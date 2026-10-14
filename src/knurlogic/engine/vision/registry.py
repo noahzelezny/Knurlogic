@@ -37,8 +37,8 @@ def resolve(target: str) -> Callable[..., Any] | None:
     return families.resolve(target, optional=True)
 
 
-def family_of(model_type: str) -> str:
-    """The registry name for a config's model_type.
+def arch_for_type(model_type: str) -> str:
+    """The architecture (the FAMILIES key) a config's model_type names.
 
     Through arch.ARCH_FOR_MODEL_TYPE, the one home for how configs spell a
     family: the released rungs report the TEXT config's type
@@ -55,7 +55,7 @@ def registered(model_type: str, path=None) -> bool:
     artifact's config.json must also describe a tower: DeepSeek-V4-Flash
     and its Vision-Exp share a model_type."""
     import importlib.util
-    t = FAMILIES.get(family_of(model_type))
+    t = FAMILIES.get(arch_for_type(model_type))
     if t is None:
         return False
     if path is not None:
@@ -185,7 +185,7 @@ def unavailable_why(model_type: str, path) -> str:
     grays its vision switch with it; the MCP says it beside
     vision_capable."""
     from pathlib import Path
-    if FAMILIES.get(family_of(model_type)) is None:
+    if FAMILIES.get(arch_for_type(model_type)) is None:
         return ""
     try:
         config = json.loads((Path(path) / "config.json").read_text())
@@ -211,7 +211,7 @@ def build(model_type: str, model_path: str, text_model: Any,
     """The Family for a loaded model, or None when it has no vision here:
     an unregistered model_type, a family package not present, a config with
     no vision config, or the family's own build declining."""
-    t = FAMILIES.get(family_of(model_type))
+    t = FAMILIES.get(arch_for_type(model_type))
     if t is None:
         return None
     if config is None:

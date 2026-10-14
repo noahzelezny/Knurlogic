@@ -315,11 +315,11 @@ def test_the_tower_on_the_real_weights_is_the_references():
     from PIL import Image
 
     from knurlogic.engine.families.deepseek.vision import (
-        DeepseekVisionFamily,
+        DeepseekVision,
         processor,
     )
     cfg = json.loads((REF / "config.json").read_text())
-    fam = DeepseekVisionFamily(cfg, 129264)
+    fam = DeepseekVision(cfg, 129264)
     n = fam.load_weights(str(REF))
     assert n == 263 + 4
     img = Image.open(REF / "inference/examples/images/carrots.jpeg") \
@@ -411,12 +411,12 @@ def _random(module, rng):
 
 @pytest.fixture(scope="module")
 def tiny():
-    from knurlogic.engine.families.deepseek.vision import DeepseekVisionFamily
+    from knurlogic.engine.families.deepseek.vision import DeepseekVision
     M = _arch()
     rng = np.random.default_rng(0)
     model = M.Model(M.ModelArgs.from_dict(TINY))
     _random(model, rng)
-    fam = DeepseekVisionFamily(TINY, IMG_ID)
+    fam = DeepseekVision(TINY, IMG_ID)
     _random(fam._build_tower(), rng)
     core = model.model
     fam.set_rows({k: getattr(core, k) for k in

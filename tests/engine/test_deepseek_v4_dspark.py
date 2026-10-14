@@ -54,13 +54,15 @@ def test_the_dspark_sidecar_is_found_and_chosen():
     """find_head sees it (fit and launch count it like any head); the
     registry picks DSpark for a config with dspark_block_size."""
     from knurlogic.engine import mtp
-    from knurlogic.engine.families.deepseek.heads.deepseek_v4_dspark import DSparkHead
+    from knurlogic.engine.families.deepseek.heads.deepseek_v4_dspark import (
+        DeepseekV4DSparkHead,
+    )
     found = mtp.find_head(G.TINY)
     assert found is not None and found.family == "deepseek_v4"
     assert found.path.name == "mtp-head-dspark-mxfp4.safetensors"
     head, spec = _head(_load())
-    assert isinstance(head, DSparkHead) and head.block_size == G.K
-    assert spec.name == "deepseek_v4" and spec.head.endswith(":DSparkHead")
+    assert isinstance(head, DeepseekV4DSparkHead) and head.block_size == G.K
+    assert spec.name == "deepseek_v4" and spec.head.endswith(":DeepseekV4DSparkHead")
     gp = head.m.stages[0].ffn.switch_mlp.gate_proj
     assert type(gp).__name__ == "QuantizedSwitchLinear" and gp.mode == "mxfp4"
     assert head.capture_paths() == ["layers.2", "layers.3", "hc_head"]
@@ -385,7 +387,9 @@ def test_the_real_sidecar_binds_by_its_header_alone():
     """Every name and shape dspark_pack wrote from the real checkpoint,
     against stages built from its config -- lazily, nothing loaded."""
     from knurlogic.engine import register
-    from knurlogic.engine.families.deepseek.heads.deepseek_v4_dspark import DSparkHead
+    from knurlogic.engine.families.deepseek.heads.deepseek_v4_dspark import (
+        DeepseekV4DSparkHead,
+    )
     register.register("deepseek_v4")
     import mlx_lm.models.deepseek_v4 as M
     hdr = _header(REAL)
@@ -393,7 +397,7 @@ def test_the_real_sidecar_binds_by_its_header_alone():
     assert json.loads(meta["knurlogic_mtp"])["kind"] == "dspark"
     args = M.ModelArgs.from_dict(json.loads(REAL_CONFIG.read_text()))
     core = types.SimpleNamespace(args=args)
-    head = DSparkHead(types.SimpleNamespace(model=core), M)
+    head = DeepseekV4DSparkHead(types.SimpleNamespace(model=core), M)
     shapes = {k: types.SimpleNamespace(shape=tuple(v["shape"]))
               for k, v in hdr.items()}
     mw = head.bind(shapes)

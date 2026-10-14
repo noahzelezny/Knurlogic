@@ -35,7 +35,7 @@ MANIFEST = {
             "head": dict(
                 names=["deepseek_v4"],
                 head="knurlogic.engine.families.deepseek.heads."
-                     "deepseek_v4:MTPHead",
+                     "deepseek_v4:DeepseekV4Head",
                 # the [B, S, hc, D] streams INTO the trunk's hc_head: the
                 # official MTPBlock takes all hc streams, not the collapse
                 capture="hc_head", draft_cache="DeepseekV4Cache",
@@ -50,7 +50,7 @@ MANIFEST = {
                 # of dspark_target_layer_ids (docs/design/deepseek-vision.md)
                 block=dict(
                     head="knurlogic.engine.families.deepseek.heads."
-                         "deepseek_v4_dspark:DSparkHead",
+                         "deepseek_v4_dspark:DeepseekV4DSparkHead",
                     sidecar_name="mtp-head-dspark-mxfp4.safetensors",
                     config="dspark_block_size")),
             # a pipeline split: the trunk core's class. Nothing to

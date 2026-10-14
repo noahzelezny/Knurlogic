@@ -322,7 +322,7 @@ class DSparkCache:
         return self.keys is None
 
 
-class DSparkHead(PackedSidecar):
+class DeepseekV4DSparkHead(PackedSidecar):
     """The DSpark stages bound to a loaded deepseek_v4 trunk. Drafts
     `block_size` tokens per pass (engine/mtp/block_loop.BlockBatch)."""
 

@@ -8,7 +8,7 @@ does not exist for GLM (PROVENANCE.md, "Deviations"). What IS gated here:
   BLOCKED from ever resolving (the package's core acceptance test);
 * every `_vendor/` sibling glm5_next actually imports resolves with no
   reference to the real, installed mlx-vlm;
-* `Glm5VisionFamily` (the registry target) preprocesses, encodes and embeds
+* `Glm5Vision` (the registry target) preprocesses, encodes and embeds
   a tiny random image end to end, and its API matches the `Family`
   protocol (`docs/design/vision-contracts.md`).
 
@@ -199,7 +199,7 @@ def test_family_encode_shape_mismatch_raises():
 
 def test_family_encode_shape_mismatch_raises_MUTATED():
     """Mutation check for the gate above: temporarily removing the
-    `feats.shape[0] != ref.n_tokens` check in `Glm5VisionFamily.encode`
+    `feats.shape[0] != ref.n_tokens` check in `Glm5Vision.encode`
     (confirmed) turns `test_family_encode_shape_mismatch_raises`
     green-to-red as expected (no `ValueError` raised); restored."""
     assert True
@@ -258,8 +258,8 @@ def test_preprocess_normalizes_like_the_reference_processor(tmp_path):
     from fixtures_vision_glm5 import glm5_tiny_config
     from PIL import Image
 
-    from knurlogic.engine.families.glm5.vision import Glm5VisionFamily
-    fam = Glm5VisionFamily(glm5_tiny_config())
+    from knurlogic.engine.families.glm5.vision import Glm5Vision
+    fam = Glm5Vision(glm5_tiny_config())
     px, _ = fam.preprocess(Image.new("RGB", (56, 56), (255, 0, 0)), "x")
     v = px["pixel_values"].reshape(px["pixel_values"].shape[0], 3, -1)
     m, s = np.array(fam.IMAGE_MEAN), np.array(fam.IMAGE_STD)
@@ -268,7 +268,7 @@ def test_preprocess_normalizes_like_the_reference_processor(tmp_path):
     # and the artifact's own values win, and change the processing hash
     (tmp_path / "processor_config.json").write_text(json.dumps(
         {"image_processor": {"image_mean": [0.5] * 3, "image_std": [0.5] * 3}}))
-    other = Glm5VisionFamily(glm5_tiny_config(), [0.5] * 3, [0.5] * 3)
+    other = Glm5Vision(glm5_tiny_config(), [0.5] * 3, [0.5] * 3)
     assert other.spec.proc_hash != fam.spec.proc_hash
 
 
@@ -294,10 +294,10 @@ def test_preprocess_matches_reference_processor_patch_order():
     import numpy as np
     from PIL import Image
 
-    from knurlogic.engine.families.glm5.vision import Glm5VisionFamily
+    from knurlogic.engine.families.glm5.vision import Glm5Vision
 
     g, cfg = _vision_golden()
-    fam = Glm5VisionFamily(cfg)
+    fam = Glm5Vision(cfg)
     px, ref = fam.preprocess(Image.fromarray(g["image"]), "sha")
     assert tuple(px["grid_thw"]) == tuple(g["image_grid_thw"][0])
     assert ref.n_tokens == 24
@@ -343,10 +343,10 @@ def test_tower_matches_reference_on_same_weights():
     from mlx.utils import tree_unflatten
     from PIL import Image
 
-    from knurlogic.engine.families.glm5.vision import Glm5VisionFamily
+    from knurlogic.engine.families.glm5.vision import Glm5Vision
 
     g, cfg = _vision_golden()
-    fam = Glm5VisionFamily(cfg)
+    fam = Glm5Vision(cfg)
     tower = fam._build_tower()
     w = {k[3:]: mx.array(g[k]) for k in g.files if k.startswith("w::")}
     tower.update(tree_unflatten(list(tower.sanitize(w).items())))
@@ -362,8 +362,8 @@ def test_an_image_is_framed_as_the_makers_template_frames_it():
     token is the one expand_pads widens; the frame ids stay one each."""
     from fixtures_vision_glm5 import glm5_tiny_config
 
-    from knurlogic.engine.families.glm5.vision import Glm5VisionFamily
-    fam = Glm5VisionFamily(glm5_tiny_config())
+    from knurlogic.engine.families.glm5.vision import Glm5Vision
+    fam = Glm5Vision(glm5_tiny_config())
     assert fam.placeholder_text(None) == \
         "<|begin_of_image|><|image|><|end_of_image|>"
 
@@ -398,7 +398,7 @@ def test_a_one_image_request_tokenizes_as_the_maker_frames_it():
     (154854), <|end_of_image|> (154831), consecutive and once."""
     from fixtures_vision_glm5 import glm5_tiny_config
 
-    from knurlogic.engine.families.glm5.vision import Glm5VisionFamily
+    from knurlogic.engine.families.glm5.vision import Glm5Vision
     from knurlogic.engine.runtime.prompt import flatten
     from knurlogic.engine.vision import ImageRef
     from knurlogic.engine.vision.key import expand_pads
@@ -407,7 +407,7 @@ def test_a_one_image_request_tokenizes_as_the_maker_frames_it():
     assert tok.convert_tokens_to_ids(
         ["<|begin_of_image|>", "<|image|>", "<|end_of_image|>"]) == \
         [154830, 154854, 154831]
-    fam = Glm5VisionFamily(dict(glm5_tiny_config(), image_token_id=154854))
+    fam = Glm5Vision(dict(glm5_tiny_config(), image_token_id=154854))
     n = 6
     ref = ImageRef(sha="x", proc_hash=fam.spec.proc_hash, n_tokens=n,
                    grid_thw=(1, 6, 4))
@@ -429,8 +429,8 @@ def test_a_configured_min_image_tokens_of_zero_is_kept():
     """0 is a value: `int(x or DEFAULT)` turned it into the default 16."""
     from fixtures_vision_glm5 import glm5_tiny_config
 
-    from knurlogic.engine.families.glm5.vision import Glm5VisionFamily
-    fam = Glm5VisionFamily(glm5_tiny_config(), min_image_tokens=0)
+    from knurlogic.engine.families.glm5.vision import Glm5Vision
+    fam = Glm5Vision(glm5_tiny_config(), min_image_tokens=0)
     assert fam.min_image_tokens == 0
 
 

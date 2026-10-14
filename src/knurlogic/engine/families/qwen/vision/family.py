@@ -54,7 +54,7 @@ def _tower_key(k: str) -> Optional[str]:
     return None
 
 
-class QwenFamily(Family):
+class QwenVision(Family):
     """engine.vision.Family for the three Qwen families."""
 
     def __init__(self, model_path: str, config: Dict[str, Any]):

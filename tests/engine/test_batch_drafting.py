@@ -28,7 +28,7 @@ def _tiny(vocab):
     register.register("qwen3_5")
     from mlx_lm.models import qwen3_5 as arch
 
-    from knurlogic.engine.families.qwen.heads.qwen35 import MTPHeadQwen35
+    from knurlogic.engine.families.qwen.heads.qwen35 import Qwen35Head
 
     mx.random.seed(0)
     tc = dict(model_type="qwen3_5", hidden_size=128, intermediate_size=256,
@@ -39,7 +39,7 @@ def _tiny(vocab):
               full_attention_interval=2, tie_word_embeddings=False)
     model = arch.Model(arch.ModelArgs(model_type="qwen3_5", text_config=tc))
     model.set_dtype(mx.float32)
-    head = MTPHeadQwen35(model, arch, norm_shift=0.0)
+    head = Qwen35Head(model, arch, norm_shift=0.0)
     D = tc["hidden_size"]
     for n in ("norm_e", "norm_h", "norm_out"):
         setattr(head, n, head._norm(mx.ones((D,)), 0.0))

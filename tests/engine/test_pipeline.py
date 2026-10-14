@@ -650,12 +650,12 @@ def test_the_flash_next_head_binds_on_any_stage(start, end, recv, send):
     not bind and MTP was off on every rank of the pipeline."""
     import importlib
 
-    from knurlogic.engine.families.qwen.heads.qwen4_exp import MTPHead
+    from knurlogic.engine.families.qwen.heads.qwen4_exp import Qwen4ExpHead
     from knurlogic.engine.model import trunk
     model = _stage(_tiny("qwen4_exp"), start, end, recv=recv, send=send)
     core = trunk.core_of(model)
     arch = importlib.import_module(type(core).__module__)
-    head = MTPHead(model, arch)
+    head = Qwen4ExpHead(model, arch)
     assert type(head.block) is arch.DecoderLayer
     assert head.block.layer_type == "full_attention"
     assert head.fa_idx == core.args.layer_types.index("full_attention") == 3

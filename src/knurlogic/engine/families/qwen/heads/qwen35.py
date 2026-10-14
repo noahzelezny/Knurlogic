@@ -54,7 +54,7 @@ _NORM_KEYS = (
 )
 
 
-class MTPHeadQwen35(GraftHead):
+class Qwen35Head(GraftHead):
     """One drafting head bound to a loaded qwen3_5 / qwen3_5_moe trunk."""
 
     def __init__(self, model, arch, *, fc_order="eh", h_source="pre_norm",

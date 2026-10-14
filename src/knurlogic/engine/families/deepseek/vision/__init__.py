@@ -52,7 +52,7 @@ def _image_token_id(model_path: str) -> int:
     return IMAGE_TOKEN_ID if tid is None else tid
 
 
-class DeepseekVisionFamily(Family):
+class DeepseekVision(Family):
     """`Family` (vision-contracts.md) for DeepSeek-V4-Flash-Vision-Exp: the
     trunk's own 1D positions (an image token is one position); every image
     block is whole in a chunk -- inside it a token sees forward to
@@ -234,4 +234,4 @@ def build(model_path: str, text_model: Any, config: dict[str, Any]):
     if int(config.get("vision_n_layers") or 0) <= 0:
         return None
     # the tower is read by model/vision.bind (fam.load_weights), not here
-    return DeepseekVisionFamily(config, _image_token_id(model_path))
+    return DeepseekVision(config, _image_token_id(model_path))

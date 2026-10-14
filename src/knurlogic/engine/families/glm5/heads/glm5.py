@@ -31,7 +31,7 @@ from knurlogic.engine.mtp.head_base import GraftHead, fill, read_recipe, save_si
 _GLUE = ("eh_proj", "enorm", "hnorm", "shared_head")
 
 
-class MTPHeadGlm5(GraftHead):
+class Glm5Head(GraftHead):
     """One drafting head bound to a loaded glm5_next trunk."""
 
     def __init__(self, model, arch):

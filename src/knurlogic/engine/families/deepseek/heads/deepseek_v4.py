@@ -129,7 +129,7 @@ def _vq_module(w: dict, path: str, mod, vq_cls):
                   in_features=IN if pb else None)
 
 
-class MTPHead(PackedSidecar, DraftHead):
+class DeepseekV4Head(PackedSidecar, DraftHead):
     """One drafting head bound to a loaded deepseek_v4 trunk."""
 
     LABEL = "deepseek_v4 head"

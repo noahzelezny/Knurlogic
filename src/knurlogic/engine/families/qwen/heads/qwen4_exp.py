@@ -51,7 +51,7 @@ from knurlogic.engine.mtp.head_base import (
 _KEEP_FP = ("mlp.gate",)
 
 
-class MTPHead(GraftHead):
+class Qwen4ExpHead(GraftHead):
     """One drafting head bound to a loaded qwen4_exp trunk."""
 
     def __init__(self, model, arch):

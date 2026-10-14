@@ -20,14 +20,14 @@ installed (tools/vision_gate.py passes through `knurlogic serve` that way).
 
 ## Preprocessing
 
-`Glm5VisionFamily.preprocess` builds patches itself, normalizing with the
+`Glm5Vision.preprocess` builds patches itself, normalizing with the
 artifact's `image_mean`/`image_std` (CLIP's by default), as
 Glm5NextImageProcessor does. It does not call into the HF processor class.
 
 ## The `vision_model.*` -> `vision_tower.*` remap
 
 Weight keys on disk are `vision_model.*` (347 keys, inside the main
-shards). `Glm5VisionFamily.load_weights` reads every `vision_model.*` key
+shards). `Glm5Vision.load_weights` reads every `vision_model.*` key
 straight out of the artifact's own `model.safetensors.index.json` shards and
 strips the prefix before handing the dict to a STANDALONE
 `VisionModel(vision_config)` (never attached to any trunk `Model`) via
@@ -41,7 +41,7 @@ vision keys").
 
 GLM's trunk (`language.py`) computes its own 1D rotary positions inside its
 attention layers; there is no MRoPE grid analogous to Qwen's that an image
-span needs to shift. So `Glm5VisionFamily.positions` always returns
+span needs to shift. So `Glm5Vision.positions` always returns
 `(None, 0)`: "the trunk's own 1D positions, no rope_delta" per the Family
 protocol.
 
@@ -55,7 +55,7 @@ protocol.
    rules (which may clamp differently).
 2. **`tests/test_vision_glm5.py` is structural**, not a full gate sweep: it
    verifies that the architecture imports and builds with `mlx_vlm` blocked,
-   and that a tiny random-weight `Glm5VisionFamily` encodes a tiny image to
+   and that a tiny random-weight `Glm5Vision` encodes a tiny image to
    the right token count and dtype, embeds it via `scatter.merge`, and
    returns `(None, 0)` from `positions`. The remap against real
    `vision_model.*` keys is covered only by the real-model gate

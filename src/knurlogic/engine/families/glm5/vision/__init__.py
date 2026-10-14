@@ -32,7 +32,7 @@ _PATCH_PREFIX = "vision_model."
 _TOWER_PREFIX = "vision_tower."
 
 
-class Glm5VisionFamily(Family):
+class Glm5Vision(Family):
     """`Family` (vision-contracts.md) for glm5_next."""
 
     #: CLIP's, the Glm5NextImageProcessor defaults; the artifact's own
@@ -299,5 +299,5 @@ def build(model_path: str, text_model: Any, config: dict[str, Any]):
     # the tower is read by model/vision.bind (fam.load_weights), not here:
     # it was read twice per load, and a follower rank builds the family
     # without one
-    return Glm5VisionFamily(config, image_mean=mean, image_std=std,
+    return Glm5Vision(config, image_mean=mean, image_std=std,
                             min_image_tokens=lo, max_image_tokens=hi)

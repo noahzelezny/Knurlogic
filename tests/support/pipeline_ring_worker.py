@@ -249,13 +249,13 @@ def _tiny_flash_next_with_head(vocab):
     register.register("qwen4_exp", override=True)
     from mlx_lm.models import qwen4_exp as arch
 
-    from knurlogic.engine.families.qwen.heads.qwen4_exp import MTPHead
+    from knurlogic.engine.families.qwen.heads.qwen4_exp import Qwen4ExpHead
     mx.random.seed(0)
     cfg = FQ.config("qwen4_exp")
     cfg["text_config"]["vocab_size"] = vocab
     model = arch.Model(arch.ModelArgs.from_dict(cfg))
     model.set_dtype(mx.float32)
-    head = MTPHead(model, arch)
+    head = Qwen4ExpHead(model, arch)
     D, hc = head.D, head.hc
     head.norm_e = head._norm(D, mx.zeros((D,)))
     head.norm_h = head._norm(hc * D, mx.zeros((hc * D,)), group_size=D)
@@ -803,12 +803,12 @@ def _v4_mtp_tiny(tmp):
     from mlx.utils import tree_flatten, tree_unflatten
     from tensor_ring_worker import build_deepseek_v4
 
-    from knurlogic.engine.families.deepseek.heads.deepseek_v4 import MTPHead
+    from knurlogic.engine.families.deepseek.heads.deepseek_v4 import DeepseekV4Head
     from knurlogic.engine.mtp import registry
     model = build_deepseek_v4()
     arch = sys.modules[type(model.model).__module__]
     mx.random.seed(7)
-    h = MTPHead(model, arch)
+    h = DeepseekV4Head(model, arch)
     h.m.update(tree_unflatten([
         (k, mx.ones(v.shape) if k.endswith("norm.weight")
          else 0.15 * mx.random.normal(v.shape))

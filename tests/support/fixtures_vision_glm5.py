@@ -1,7 +1,7 @@
 """Tiny glm5_next fixture (tiny fixtures are one file per family).
 
 Builds a config small enough to construct a real `VisionModel` +
-`Glm5VisionFamily` with float32, seed-0 random weights, no artifact on
+`Glm5Vision` with float32, seed-0 random weights, no artifact on
 disk -- `fixtures_vision.tiny_config("glm5_next")` already scales the
 structural fields (`REAL["glm5_next"]` in `tests/support/fixtures_vision.py`);
 this file only adds what the family package itself needs to drive it.
@@ -26,7 +26,7 @@ def glm5_tiny_config(**overrides: Any) -> dict[str, Any]:
 
 
 def glm5_family(config: dict[str, Any] | None = None):
-    """A `Glm5VisionFamily` built from a tiny config, with random float32
+    """A `Glm5Vision` built from a tiny config, with random float32
     tower weights (never loaded from disk -- `load_weights` is not called;
     `mx.nn.Module.__init__`'s own default init stands in for it, which is
     exactly what a "no real model" tiny-fixture gate needs: SOME weights,
@@ -34,11 +34,11 @@ def glm5_family(config: dict[str, Any] | None = None):
     output)."""
     import mlx.core as mx
 
-    from knurlogic.engine.families.glm5.vision import Glm5VisionFamily
+    from knurlogic.engine.families.glm5.vision import Glm5Vision
 
     mx.random.seed(0)
     cfg = config if config is not None else glm5_tiny_config()
-    fam = Glm5VisionFamily(cfg)
+    fam = Glm5Vision(cfg)
     fam._build_tower()
     return fam
 

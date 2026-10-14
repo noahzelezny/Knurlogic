@@ -280,4 +280,4 @@ def test_the_released_rungs_text_spelling_finds_its_vision_family(
     """All 20 released rungs report the text config's model_type; looked up
     raw, /models.json said none of them had vision."""
     from knurlogic.engine.vision import registry
-    assert registry.family_of(model_type) == family
+    assert registry.arch_for_type(model_type) == family
