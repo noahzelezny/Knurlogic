@@ -9,6 +9,8 @@ running server is tuning/live.
 
 from __future__ import annotations
 
+import os
+
 from knurlogic.tuning import context_window, measured, numerics, presets
 
 #: the page's name for each launch setting (Settings -> Models / Knurlogic;
@@ -27,6 +29,15 @@ KNOB_TITLES: dict = {
     "KNURLOGIC_THINKING_DEFAULT": "Thinking default",
     "KNURLOGIC_PROMPT_CACHE_REUSE": "Prompt cache reuse",
 }
+KNOB_TITLES.update({
+    "KNURLOGIC_JACCL_TIMEOUT_MS": "Jaccl timeout",
+    "KNURLOGIC_PIPELINE_OVERLAP": "Pipeline overlap",
+    "KNURLOGIC_TIMING_SPANS": "Timing spans",
+    "KNURLOGIC_MTP_BATCH_MAX_ROWS": "MTP batch max rows",
+    "KNURLOGIC_MTP_PROFILE": "MTP profile",
+    "KNURLOGIC_MTP_VERIFY": "MTP verify",
+    "KNURLOGIC_DISCONNECT_POLL": "Disconnect poll",
+})
 KNOB_TITLES["VQLAB_PREFILL_CHUNK"] = KNOB_TITLES["KNURLOGIC_PREFILL_CHUNK"]
 KNOB_TITLES["VQ_CACHE_LIMIT_GB"] = KNOB_TITLES["KNURLOGIC_CACHE_LIMIT_GB"]
 KNOB_TITLES["VQLAB_CACHE_LIMIT_GB"] = KNOB_TITLES["KNURLOGIC_CACHE_LIMIT_GB"]
@@ -315,7 +326,32 @@ KNOB_ALIASES = {
     "preset": ("KNURLOGIC_PRESET",),
     # whether the prompt cache serves a hit (engine/prompt_cache/memory)
     "prompt_cache_reuse": ("KNURLOGIC_PROMPT_CACHE_REUSE",),
+    # --- developer knobs: A/B switches and diagnostics the engine reads
+    # live from its environment; never resolved, emitted or shown (tier
+    # "developer"), but named here so every one has a single spelling
+    # the jaccl collective deadline (ms) for the ring join and after load
+    # (engine/split/link.join, marker.after_load); cluster/launch sets it
+    "jaccl_timeout_ms": ("KNURLOGIC_JACCL_TIMEOUT_MS",),
+    # off: each prefill chunk is sent before the next computes
+    # (engine/split/pipeline.overlap_on)
+    "pipeline_overlap": ("KNURLOGIC_PIPELINE_OVERLAP",),
+    # off: no per-request wall-time buckets (engine/runtime/timing)
+    "timing_spans": ("KNURLOGIC_TIMING_SPANS",),
+    # a fixed row ceiling for MTP drafting, 0 = never (engine/mtp/batch_loop)
+    "mtp_batch_max_rows": ("KNURLOGIC_MTP_BATCH_MAX_ROWS",),
+    # on: time each phase of an MTP block step (engine/mtp/block_loop)
+    "mtp_profile": ("KNURLOGIC_MTP_PROFILE",),
+    # k: verify the first k drafts every step (engine/mtp/block_loop)
+    "mtp_verify": ("KNURLOGIC_MTP_VERIFY",),
+    # off: a non-streamed request does not watch for a client hang-up
+    # (interfaces/http/server)
+    "disconnect_poll": ("KNURLOGIC_DISCONNECT_POLL",),
 }
+
+#: the developer knobs above: read only by env_value / env_on / env_int
+DEVELOPER_KNOBS = tuple(KNOB_ALIASES[k][0] for k in (
+    "jaccl_timeout_ms", "pipeline_overlap", "timing_spans",
+    "mtp_batch_max_rows", "mtp_profile", "mtp_verify", "disconnect_poll"))
 
 #: launch settings of the model itself, read when it loads: the same on
 #: every rank of a split (cluster/launch passes them ring-wide)
@@ -372,6 +408,57 @@ def on_off(v, default: bool = True) -> bool:
     if s in ("off", "0", "false", "no"):
         return False
     raise ValueError(f"{v!r}: on or off")
+
+
+def logical_of(name: str) -> str | None:
+    """The logical knob an env name is an alias of (VQLAB_CACHE_LIMIT_GB ->
+    'cache_limit_gb'); None for a name no knob goes by."""
+    for logical, names in KNOB_ALIASES.items():
+        if name in names:
+            return logical
+    return None
+
+
+def aliases(logical: str) -> tuple:
+    """Every env name a logical knob goes by, preferred first."""
+    return KNOB_ALIASES[logical]
+
+
+def env_value(name: str, env=None) -> str | None:
+    """A knob's raw value from `env` (default os.environ), under `name` or
+    any alias of the same knob, the preferred name first; None if unset.
+    Read at call time, so a running process sees a live change."""
+    env = os.environ if env is None else env
+    logical = logical_of(name)
+    for n in KNOB_ALIASES[logical] if logical else (name,):
+        if n in env:
+            return env[n]
+    return None
+
+
+def env_on(name: str, default: bool = True, env=None) -> bool:
+    """An on/off knob from the environment (on_off's spellings); unset, or
+    a value on_off does not know, is `default`."""
+    try:
+        return on_off(env_value(name, env), default)
+    except ValueError:
+        return default
+
+
+def env_int(name: str, default=None, env=None, strict: bool = False):
+    """An integer knob from the environment; unset or empty is `default`,
+    and so is a value that is not a whole number unless `strict`, which
+    raises ValueError naming the knob."""
+    v = (env_value(name, env) or "").strip()
+    if not v:
+        return default
+    try:
+        return int(v)
+    except ValueError:
+        if strict:
+            raise ValueError(f"{name}={v!r}: a whole number, or unset") \
+                from None
+        return default
 
 
 #: what KNURLOGIC_KV_BITS may be; "bf16" is the unquantized cache
@@ -486,6 +573,8 @@ def default_alias(logical: str) -> str:
 #             tune axis. These are the page.
 #   deeper    measured performance and numerics flags. Real effects, real
 #             findings behind them, but you go looking on purpose.
+#   developer the engine's own A/B switches and diagnostics
+#             (DEVELOPER_KNOBS): never resolved or shown.
 #   kernel    read by the runtime, no measured answer here. NOT defaulted and
 #             NOT hidden: listed if someone digs, labelled as the runtime's
 #             own business. Inventing defaults for unmeasured knobs is how
@@ -501,6 +590,8 @@ KNOB_TIER_REACH = ("VQ_DECODE_CHUNK", "VQ_CACHE_LIMIT_GB",
 def knob_tier(name: str) -> str:
     if name in KNOB_TIER_REACH:
         return "reach"
+    if name in DEVELOPER_KNOBS:
+        return "developer"
     if name in numerics.NUMERICS_FLAGS:
         return "deeper"
     return "kernel"
@@ -559,4 +650,7 @@ KNOB_BOUNDS = {
     "VQ_CACHE_LIMIT_GB": (float, 0.0, measured.CACHE_LIMIT_GB_MAX, "GiB"),
     "VQLAB_CACHE_LIMIT_GB": (float, 0.0, measured.CACHE_LIMIT_GB_MAX, "GiB"),
     "KNURLOGIC_CACHE_LIMIT_GB": (float, 0.0, measured.CACHE_LIMIT_GB_MAX, "GiB"),
+    "KNURLOGIC_JACCL_TIMEOUT_MS": (int, 0, None, "ms"),
+    "KNURLOGIC_MTP_BATCH_MAX_ROWS": (int, 0, None, "rows"),
+    "KNURLOGIC_MTP_VERIFY": (int, 0, None, "drafts"),
 }

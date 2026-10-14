@@ -57,6 +57,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from knurlogic.machine.files import read_json, write_json
+from knurlogic.tuning import knobs
 
 from . import disk, location, slices
 
@@ -249,7 +250,7 @@ def host_shard_key(host) -> dict | None:
     if getattr(host, "model", None) is None or not getattr(host, "path", None):
         return None
     return shard_key(host.path, kv_bits=getattr(host, "kv_bits", None),
-                     long_context=os.environ.get("KNURLOGIC_LONG_CONTEXT"),
+                     long_context=knobs.env_value("KNURLOGIC_LONG_CONTEXT"),
                      rounding=getattr(host, "rounding", None))
 
 

@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import json
 
+from knurlogic.tuning import knobs
+
 #: one row per rank per step. ACTIVE / PEAK: that rank's own mlx active
 #: and peak memory, so rank 0 can report every rank's (a follower serves
 #: no /status.json of its own)
@@ -66,8 +68,7 @@ _FIELDS = {
 _OPTIONAL = {"insert": ("owner",), "save_cache": ("session",)}
 #: the live knobs (tuning/live.LIVE_KNOBS) that act on a rank's own
 #: engine, so a change on rank 0 must reach every rank
-SETS = ("VQ_DECODE_CHUNK", "VQ_CACHE_LIMIT_GB", "VQLAB_CACHE_LIMIT_GB",
-        "KNURLOGIC_CACHE_LIMIT_GB")
+SETS = knobs.aliases("decode_chunk") + knobs.aliases("cache_limit_gb")
 EVENTS = ("checkpoint", "finished")
 
 

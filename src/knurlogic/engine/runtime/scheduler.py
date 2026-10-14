@@ -32,6 +32,7 @@ from knurlogic.machine.memory.pressure import (
     own_compressed_bytes,
     system_pressure_level,
 )
+from knurlogic.tuning import knobs
 
 from . import prompt as P
 from .executor import (
@@ -85,11 +86,7 @@ _WARM_MARGIN = 128
 def context_cap() -> int:
     """KNURLOGIC_CONTEXT_LENGTH: the longest prompt + answer a request may
     use, read at every admission so the setting applies live. 0 = none."""
-    import os
-    try:
-        return max(int(os.environ.get("KNURLOGIC_CONTEXT_LENGTH") or 0), 0)
-    except ValueError:
-        return 0
+    return max(knobs.env_int("KNURLOGIC_CONTEXT_LENGTH", 0), 0)
 
 
 def _kv_from_config(path, kv_bits=None) -> tuple | None:

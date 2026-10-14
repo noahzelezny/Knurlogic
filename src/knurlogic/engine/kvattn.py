@@ -16,7 +16,6 @@ Design: docs/design/kv-cache.md (decode kernel).
 from __future__ import annotations
 
 import logging
-import os
 import sys
 
 import mlx.core as mx
@@ -72,8 +71,8 @@ ENV = "KNURLOGIC_KV_KERNEL"
 
 def enabled() -> bool:
     from knurlogic.engine import backend
-    s = os.environ.get(ENV, "").strip().lower()
-    return backend.metal() and s not in ("off", "0", "false", "no")
+    from knurlogic.tuning import knobs
+    return backend.metal() and knobs.env_on(ENV)
 
 
 _SRC = r"""

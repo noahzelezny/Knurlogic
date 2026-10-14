@@ -72,6 +72,7 @@ from pathlib import Path
 from knurlogic.machine.artifact import safetensors_header, safetensors_layout
 from knurlogic.machine.files import read_json, write_json
 from knurlogic.machine.units import GIB
+from knurlogic.tuning import knobs
 
 logger = logging.getLogger(__name__)
 
@@ -214,7 +215,7 @@ def host_key(host) -> dict | None:
         return None
     return identity(host.path, kv_bits=getattr(host, "kv_bits", None),
                     draft=draft_of(), layout=getattr(host, "cache_layout", None),
-                    long_context=os.environ.get("KNURLOGIC_LONG_CONTEXT"),
+                    long_context=knobs.env_value("KNURLOGIC_LONG_CONTEXT"),
                     rounding=getattr(host, "rounding", None))
 
 

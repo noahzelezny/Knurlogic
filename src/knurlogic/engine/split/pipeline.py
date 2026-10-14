@@ -197,9 +197,8 @@ def sends_of(model) -> list[Send]:
 def overlap_on() -> bool:
     """KNURLOGIC_PIPELINE_OVERLAP=off sends each prefill chunk before the
     next one computes (the A/B for the overlap's gain)."""
-    import os
-    v = os.environ.get("KNURLOGIC_PIPELINE_OVERLAP", "").strip().lower()
-    return v not in ("off", "0", "false", "no")
+    from knurlogic.tuning import knobs
+    return knobs.env_on("KNURLOGIC_PIPELINE_OVERLAP")
 
 
 @contextlib.contextmanager

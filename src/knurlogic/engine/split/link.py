@@ -12,6 +12,8 @@ import socket
 
 import mlx.core as mx
 
+from knurlogic.tuning import knobs
+
 from . import plan as P
 from .marker import progress
 
@@ -317,10 +319,10 @@ def init(link_kind: str) -> Link:
     armed here for the join alone and dropped back to 0 once the ring is
     up, before the model's own cold read."""
     backend = {"ring": "ring", "jaccl": "jaccl"}[link_kind]
-    join_ms = os.environ.get("KNURLOGIC_JACCL_TIMEOUT_MS")
-    armed = bool(join_ms and join_ms.isdigit())
-    if armed and join_ms:
-        os.environ["JACCL_COLLECTIVE_TIMEOUT_MS"] = join_ms
+    join_ms = knobs.env_int("KNURLOGIC_JACCL_TIMEOUT_MS")
+    armed = join_ms is not None and join_ms >= 0
+    if armed:
+        os.environ["JACCL_COLLECTIVE_TIMEOUT_MS"] = str(join_ms)
     try:
         # the bell first, over TCP (the launcher said where): the ranks then
         # join and run the first collectives together (Link.align)

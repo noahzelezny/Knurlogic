@@ -34,7 +34,8 @@ def after_load() -> None:
     """The model is in memory: arm the jaccl self-heal deadline, if the
     page asked for one (it does only when the fork is installed and the
     link is jaccl). Read live by libjaccl on every collective."""
-    ms = os.environ.get("KNURLOGIC_JACCL_TIMEOUT_MS")
-    if ms and ms.isdigit():
-        os.environ["JACCL_COLLECTIVE_TIMEOUT_MS"] = ms
+    from knurlogic.tuning import knobs
+    ms = knobs.env_int("KNURLOGIC_JACCL_TIMEOUT_MS")
+    if ms is not None and ms >= 0:
+        os.environ["JACCL_COLLECTIVE_TIMEOUT_MS"] = str(ms)
     progress(phase="ready")
