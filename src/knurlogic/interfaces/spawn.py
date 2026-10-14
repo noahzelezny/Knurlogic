@@ -9,11 +9,12 @@ model is launched on by default (and the page's own, "ui").
 
 from __future__ import annotations
 
-import http.client
 import subprocess
 import time
 from pathlib import Path
 
+from knurlogic.interfaces.ports import MODEL_PORT, PAGE_PORT
+from knurlogic.machine.http_client import NET_ERRORS, request
 from knurlogic.machine.memory import footprint
 from knurlogic.machine.processes import PROC_ERRORS
 from knurlogic.machine.servers import is_our_server, registry, save_registry, serve_log
@@ -28,7 +29,7 @@ _SPAWN_LOCK = __import__("threading").Lock()
 
 #: The port a knurlogic on ANOTHER node is expected to answer on, which is
 #: the one this page launches models on.
-SERVE_PORT: dict = {"n": 8080, "ui": 8899}
+SERVE_PORT: dict = {"n": MODEL_PORT, "ui": PAGE_PORT}
 
 
 #: A loading server whose log has said nothing for this long is reported as
@@ -72,11 +73,9 @@ def _artifact_bytes(path: str) -> int:
 
 
 def answers(port: int) -> bool:
-    import urllib.request
     try:
-        urllib.request.urlopen(f"http://127.0.0.1:{port}/v1/models", timeout=1.5)
-        return True
-    except (OSError, http.client.HTTPException):
+        return request(f"http://127.0.0.1:{port}/v1/models", timeout=1.5)[0] < 400
+    except NET_ERRORS:
         return False
 
 
@@ -261,7 +260,7 @@ def stop(port: int) -> dict:
     os.kill(pid, signal.SIGTERM)
     # it finishes the step it is in and its scheduler's cleanup on the way
     # out: the same ceiling as its own (http.STOP_SAVE_S)
-    from knurlogic.interfaces.http import STOP_SAVE_S
+    from knurlogic.interfaces.http.lifecycle import STOP_SAVE_S
     end = time.monotonic() + STOP_SAVE_S + 5.0
     while time.monotonic() < end:
         time.sleep(0.25)

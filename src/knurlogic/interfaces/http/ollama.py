@@ -18,7 +18,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .messages import TransportError
+from .dialect import BadRequest, image_part
+from .dialect import handler_over as handler_over_dialect
 
 #: Ollama option -> the chat request's parameter
 OPTIONS = {"temperature": "temperature", "top_p": "top_p", "top_k": "top_k",
@@ -27,10 +28,6 @@ OPTIONS = {"temperature": "temperature", "top_p": "top_p", "top_k": "top_k",
            "presence_penalty": "presence_penalty",
            "frequency_penalty": "frequency_penalty"}
 DONE_REASON = {"length": "length"}
-
-
-class BadRequest(ValueError):
-    pass
 
 
 def _now() -> str:
@@ -46,7 +43,7 @@ def _content(text: str, images) -> object:
             raise BadRequest("images must be base64 strings")
         url = img if img.startswith("data:") else \
             f"data:image/png;base64,{img}"
-        parts.append({"type": "image_url", "image_url": {"url": url}})
+        parts.append(image_part(url))
     return parts
 
 
@@ -248,35 +245,17 @@ def stream(lines, model: str, generate: bool, started: float):
 
 def handler_over(transport, model: str, generate: bool):
     """A `/api/chat` (or `/api/generate`) handler over the in-process
-    OpenAI chat transport."""
-
-    def call(body: bytes, write, start_response):
-        def fail(status, message, headers=None):
-            start_response(status, "application/json", headers or {})
-            write(json.dumps({"error": message}).encode())
-        started = time.time()
-        try:
-            req = json.loads(body or b"{}")
-            oai = to_chat(req, generate)
-        except ValueError as e:              # JSON errors and BadRequest
-            return fail(400, str(e) if isinstance(e, BadRequest)
-                        else "body must be JSON")
-        try:
-            resp = transport(oai)
-        except TransportError as e:
-            return fail(e.status, str(e), (
-                {"Retry-After": str(int(e.retry_after))}
-                if e.retry_after else None))
-        name = req.get("model") or model
-        if not oai["stream"]:
-            start_response(200, "application/json")
-            return write(json.dumps(from_chat(resp, name, generate,
-                                              started)).encode())
-        start_response(200, "application/x-ndjson")
-        for line in stream(resp, name, generate, started):
-            write(line)
-
-    return call
+    OpenAI chat transport (dialect.handler_over); streams NDJSON by
+    default."""
+    return handler_over_dialect(
+        transport, translate=lambda req: to_chat(req, generate),
+        error_body=lambda message, _status, _param: {"error": message},
+        answer=lambda resp, req, t: from_chat(
+            resp, req.get("model") or model, generate, t),
+        events=lambda resp, req, t: stream(
+            resp, req.get("model") or model, generate, t),
+        streams=lambda _req, oai: oai["stream"],
+        stream_type="application/x-ndjson")
 
 
 # --------------------------------------------------- the model documents

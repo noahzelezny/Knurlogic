@@ -36,7 +36,7 @@ Around it, in `engine/`:
 | `vision/` | see [vision](vision.md) |
 
 The process around it is `interfaces/http/` (see
-[http-and-page](http-and-page.md)): `interfaces/http/__init__.py`
+[http-and-page](http-and-page.md)): `interfaces/http/lifecycle.py`
 (`serve`, `scheduler_options`, `watch_ring`) builds the scheduler and the
 server.
 

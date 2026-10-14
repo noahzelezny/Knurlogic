@@ -78,7 +78,7 @@ def test_offline_skips_the_check(tmp_path, monkeypatch):
 def test_models_json_carries_update(tmp_path, monkeypatch):
     from types import SimpleNamespace
 
-    from knurlogic.interfaces.page import documents
+    from knurlogic.interfaces import documents
     d = snap(tmp_path, "org/m", OLD)
     f = SimpleNamespace(name="org/m", path=d, store="huggingface",
                         bytes_on_disk=10, model_type="qwen3_5", is_vq=False,
@@ -87,7 +87,7 @@ def test_models_json_carries_update(tmp_path, monkeypatch):
     monkeypatch.setattr(documents, "_room", lambda *a: None)
     monkeypatch.setattr(documents, "_splits", lambda *a: {"splits": None})
     updates.check(["org/m"], ask=lambda r: NEW)
-    rows = documents.models_document()({})["models"]
+    rows = documents.models_document(flagged=updates.flagged)({})["models"]
     assert rows[0]["update"] is True
 
 

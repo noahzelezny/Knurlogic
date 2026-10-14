@@ -52,8 +52,7 @@ def main():
                              json.loads(sys.argv[4]))
     from knurlogic.cluster import launch as C
     from knurlogic.cluster import protocol
-    from knurlogic.interfaces import spawn
-    from knurlogic.interfaces.page import documents
+    from knurlogic.interfaces import documents, spawn
     from knurlogic.interfaces.page import loads as page_loads
     from knurlogic.interfaces.page import nodes as page_nodes
     from knurlogic.interfaces.page import server as page_server

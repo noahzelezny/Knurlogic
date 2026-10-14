@@ -12,8 +12,8 @@ import time
 from pathlib import Path
 from urllib.parse import urlparse
 
-from knurlogic.interfaces import spawn
-from knurlogic.interfaces.page import documents, nodes, peers, router
+from knurlogic.interfaces import documents, spawn
+from knurlogic.interfaces.page import nodes, peers, router
 from knurlogic.machine import identity, loaded
 from knurlogic.machine.servers import registry
 from knurlogic.tuning.checks import PATH_KEYS, clean_sets

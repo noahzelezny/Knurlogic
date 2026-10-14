@@ -166,7 +166,7 @@ def _save() -> None:
 
 
 def _refresh_models() -> None:
-    from knurlogic.interfaces.page import documents
+    from knurlogic.interfaces import documents
     documents.forget_models()
 
 

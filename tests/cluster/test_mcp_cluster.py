@@ -16,9 +16,8 @@ import pytest
 import test_cluster_jobs as T
 
 from knurlogic.cluster import launch as C
-from knurlogic.interfaces import mcp, spawn
+from knurlogic.interfaces import documents, mcp, spawn
 from knurlogic.interfaces.mcp import lifecycle, page_client
-from knurlogic.interfaces.page import documents
 from knurlogic.interfaces.page import loads as page_loads
 from knurlogic.interfaces.page import nodes as page_nodes
 from knurlogic.interfaces.page import server as page_server

@@ -4,7 +4,7 @@ read-only views of other servers for the page. No network: every fetch is a stub
 import json
 from types import SimpleNamespace
 
-from knurlogic.interfaces.page import documents
+from knurlogic.interfaces import documents
 from knurlogic.interfaces.page import nodes as page_nodes
 from knurlogic.interfaces.page import peek as page_peek
 from knurlogic.interfaces.page import router as page_router

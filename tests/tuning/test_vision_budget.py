@@ -233,7 +233,7 @@ def test_mcp_fit_with_vision_off(tmp_path, monkeypatch):
 
 
 def test_the_picked_models_preview_carries_the_part_sizes(tmp_path):
-    from knurlogic.interfaces.page import documents
+    from knurlogic.interfaces import documents
     d = _with_head(_rung(tmp_path / "v"), 3 << 20)
     p = documents.preview(str(d), "default", 64)
     assert (p["mtp_bytes"], p["vision_bytes"]) == (3 << 20, _freed())
@@ -248,7 +248,7 @@ def test_the_models_listing_loads_no_artifact(tmp_path, monkeypatch):
     import time
     from types import SimpleNamespace
 
-    from knurlogic.interfaces.page import documents
+    from knurlogic.interfaces import documents
     d = _with_head(_rung(tmp_path / "v"), 3 << 20)
     rows = [SimpleNamespace(name=f"m{i}", path=d, store="t", bytes_on_disk=1,
                             model_type="qwen3_5", is_vq=False, servable=True,
@@ -324,7 +324,7 @@ def test_a_cluster_launchs_mtp_off_reaches_its_shape(tmp_path, monkeypatch):
 def test_the_picked_models_preview_carries_its_tensor_bytes(tmp_path):
     # the picker fits a tensor split from the picked model's preview (the
     # listing loads no artifact, so it no longer carries them)
-    from knurlogic.interfaces.page import documents
+    from knurlogic.interfaces import documents
     t = documents.preview(str(_with_head(_rung(tmp_path / "t"), 3 << 20)),
                            "default", 64)
     tb = t["tensor_bytes"]
@@ -360,7 +360,7 @@ def test_the_previews_room_is_what_this_machine_has_free_now(tmp_path,
     """A 128 GiB Mac already holding a 108 GiB model: the room line said
     "leaves 87 GiB" -- measured against the whole working set. It is the
     load budget's: memory available now."""
-    from knurlogic.interfaces.page import documents
+    from knurlogic.interfaces import documents
     ws, free = 120 * GIB, 10 * GIB
     monkeypatch.setattr(
         "knurlogic.machine.memory.wired.load_budget",

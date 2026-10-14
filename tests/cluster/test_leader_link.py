@@ -8,8 +8,8 @@ import socket
 import pytest
 
 from knurlogic.cluster import launch as C
-from knurlogic.interfaces import http as H
-from knurlogic.interfaces.http.server import browser_refusal
+from knurlogic.interfaces.http import lifecycle as H
+from knurlogic.interfaces.http.guard import browser_refusal
 
 
 def _spec(rank, link="ring", **kw):

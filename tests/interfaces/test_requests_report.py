@@ -124,10 +124,11 @@ def test_the_503s_say_when_to_retry():
 
 def test_messages_refusal_sends_retry_after():
     from knurlogic.interfaces.http import messages as M
+    from knurlogic.interfaces.http.openai import ApiError
     sent = []
 
     def transport(_oai):
-        raise M.TransportError(503, "no model is loaded", 5)
+        raise ApiError(503, "no model is loaded", retry_after=5)
     h = M.handler_over(transport, "m")
     h(b"{}", lambda b: None, lambda *a: sent.append(a))
     assert sent == [(503, "application/json", {"Retry-After": "5"})]

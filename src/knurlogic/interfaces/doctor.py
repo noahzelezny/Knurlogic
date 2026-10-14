@@ -12,6 +12,7 @@ import argparse
 import sys
 
 from knurlogic.engine import arch
+from knurlogic.interfaces.ports import PAGE_PORT
 from knurlogic.machine.artifact import Artifact
 from knurlogic.machine.memory import wired
 from knurlogic.machine.units import GIB
@@ -142,7 +143,7 @@ def main(argv=None) -> int:
                    help="check what stops this Mac and the others finding "
                         "each other: addresses, firewall, Bonjour, peers. "
                         "Run it on each Mac.")
-    p.add_argument("--port", type=int, default=8899,
+    p.add_argument("--port", type=int, default=PAGE_PORT,
                    help="with --cluster: the port the page runs on")
     p.add_argument("--working-set-gib", type=float, default=0.0,
                    help="usable GPU working set. 0 = ask the framework what "

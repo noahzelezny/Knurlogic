@@ -120,7 +120,7 @@ def test_the_maintainers_saved_context_launches(cache):
 def test_the_page_offers_up_to_the_yarn_window():
     from pathlib import Path
 
-    from knurlogic.interfaces.page.documents import knob_limit
+    from knurlogic.interfaces.documents import knob_limit
     from knurlogic.machine.artifact import Artifact
     a = Artifact(path=Path("/x"), model_type="qwen3_5_moe", model_file=None,
                  bytes_on_disk=0, hidden_size=None,

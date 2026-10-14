@@ -21,7 +21,8 @@ import sys
 from knurlogic.engine import arch, mtp
 from knurlogic.engine import model as engine
 from knurlogic.engine.mtp import binding
-from knurlogic.interfaces.page import documents
+from knurlogic.interfaces import documents
+from knurlogic.interfaces.ports import MODEL_PORT
 from knurlogic.machine import identity, status
 from knurlogic.machine.artifact import Artifact
 from knurlogic.machine.memory import wired
@@ -429,11 +430,11 @@ def run(path: str, host: str, port: int, working_set_gib: float,
             snap["ranks"] = [dict(x) for x in _st.SERVED["ranks"]]
         snap["preset"] = dict(r.preset)
         # what is running and what is waiting (scheduler.requests)
-        from knurlogic.interfaces import http as _http
-        snap["requests"] = _http.requests_now()
+        from knurlogic.interfaces.http import lifecycle
+        snap["requests"] = lifecycle.requests_now()
         # the host's own state: /status.json answers (with the artifact)
         # from the moment the server starts, long before the weights are in
-        snap["load"] = _http.load_now()
+        snap["load"] = lifecycle.load_now()
         # what reasoning_effort does on the served model -- the MCP's
         # `models` answer plus the default the server actually renders
         try:
@@ -565,13 +566,13 @@ def run(path: str, host: str, port: int, working_set_gib: float,
             if "applied" in done.get(k, "") or "set for" in done.get(k, ""):
                 live_env[k] = v
         # on a ring the other ranks apply what took here (plan `set`)
-        sched = http.CURRENT.get("scheduler")
+        sched = lifecycle.CURRENT.get("scheduler")
         if sched is not None:
             sched.share_live({k: v for k, v in want.items()
                               if live_env.get(k) == v})
         return {"applied": done, "running": dict(live_env)}
 
-    from knurlogic.interfaces import http
+    from knurlogic.interfaces.http import lifecycle
 
     # /v1/messages is served by the server itself (in-process over its
     # OpenAI surface), so it is not one of these routes.
@@ -587,7 +588,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
             artifact_for=lambda p: Artifact.load(p),
             resolve_fn=lambda art: resolve(art, ws, profile=profile, tune=tune),
             live_knobs=LIVE_KNOBS,
-            switch_fn=http.switch, unload_fn=http.unload),
+            switch_fn=lifecycle.switch, unload_fn=lifecycle.unload),
         apply_fn=_apply)
     # A packed head is used because it is there. Nobody should have to know
     # an environment variable exists to run weights they already downloaded.
@@ -629,7 +630,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         print(f"memory    the scheduler guards {gib(guard)} ("
               + ("--working-set-gib" if working_set_gib else
                  f"the knurlogic allowance, {allowance.path()}") + ")")
-    return http.serve(a, host, port, routes=routes,
+    return lifecycle.serve(a, host, port, routes=routes,
                       settings={**eng, "rounding": rounding, **(serving or {}),
                                 **({"working_set_bytes": guard}
                                    if guard else {})}, draft=draft,
@@ -756,7 +757,7 @@ def main(argv=None) -> int:
                         "cluster job's leader binds loopback and its link "
                         "address), or `cluster`: every address "
                         "bound, answered on loopback and Thunderbolt only")
-    p.add_argument("--port", type=int, default=8080)
+    p.add_argument("--port", type=int, default=MODEL_PORT)
     p.add_argument("--working-set-gib", type=float, default=0.0,
                    help="usable GPU working set; 0 asks the framework what "
                         "it may use")

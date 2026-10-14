@@ -163,8 +163,5 @@ def fit_machines(artifact: str, split: str = "", draft: bool = True,
 
 
 def _local_path(artifact: str) -> str:
-    from knurlogic.interfaces.load_checks import NotLoadable, resolve_name
-    try:
-        return str(resolve_name(artifact, None))
-    except NotLoadable:
-        return ""
+    from knurlogic.interfaces.load_checks import local_artifact
+    return str(local_artifact(artifact)[0] or "")

@@ -63,7 +63,7 @@ def test_load_budget_is_capped_and_says_so(home, monkeypatch):
 
 
 def test_the_page_route_reads_and_sets_this_machine(home, monkeypatch):
-    from knurlogic.interfaces.page import documents
+    from knurlogic.interfaces import documents
     monkeypatch.setattr(wired, "detected_working_set_bytes", lambda: 100 * GIB)
     monkeypatch.setattr(wired, "advise", lambda b: {"total_bytes": 128 * GIB})
     assert documents.allowance_doc()["allowance_gib"] == 0
@@ -78,7 +78,7 @@ def test_the_page_route_reads_and_sets_this_machine(home, monkeypatch):
 
 
 def test_the_scheduler_is_handed_the_working_set():
-    from knurlogic.interfaces.http import scheduler_options
+    from knurlogic.interfaces.http.lifecycle import scheduler_options
     assert scheduler_options({})["working_set_bytes"] is None
     assert scheduler_options({"working_set_bytes": 7})["working_set_bytes"] == 7
 

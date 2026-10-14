@@ -7,8 +7,7 @@ import time
 import pytest
 
 from knurlogic.cluster import jobs as J
-from knurlogic.interfaces import spawn
-from knurlogic.interfaces.page import documents
+from knurlogic.interfaces import documents, spawn
 from knurlogic.interfaces.page import loads as page_loads
 from knurlogic.interfaces.page import messages as page_messages
 from knurlogic.interfaces.page import nodes as page_nodes

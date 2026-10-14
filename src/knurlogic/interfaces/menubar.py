@@ -12,15 +12,15 @@ from __future__ import annotations
 
 import argparse
 import fcntl
-import json
 import os
 import signal
 import subprocess
 import sys
-import urllib.request
+import webbrowser
 from pathlib import Path
 
 from knurlogic.machine import paths, processes
+from knurlogic.machine.http_client import get_json
 
 REFRESH_S = 5.0
 ASSETS = Path(__file__).parent / "menubar_assets"
@@ -102,12 +102,7 @@ def spawn(port: int, enabled: bool = True) -> bool:
 
 
 def _fetch(port: int):
-    try:
-        with urllib.request.urlopen(
-                f"http://127.0.0.1:{port}/loaded.json", timeout=2) as r:
-            return json.loads(r.read())
-    except (OSError, ValueError):
-        return None
+    return get_json(f"http://127.0.0.1:{port}/loaded.json", timeout=2)
 
 
 def _dock_icon(path: Path) -> None:
@@ -140,7 +135,7 @@ def run(port: int, parent: int) -> int:
     state = {"models": 0}
 
     def open_page(_):
-        subprocess.Popen(["open", f"http://127.0.0.1:{port}/"])
+        webbrowser.open(f"http://127.0.0.1:{port}/")
 
     def quit_page(_):
         if state["models"] and rumps.alert(

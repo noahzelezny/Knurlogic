@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import json
 
+from knurlogic.interfaces.ports import MODEL_PORT
+
 #: Clients and what they need. Adding one is a row.
 CLIENTS = ("claude", "openai", "settings")
 
@@ -190,7 +192,7 @@ def main(argv=None) -> int:
         prog="knurlogic connect",
         description="print how to point a client at a running server")
     p.add_argument("--host", default="127.0.0.1")
-    p.add_argument("--port", type=int, default=8080)
+    p.add_argument("--port", type=int, default=MODEL_PORT)
     p.add_argument("--model", default="local",
                    help="the name clients should send; serve pins it anyway")
     a = p.parse_args(argv)

@@ -12,8 +12,7 @@ import uuid
 from typing import TYPE_CHECKING
 
 from knurlogic.engine.model import process_memory
-from knurlogic.interfaces import spawn
-from knurlogic.interfaces.page import documents
+from knurlogic.interfaces import documents, spawn
 from knurlogic.machine import identity, status
 from knurlogic.machine.memory import footprint, wired
 from knurlogic.machine.processes import PROC_ERRORS

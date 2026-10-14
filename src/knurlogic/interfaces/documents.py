@@ -1,6 +1,10 @@
-"""The routes knurlogic serves next to the engine's OpenAI surface.
+"""The routes knurlogic serves next to the engine's OpenAI surface: the
+documents (/settings.json, /models.json, /loaded.json, /status.json ...)
+and the page's static files (page/assets).
 
-One place, because `serve` and the page `knurlogic ui` opens both use them.
+One place, because `serve` and the page `knurlogic ui` opens both use them;
+neither server's own modules are imported here (what only the page knows
+-- update flags, the room across peers -- is handed in).
 The runtime reads its environment at import, so the settings route never
 pretends a control retunes a loaded model; it answers three separate
 questions: what is running now, what a setting would give, and how to get
@@ -17,7 +21,7 @@ from knurlogic.machine.disk_cache import DiskCache
 from knurlogic.machine.units import GIB, gib
 from knurlogic.tuning.live import LIVE_KNOBS, RESTART_WHY, knob_reach
 
-ASSETS = Path(__file__).parent / "assets"
+ASSETS = Path(__file__).parent / "page" / "assets"
 PAGE = ASSETS / "index.html"
 # The page is plain static files the browser loads as they are (native ES
 # modules, no build step); only these kinds are served.
@@ -92,7 +96,7 @@ def forget_models() -> None:
     _MODELS.update(rows=None)
 
 
-def models_document(serving: str = ""):
+def models_document(serving: str = "", flagged=None):
     """`/models.json` -- what else is on this machine, and what is loaded.
 
     The model folders are read only when someone acts: the first request,
@@ -102,6 +106,9 @@ def models_document(serving: str = ""):
 
     Switching is NOT offered. A loaded model is loaded; what this can
     honestly hand over is the command that would serve another one.
+
+    `flagged(paths)`: the paths with an update on the hub (the page's
+    page/updates.flagged); none without it.
     """
     def handler(q: dict) -> dict:
         from knurlogic.engine.vision import registry as vision_registry
@@ -116,8 +123,8 @@ def models_document(serving: str = ""):
         from knurlogic.machine.artifact import identity as artifact_identity
         from knurlogic.machine.memory import allowance, wired
         ws = allowance.cap(wired.detected_working_set_bytes())
-        from knurlogic.interfaces.page import updates
-        stale = updates.flagged([f.path for f in _MODELS["rows"]])
+        stale = (flagged([f.path for f in _MODELS["rows"]])
+                 if flagged else set())
         for f in _MODELS["rows"]:
             out.append({
                 "name": f.name, "path": str(f.path), "store": f.store,
@@ -374,7 +381,7 @@ def load_action(artifact_for, resolve_fn=None, live_knobs=(),
     return handler
 
 
-def machine_settings():
+def machine_settings(split_room=None):
     """`/settings.json` when no model is loaded.
 
     Most of what Settings shows belongs to an artifact -- the knobs are read
@@ -386,6 +393,10 @@ def machine_settings():
 
     knurlogic never runs it. It reads the current value, works out the
     ceiling, and hands over the exact line.
+
+    `split_room(path, ids, split, mtp=, vision=, kv_bits=)`: the room for a
+    model split across the picked machines (the page's
+    page/loads.room_across); without it a preview has no split_room.
     """
     def _one(q, key):
         v = q.get(key)
@@ -423,10 +434,9 @@ def machine_settings():
                               kv_bits=_one(q, "kv_bits"),
                               long_context=_one(q, "long_context"))
                 ids = [i for i in str(_one(q, "nodes") or "").split(",") if i]
-                if len(ids) >= 2:
+                if len(ids) >= 2 and split_room is not None:
                     # several machines picked: the room under that split
-                    from knurlogic.interfaces.page import loads
-                    doc["split_room"] = loads.room_across(
+                    doc["split_room"] = split_room(
                         art, ids, _one(q, "split") or "pipeline",
                         mtp=_one(q, "mtp") != "off",
                         vision=_one(q, "vision") != "off",

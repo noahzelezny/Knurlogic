@@ -36,7 +36,7 @@ Outside it, only thin hooks:
   into it at admission (read-back, divergence) and at load (restore).
 - `engine/split/plan.py`: the schema every journaled op must match.
 - `tuning/groups.py` (`PROMPT_CACHE_KNOBS`): the disk on/off, GB, TTL
-  and KV-width conversion settings; `interfaces/page/documents.py`
+  and KV-width conversion settings; `interfaces/documents.py`
   (`prompt_cache_document`) shows them under Settings -> Knurlogic ->
   Prompt cache.
 

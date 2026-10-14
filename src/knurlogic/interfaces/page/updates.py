@@ -111,10 +111,8 @@ _RELEASE: dict = {"latest": None}
 
 def pypi_latest() -> str:
     """PyPI's latest release of knurlogic (it skips pre-releases)."""
-    import json
-    import urllib.request
-    with urllib.request.urlopen(PYPI, timeout=TIMEOUT) as r:
-        return str(json.load(r)["info"]["version"])
+    from knurlogic.machine.http_client import send_json
+    return str(send_json(PYPI, method="GET", timeout=TIMEOUT)["info"]["version"])
 
 
 def check_release(ask=pypi_latest) -> None:

@@ -5,11 +5,11 @@ model server on this machine (`peer_settings`)."""
 
 from __future__ import annotations
 
-import http.client
 import json
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 
 from knurlogic.interfaces.page import nodes, peers, router
+from knurlogic.machine.http_client import NET_ERRORS, request
 from knurlogic.machine.servers import registry
 
 #: a model server's settings document, readable (/peek: a Read message) and
@@ -26,10 +26,6 @@ def peer_settings(method: str, port, data, call=None) -> tuple:
     working_set_gib passed on), POST is its live apply, which refuses and
     reports per knob exactly as it does for this machine's own page. It is
     how a peer's live knob changes the peer, not this page."""
-    import urllib.error
-    import urllib.parse
-    import urllib.request
-
     from knurlogic.machine.servers import is_our_server
     if not isinstance(port, int) or isinstance(port, bool):
         return 400, {"error": "name the model server by its port"}
@@ -42,26 +38,16 @@ def peer_settings(method: str, port, data, call=None) -> tuple:
         q = data if isinstance(data, dict) else {}
         fwd = {k: str(q[k]) for k in PEEK_KEYS if q.get(k) is not None}
         if fwd:
-            url += "?" + urllib.parse.urlencode(fwd)
+            url += "?" + urlencode(fwd)
         data = None
     else:
         if not isinstance(data, dict):
             return 400, {"error": "the body must be a JSON object of knobs"}
         data = json.dumps(data).encode()
-    if call is None:
-        def call(u, d, t):
-            req = urllib.request.Request(
-                u, data=d, method="POST" if d is not None else "GET",
-                headers={"Content-Type": "application/json"})
-            try:
-                with urllib.request.urlopen(req, timeout=t) as r:
-                    return r.status, r.read()
-            except urllib.error.HTTPError as e:
-                return e.code, e.read()
     try:
-        code, raw = call(url, data, APPLY_S)
+        code, raw = (call or _send)(url, data, APPLY_S)
         return code, json.loads(raw)
-    except (OSError, ValueError, http.client.HTTPException) as e:
+    except (*NET_ERRORS, ValueError) as e:
         return 502, {"error": f"{type(e).__name__}: {e}"}
 
 
@@ -80,8 +66,6 @@ def apply_settings(where: str, body: bytes, post=None) -> tuple:
     peer's page, never another path -- a small JSON object, a short
     deadline. The page sends it only when the person clicks Apply; which
     knobs actually move is the model server's to decide and report."""
-    import urllib.error
-    import urllib.request
     base = (where or "").rstrip("/")
     if not router.known_target(base):
         return 403, {"error": f"not a running model this page knows: "
@@ -104,25 +88,15 @@ def apply_settings(where: str, body: bytes, post=None) -> tuple:
             out = (post or transport.send)(
                 target["relay"].removeprefix("http://"), "Settings",
                 {"port": urlparse(base).port, "values": want})
-        except (OSError, ValueError, http.client.HTTPException) as e:
+        except (*NET_ERRORS, ValueError) as e:
             return 502, {"error": f"{type(e).__name__}: {e}"}
         return (502 if out.get("error") and "applied" not in out
                 else 200), out
-    if post is None:
-        def post(url, data, t):
-            req = urllib.request.Request(
-                url, data=data, method="POST",
-                headers={"Content-Type": "application/json"})
-            try:
-                with urllib.request.urlopen(req, timeout=t) as r:
-                    return r.status, r.read()
-            except urllib.error.HTTPError as e:
-                return e.code, e.read()
     try:
-        code, raw = post(base + PEER_SETTINGS,
-                         json.dumps(want).encode(), APPLY_S)
+        code, raw = (post or _send)(base + PEER_SETTINGS,
+                                    json.dumps(want).encode(), APPLY_S)
         return code, json.loads(raw)      # JSON only, never an HTML page
-    except (OSError, ValueError, http.client.HTTPException) as e:
+    except (*NET_ERRORS, ValueError) as e:
         return 502, {"error": f"{type(e).__name__}: {e}"}
 
 
@@ -181,9 +155,22 @@ def _peek_peer(where: str, path: str, fwd: dict):
         out = transport.send(page, "Read", {"path": path, "query": fwd,
                                             **({"port": port} if port
                                                else {})})
-    except (OSError, ValueError, http.client.HTTPException) as e:
+    except (*NET_ERRORS, ValueError) as e:
         return 502, json.dumps({"error": f"{type(e).__name__}: {e}"})
     return 200, json.dumps(out)
+
+
+def _send(url: str, data: bytes | None, timeout: float) -> tuple:
+    """(status, raw body): GET without `data`, POST with it."""
+    return request(url, data, timeout=timeout)
+
+
+def _get(url: str, timeout: float) -> bytes:
+    """A document's raw body; an error status raises."""
+    code, raw = request(url, timeout=timeout)
+    if code >= 400:
+        raise OSError(f"{url}: HTTP {code}")
+    return raw
 
 
 def peek(q: dict, fetch=None) -> tuple:
@@ -194,8 +181,6 @@ def peek(q: dict, fetch=None) -> tuple:
     (status, body): the upstream's JSON as it came, or a JSON error. GET
     only, a fixed list of paths and targets, a short deadline: Settings on
     a peer's tab reads that peer and can never set anything on it."""
-    import urllib.parse
-    import urllib.request
     where = ((q.get("where") or [""])[0] or "").rstrip("/")
     path = (q.get("path") or [""])[0]
     if path not in PEEK_PATHS:
@@ -210,14 +195,10 @@ def peek(q: dict, fetch=None) -> tuple:
             return peer
     url = peers.upstream(where, path)
     if fwd:
-        url += ("&" if "?" in url else "?") + urllib.parse.urlencode(fwd)
-    if fetch is None:
-        def fetch(u, t):
-            with urllib.request.urlopen(u, timeout=t) as r:
-                return r.read()
+        url += ("&" if "?" in url else "?") + urlencode(fwd)
     try:
-        body = fetch(url, PEEK_S)
+        body = (fetch or _get)(url, PEEK_S)
         json.loads(body)          # pass on JSON only, never an HTML page
         return 200, body.decode() if isinstance(body, bytes) else body
-    except (OSError, ValueError, http.client.HTTPException) as e:
+    except (*NET_ERRORS, ValueError) as e:
         return 502, json.dumps({"error": f"{type(e).__name__}: {e}"})

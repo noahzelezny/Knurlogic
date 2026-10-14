@@ -53,13 +53,13 @@ def _named(artifact: str):
     (None, the refusal): fit, settings and drafting resolve a name the way
     load does, instead of raising on a bare name. A path stays a path
     (these tools read one; load does not)."""
-    from knurlogic.interfaces.load_checks import NotLoadable, resolve_name
-    try:
-        return resolve_name(artifact, None), None
-    except NotLoadable as e:
-        if "/" in artifact:
-            return artifact, None
-        return None, {"refused": "not a known artifact", "note": str(e)}
+    from knurlogic.interfaces.load_checks import local_artifact
+    path, why = local_artifact(artifact)
+    if path is not None:
+        return path, None
+    if "/" in artifact:
+        return artifact, None
+    return None, {"refused": "not a known artifact", "note": why}
 
 
 def fit(artifact: str = "", draft: bool = True, vision: bool = True,
@@ -260,7 +260,7 @@ def settings(artifact: str = "", tune: str = "default", **_) -> dict[str, Any]:
     The `why` is the point. A knob without its provenance is one an agent
     changes for no reason, and these were expensive to establish.
     """
-    from knurlogic.interfaces.page import documents
+    from knurlogic.interfaces import documents
     from knurlogic.tuning.presets import preset_of
     artifact, refused = _named(artifact)
     if refused:

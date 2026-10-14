@@ -1,15 +1,15 @@
 """The Anthropic->OpenAI image shim (`interfaces/http/messages.py`),
 and the `vision` field on `/models.json` and `/loaded.json`.
 
-No mlx, no PIL, no real model: `interfaces/page/documents.py` reads
+No mlx, no PIL, no real model: `interfaces/documents.py` reads
 `served_vision()` and `registry.registered()`, both stdlib-only per the
 frozen contract (`docs/design/vision-contracts.md`), and this file proves it
 stays that way by never importing anything that would drag mlx in.
 """
 from pathlib import Path
 
+from knurlogic.interfaces import documents
 from knurlogic.interfaces.http import messages
-from knurlogic.interfaces.page import documents
 
 # --- anthropic_images_to_openai --------------------------------------------
 
@@ -125,8 +125,7 @@ def test_models_document_says_why_a_conversion_has_no_vision(monkeypatch,
     assert doc["text"]["vision_why"] == "this conversion has no vision weights"
     assert doc["flash"]["vision"] is False and doc["flash"]["vision_why"] == ""
     # the picker shows that row's switch disabled, off, with the reason
-    js = (Path(documents.__file__).parent / "assets" / "views"
-          / "picker.js").read_text()
+    js = (documents.ASSETS / "views" / "picker.js").read_text()
     assert "m.vision_why" in js and "b.disabled=off" in js
 
 
@@ -173,15 +172,17 @@ def test_web_module_never_imports_mlx_or_pil():
 
     code = (
         "import sys\n"
-        "from knurlogic.interfaces.page import documents\n"
+        "from knurlogic.interfaces import documents\n"
         "documents.models_document()({'rescan': ['1']})\n"
         "documents.loaded_document()({})\n"
         "assert 'mlx' not in sys.modules, sorted(sys.modules)\n"
         "assert 'PIL' not in sys.modules\n"
         "print('ok')\n"
     )
+    import os
+    src = str(Path(__file__).resolve().parents[2] / "src")
     r = subprocess.run([sys.executable, "-c", code], capture_output=True,
-                       text=True)
+                       text=True, env={**os.environ, "PYTHONPATH": src})
     assert r.returncode == 0, r.stdout + r.stderr
 
 
@@ -209,7 +210,7 @@ def test_the_chat_proxy_only_reaches_models_this_page_knows(monkeypatch):
 def test_the_page_asset_ships_with_the_package():
     """interfaces/page/assets/index.html is package data: a wheel or a move
     that loses it must fail here, not as a blank page."""
-    from knurlogic.interfaces.page.documents import PAGE
+    from knurlogic.interfaces.documents import PAGE
     assert PAGE.exists(), PAGE
 
 
@@ -223,7 +224,7 @@ def test_every_page_file_ships_and_every_reference_resolves():
         import tomllib
     except ModuleNotFoundError:            # 3.10: pytest depends on tomli
         import tomli as tomllib
-    from knurlogic.interfaces.page.documents import ASSETS, asset_names
+    from knurlogic.interfaces.documents import ASSETS, asset_names
     root = Path(__file__).resolve().parents[2]
     pkg = root / "src" / "knurlogic"
     patterns = tomllib.loads((root / "pyproject.toml").read_text())[
@@ -251,7 +252,7 @@ def _page_server():
     import threading
     from http.server import ThreadingHTTPServer
 
-    from knurlogic.interfaces.page import documents as web
+    from knurlogic.interfaces import documents as web
     from knurlogic.interfaces.page import server as ui
     srv = ThreadingHTTPServer(("127.0.0.1", 0),
                               ui.make_handler(web.routes()))
@@ -303,7 +304,7 @@ def test_the_static_route_refuses_traversal_and_unknown_files():
 
 
 def test_asset_stays_inside_the_assets_directory(tmp_path, monkeypatch):
-    from knurlogic.interfaces.page import documents as web
+    from knurlogic.interfaces import documents as web
     assets = tmp_path / "assets"
     (assets / "views").mkdir(parents=True)
     (assets / "app.js").write_text("export {}")
@@ -327,7 +328,7 @@ def test_asset_stays_inside_the_assets_directory(tmp_path, monkeypatch):
 def test_vendored_pdfjs_ships_and_is_served():
     """The chat's PDF attachments load pdf.js from the page itself (the page
     works offline): both modules must be there and served as JavaScript."""
-    from knurlogic.interfaces.page import documents as web
+    from knurlogic.interfaces import documents as web
     for name in ("vendor/pdfjs/pdf.min.mjs", "vendor/pdfjs/pdf.worker.min.mjs"):
         assert name in web.asset_names(), name
     assert (web.ASSETS / "vendor/pdfjs/LICENSE").is_file()

@@ -60,15 +60,14 @@ def load(artifact: str = "", port: int = 0, tune: str = "default",
         return _load_on(names, artifact, port, tune, sets, force, draft,
                         split, link, cable)
     from knurlogic.interfaces import spawn
-    from knurlogic.interfaces.load_checks import NotLoadable, resolve_name
+    from knurlogic.interfaces.load_checks import local_artifact
 
     # a model named, never a directory (interfaces/load_checks.py): the same
     # rule a switch on a running server follows
-    try:
-        artifact = resolve_name(artifact, None)
-    except NotLoadable as e:
+    artifact, why = local_artifact(artifact)
+    if artifact is None:
         return {"loaded": False, "refused": "not a known artifact",
-                "note": str(e)}
+                "note": why}
     # serve's deterministic refusals (bad settings, a context past the
     # model's maximum, ...), asked before a process is started: a server
     # that prints REFUSING and exits is a reason nobody sees
@@ -168,19 +167,17 @@ def _identity_of(artifact: str) -> tuple:
     """(identity, refusal): a model on other machines is named by identity
     (machine/artifact.identity), read from this Mac's copy; a 16-hex
     identity is taken as given, for a model this Mac does not hold."""
-    import re
-
-    from knurlogic.interfaces.load_checks import NotLoadable, resolve_name
+    from knurlogic.interfaces.load_checks import is_identity, local_artifact
     from knurlogic.machine.artifact import identity
-    try:
-        ident = identity(resolve_name(artifact, None))
-    except NotLoadable as e:
-        if re.fullmatch(r"[0-9a-f]{16}", str(artifact or "")):
+    path, why = local_artifact(artifact)
+    if path is None:
+        if is_identity(artifact):
             return artifact, None
         return "", {"loaded": False, "refused": "not a known artifact",
-                    "note": f"{e}. A model this Mac does not hold is named "
+                    "note": f"{why}. A model this Mac does not hold is named "
                             f"by its identity (the page's /models.json on a "
                             f"Mac that has it)."}
+    ident = identity(path)
     if not ident:
         return "", {"loaded": False, "refused": "no identity",
                     "note": f"{artifact} has no config.json"}
@@ -190,18 +187,14 @@ def _identity_of(artifact: str) -> tuple:
 def _artifact_name(artifact: str) -> str:
     """The directory name `load` was given the artifact by ("" for a bare
     identity): the name the other machines resolve it by."""
-    import re
-    a = str(artifact or "").rstrip("/")
-    if re.fullmatch(r"[0-9a-f]{16}", a):
-        return ""
     from pathlib import Path
 
-    from knurlogic.interfaces.load_checks import NotLoadable, resolve_name
-    try:
-        # a path (or a pin's real path) -> the store's own name for it
-        return Path(resolve_name(a, None)).name
-    except NotLoadable:
-        return Path(a).name
+    from knurlogic.interfaces.load_checks import is_identity, local_artifact
+    a = str(artifact or "").rstrip("/")
+    if is_identity(a):
+        return ""
+    # a path (or a pin's real path) -> the store's own name for it
+    return Path(local_artifact(a)[0] or a).name
 
 
 def _load_on(names, artifact, port, tune, sets, force, draft, split, link,

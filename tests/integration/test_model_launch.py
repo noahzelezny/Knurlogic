@@ -221,7 +221,7 @@ def test_a_cluster_job_passes_the_same_sets_to_every_rank():
 def test_settings_offer_a_family_only_the_bits_it_takes(tmp_path):
     """Settings -> MODELS: one row per launch knob, needs reload, and the
     KV control narrowed to what the family allows."""
-    from knurlogic.interfaces.page import documents
+    from knurlogic.interfaces import documents
     for mt, want in (("glm5_next", ["bf16", "8"]),
                      ("qwen3_5_text", ["bf16", "8"])):
         (tmp_path / mt).mkdir()
@@ -289,7 +289,7 @@ def test_serve_says_when_an_environment_knob_is_ignored():
 def test_the_picker_offers_only_the_splits_a_launch_takes(tmp_path):
     import json
 
-    from knurlogic.interfaces.page.documents import splits_of
+    from knurlogic.interfaces.documents import splits_of
     tc = {"model_type": "qwen3_5_moe_text", "num_hidden_layers": 40,
           "num_attention_heads": 32, "num_key_value_heads": 4,
           "num_experts": 8, "moe_intermediate_size": 512,

@@ -44,7 +44,7 @@ function pushRecent(path){
   r.unshift({path, at:Date.now()});
   try{ localStorage.setItem('kn.recent', JSON.stringify(r.slice(0,20))) }catch(e){}
 }
-// /models.json has no `vision` field (interfaces/page/documents.py), so
+// /models.json has no `vision` field (interfaces/documents.py), so
 // this is a family-name heuristic matching the vision-capable families
 // (gemma4, glm5, qwen-vl) until the server reports one.
 function isVision(m){

@@ -26,8 +26,7 @@ def _setup(monkeypatch, phases, tables):
     monkeypatch.setattr(router, "routable", routable)
     monkeypatch.setattr(router, "refresh_targets", lambda: None)
     monkeypatch.setattr(router, "_starting_jobs", starting)
-    import knurlogic.interfaces.http.server as S
-    monkeypatch.setattr(S, "_hung_up", lambda c: False)
+    monkeypatch.setattr(router, "hung_up", lambda c: False)
 
 
 def test_waits_while_a_split_job_loads(monkeypatch):
@@ -50,6 +49,5 @@ def test_a_loaded_job_gets_a_bounded_grace(monkeypatch):
 
 def test_a_client_that_hangs_up_stops_the_wait(monkeypatch):
     _setup(monkeypatch, [(True, False)], [{}])
-    import knurlogic.interfaces.http.server as S
-    monkeypatch.setattr(S, "_hung_up", lambda c: True)
+    monkeypatch.setattr(router, "hung_up", lambda c: True)
     assert router._await_launch(_H(), "m", poll=0)[0] is None

@@ -5,7 +5,7 @@ rounding are set once for every model, not per model -- read per request
 import pytest
 
 from knurlogic.context_management import compaction as C
-from knurlogic.interfaces.page import documents
+from knurlogic.interfaces import documents
 from knurlogic.interfaces.page import peers as page_peers
 from knurlogic.tuning import groups, knobs, preferences, presets
 

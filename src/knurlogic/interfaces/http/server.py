@@ -17,8 +17,6 @@ import json
 import logging
 import os
 import queue
-import select
-import socket
 import threading
 import time
 from collections.abc import Callable
@@ -31,6 +29,7 @@ from knurlogic.machine.units import MIB
 from . import openai as O
 from . import telemetry as T
 from .compaction import CompactingChat
+from .guard import browser_refusal, hung_up, is_loopback
 from .prompt_cache import PromptCacheHandlers
 
 logger = logging.getLogger(__name__)
@@ -71,21 +70,6 @@ HANGUP_POLL_S = 1.0
 _CONN = threading.local()
 
 
-def _hung_up(sock) -> bool:
-    """True when the peer has closed: readable with nothing to read (EOF)
-    or an error. Peeks, so a request's bytes are never consumed; data
-    waiting (a pipelined request) is not a hang-up."""
-    try:
-        ready, _, _ = select.select([sock], [], [], 0)
-        if not ready:
-            return False
-        return sock.recv(1, socket.MSG_PEEK) == b""
-    except BlockingIOError:
-        return False
-    except (OSError, ValueError):
-        return True
-
-
 def _watch_hangup(job, sock, done: threading.Event) -> None:
     """Cancel `job` when its client hangs up while a non-streamed reply is
     being made. Nothing is written until such a reply is complete, so the
@@ -97,7 +81,7 @@ def _watch_hangup(job, sock, done: threading.Event) -> None:
     while not done.wait(HANGUP_POLL_S):
         if job.cancelled:
             return
-        if _hung_up(sock):
+        if hung_up(sock):
             logger.info("a non-streamed request's client hung up: "
                         "cancelling it")
             job.cancel()
@@ -212,14 +196,9 @@ class App(CompactingChat):
         return job, reply
 
     def _transport(self, oai: dict):
-        """/v1/messages -> the OpenAI surface, in-process."""
-        from knurlogic.interfaces.http.messages import TransportError
-        try:
-            kind, val = self.chat(oai)
-            return val
-        except O.ApiError as e:
-            raise TransportError(e.status, str(e),
-                                 getattr(e, "retry_after", None)) from e
+        """The dialects' transport (dialect.handler_over): the OpenAI chat
+        surface, in-process; a refusal is its ApiError."""
+        return self.chat(oai)[1]
 
     # ------------------------------------------------------- context
 
@@ -511,12 +490,7 @@ class Handler(PromptCacheHandlers, T.TelemetryHandlers,
         self._send(200, body, ctype)
 
     def _loopback(self) -> bool:
-        import ipaddress
-        try:
-            return ipaddress.ip_address(
-                self.client_address[0].split("%")[0]).is_loopback
-        except ValueError:
-            return False
+        return is_loopback(self.client_address[0])
 
     def _ollama_get(self, path: str) -> None:
         from knurlogic import __version__
@@ -700,73 +674,6 @@ class Handler(PromptCacheHandlers, T.TelemetryHandlers,
             handler(raw, write, start)
         except (BrokenPipeError, ConnectionResetError):
             pass
-
-
-def browser_refusal(headers, allow_origins=(), allow_hosts=()):
-    """Why a request is refused, or None -- the browser guard both of
-    knurlogic's servers (this one and `knurlogic ui`) apply:
-
-      Host    must name this machine, or be allowed (--allow-host): a
-              foreign domain re-pointed at this address (DNS rebinding)
-              would otherwise look same-origin to the browser.
-      Origin  a browser marks its requests with one; answered only when it
-              is this server itself or allowed (--allow-origin). Ordinary
-              clients (SDKs, curl, harnesses) send none."""
-    host = (headers.get("Host") or "").strip()
-    if host and not host_is_local(host, allow_hosts):
-        name = host.rsplit(":", 1)[0] if not host.endswith("]") else host
-        return (f"Host {host!r} is not this machine (DNS-rebinding guard). "
-                f"If you reach it by that name, start it with "
-                f"--allow-host {name}.")
-    o = (headers.get("Origin") or "").rstrip("/")
-    if o and o not in (f"http://{host}", f"https://{host}") \
-            and o not in {x.rstrip("/") for x in allow_origins}:
-        return (f"requests from the web page at {o} are not answered: a "
-                f"page in a browser must not be able to drive this server. "
-                f"Start it with --allow-origin {o} to allow that page.")
-    return None
-
-
-def host_is_local(host_header: str, allow_hosts=()) -> bool:
-    """Does a Host header name this machine: localhost, an IP literal, a
-    `.local` / `.localhost` name, this machine's hostname, or a name the
-    operator allowed?"""
-    import ipaddress
-    h = host_header.strip()
-    if h.startswith("["):                       # [::1]:8080
-        h = h[1:h.find("]")] if "]" in h else h
-    elif h.count(":") == 1:
-        h = h.split(":", 1)[0]
-    h = h.lower().rstrip(".")
-    if h in {x.lower() for x in allow_hosts}:
-        return True
-    if h in ("localhost",) or h.endswith((".localhost", ".local")):
-        return True
-    try:
-        ipaddress.ip_address(h)
-        return True
-    except ValueError:
-        pass
-    # This machine's own name, exactly. Never "the first label matches":
-    # my-mac.attacker.example would pass that, and a name an attacker
-    # controls can be pointed at 127.0.0.1 (DNS rebinding) -- the Origin
-    # check compares against this same Host, so it would pass too. A name
-    # this machine is reached by (a tailnet, a LAN domain) is --allow-host.
-    return h in _machine_names()
-
-
-_NAMES: set = set()
-
-
-def _machine_names() -> set:
-    """This machine's hostname, once. Not getfqdn(): that is a DNS lookup
-    (seconds on a network without reverse DNS), and `.local` names are
-    accepted above anyway."""
-    import socket
-    if not _NAMES:
-        n = socket.gethostname().lower()
-        _NAMES.update({n, n.split(".")[0]})
-    return _NAMES
 
 
 def make_server(app: App, host: str, port: int) -> ThreadingHTTPServer:

@@ -8,6 +8,8 @@ import http.client
 import json
 from typing import Any
 
+from knurlogic.interfaces.ports import PAGE_PORT
+
 # --- across machines: through the page on this Mac ---------------------------
 # The page (`knurlogic ui`) is each Mac's node agent. It holds the peers it
 # can see, the cluster jobs it coordinates and the watcher that tears a
@@ -32,7 +34,7 @@ class PageDown(Exception):
 
 def _page_addr() -> str:
     import os
-    return os.environ.get(PAGE_ENV) or "127.0.0.1:8899"
+    return os.environ.get(PAGE_ENV) or f"127.0.0.1:{PAGE_PORT}"
 
 
 def page_call(path: str, doc=None, timeout: float = PAGE_READ_S):
@@ -52,7 +54,7 @@ def page_call(path: str, doc=None, timeout: float = PAGE_READ_S):
         raise PageDown(f"the page on this Mac ({url.split(path)[0]}) did "
                        f"not answer: {type(e).__name__}: {e}. Across "
                        f"machines goes through it: start `knurlogic ui` "
-                       f"(set {PAGE_ENV}=host:port if it is not on 8899)") from e
+                       f"(set {PAGE_ENV}=host:port if it is not on {PAGE_PORT})") from e
     try:
         out = json.loads(raw)
     except ValueError:

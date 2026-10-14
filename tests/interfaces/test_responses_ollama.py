@@ -10,9 +10,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from knurlogic.interfaces.http import messages as M
 from knurlogic.interfaces.http import ollama as OL
 from knurlogic.interfaces.http import responses as R
+from knurlogic.interfaces.http.openai import ApiError
 
 MARKER = "from-the-stub-engine"
 USAGE = {"prompt_tokens": 7, "completion_tokens": 11,
@@ -158,7 +158,7 @@ def test_responses_refusals_are_plain_400s(extra):
 
 def test_responses_engine_refusal_keeps_its_status():
     def dead(oai):
-        raise M.TransportError(503, "no model", retry_after=5)
+        raise ApiError(503, "no model", retry_after=5)
     s, raw = _responses({"input": "hi"}, dead)
     assert s["code"] == 503 and json.loads(raw)["error"]["message"] == \
         "no model"
