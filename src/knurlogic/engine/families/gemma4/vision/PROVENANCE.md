@@ -94,10 +94,10 @@ max abs diff 2e-6 (e4b) / 4e-6 (26B-style), tower and projection. The
   elements a step from HF's `Gemma4RMSNorm`, which is float32 inside with
   one rounding), and the MLP's `gelu_approx` on bf16 rounded after every
   step (torch's gelu_pytorch_tanh computes in float32, rounds once).
-  `RMSNorm` now casts to float32 around the fused kernel and `gelu_mul`
-  computes the gelu in float32. The tower runs once per image, so the
-  unfused norm's cost (measured +6-9% on text decode, where it is not
-  taken: ../architecture/PROVENANCE.md) does not matter here. Held by
+  `EncoderRMSNorm` now casts to float32 around the fused kernel and
+  `gelu_mul` computes the gelu in float32. The tower runs once per image,
+  so the float32 casts' cost does not matter here (text decode keeps the
+  bf16 kernel: ../architecture/PROVENANCE.md). Held by
   `test_the_encoder_norm_rounds_where_the_reference_does` and
   `test_the_encoder_mlp_activation_rounds_where_the_reference_does`
   (HF's ops in bf16, `gemma4_text.npz` `ops/*`).

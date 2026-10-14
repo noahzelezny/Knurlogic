@@ -223,9 +223,9 @@ def test_the_encoder_norm_rounds_where_the_reference_does():
     """HF's Gemma4RMSNorm in bf16: float32 inside, one rounding (knurlogic
     edit 7; mx.fast.rms_norm on bf16 left a quarter of these a step
     off)."""
-    from knurlogic.engine.families.gemma4.vision.vision import RMSNorm
+    from knurlogic.engine.families.gemma4.vision.vision import EncoderRMSNorm
     bf16 = _ops()
-    norm = RMSNorm(1024, eps=1e-6)
+    norm = EncoderRMSNorm(1024, eps=1e-6)
     norm.weight = bf16("ops/w")
     got = np.array(norm(bf16("ops/x")).astype(mx.float32))
     want = np.array(bf16("ops/norm").astype(mx.float32))
