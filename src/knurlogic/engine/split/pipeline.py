@@ -26,18 +26,14 @@ import mlx.core as mx
 import mlx.nn as nn
 from mlx.utils import tree_flatten
 
+from knurlogic.engine.model.trunk import _Wrap, core_of
+
 logger = logging.getLogger(__name__)
 
 _DTYPES = (mx.float32, mx.bfloat16, mx.float16)
 
 
 # ------------------------------------------------------------------ split
-
-def core_of(model):
-    """The trunk core holding `layers` (qwen3_5 / glm5_next:
-    model.language_model.model; qwen4_exp / deepseek_v4: model.model)."""
-    return getattr(model, "language_model", model).model
-
 
 def _stages() -> dict:
     """trunk core class name -> {"name": architecture, "restage":
@@ -68,30 +64,6 @@ def own_dtype(layer) -> mx.Dtype:
         if isinstance(p, mx.array) and p.dtype in (mx.bfloat16, mx.float16):
             return p.dtype
     return mx.float32
-
-
-class _Wrap(nn.Module):
-    def __init__(self, inner):
-        super().__init__()
-        self.inner = inner
-
-    def __getattr__(self, name):
-        try:
-            return super().__getattr__(name)
-        except AttributeError:
-            if "inner" not in self:
-                raise
-            return getattr(self["inner"], name)
-
-
-def unwrap(layer):
-    """The layer a stage end wraps (`Recv` / `Send`, possibly both on a
-    one-layer stage), or `layer` itself. Attribute reads already see through
-    a wrapper; `type(...)` and `isinstance(...)` do not, so code that asks
-    what class a layer is asks this first."""
-    while isinstance(layer, _Wrap):
-        layer = layer["inner"]
-    return layer
 
 
 class Carried:

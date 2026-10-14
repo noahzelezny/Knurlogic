@@ -28,6 +28,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from knurlogic.engine.model.trunk import first_attr
 from knurlogic.engine.vision import EncodedImage, ImageRef, VisionSpec, proc_hash
 
 from .processor import IMAGE, IMAGE_PAD, VisionArgs, compress_pad, image_block
@@ -242,16 +243,9 @@ class DeepseekVisionFamily:
     @staticmethod
     def _core(model):
         """The trunk's DeepseekV4Model (it owns `embed`)."""
-        for path in ("model", "language_model.model", "_model.model"):
-            obj = model
-            try:
-                for part in path.split("."):
-                    obj = getattr(obj, part)
-            except AttributeError:
-                continue
-            if hasattr(obj, "embed") and hasattr(obj, "vocab_size"):
-                return obj
-        raise AttributeError("no deepseek_v4 trunk core with embed() found")
+        return first_attr(
+            model, ("model", "language_model.model", "_model.model"),
+            accept=lambda c: hasattr(c, "embed") and hasattr(c, "vocab_size"))
 
     def embed(self, model, key, start, features) -> dict[str, Any]:
         import mlx.core as mx

@@ -28,7 +28,7 @@ from mlx.utils import tree_flatten, tree_unflatten
 from mlx_lm.models.base import create_attention_mask
 
 from knurlogic.engine.model import weight_files
-from knurlogic.engine.split.pipeline import unwrap
+from knurlogic.engine.model.trunk import unwrap
 
 SIDECAR_NAME = "mtp-head-q6.safetensors"
 

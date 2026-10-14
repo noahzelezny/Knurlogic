@@ -60,6 +60,7 @@ import mlx.nn as nn
 from mlx.utils import tree_flatten
 
 from knurlogic.engine.model import weight_files
+from knurlogic.engine.model.trunk import text_model
 
 from .deepseek_v4 import _recipe
 
@@ -344,7 +345,7 @@ class DSparkHead:
     `block_size` tokens per pass (engine/mtp/block_loop.BlockBatch)."""
 
     def __init__(self, model, arch):
-        text = getattr(model, "language_model", model)
+        text = text_model(model)
         core = text.model
         args = core.args
         if int(getattr(args, "dspark_block_size", 0) or 0) <= 0:

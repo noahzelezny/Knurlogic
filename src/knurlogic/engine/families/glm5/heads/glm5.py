@@ -27,6 +27,7 @@ import mlx.nn as nn
 from mlx.utils import tree_flatten, tree_unflatten
 
 from knurlogic.engine.model import weight_files
+from knurlogic.engine.model.trunk import text_model
 
 _GLUE = ("eh_proj", "enorm", "hnorm", "shared_head")
 
@@ -35,7 +36,7 @@ class MTPHeadGlm5:
     """One drafting head bound to a loaded glm5_next trunk."""
 
     def __init__(self, model, arch):
-        lang = getattr(model, "language_model", model)
+        lang = text_model(model)
         core = lang.model
         cfg = core.config
         self.model = lang

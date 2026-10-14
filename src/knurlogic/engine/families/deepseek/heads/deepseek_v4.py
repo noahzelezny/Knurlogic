@@ -51,7 +51,7 @@ import mlx.nn as nn
 from mlx.utils import tree_flatten, tree_unflatten
 
 from knurlogic.engine.model import weight_files
-from knurlogic.engine.split.pipeline import unwrap
+from knurlogic.engine.model.trunk import unwrap
 
 SIDECAR_NAME = "mtp-head-mxfp4.safetensors"
 PREFIX = "mtp.0."

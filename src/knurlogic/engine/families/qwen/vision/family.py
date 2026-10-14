@@ -26,6 +26,7 @@ from knurlogic.engine.vision import (EncodedImage, ImageRef, VisionError,
 from knurlogic.engine.vision import key as K
 from knurlogic.engine.vision.quant import artifact_quantization, quantize_like
 from knurlogic.engine.vision.scatter import merge
+from knurlogic.engine.model.trunk import first_attr
 
 from .processing import ImageProcessor, image_kwargs
 from .rope_index import rope_index
@@ -194,16 +195,8 @@ class QwenFamily:
 
     @staticmethod
     def _embed_tokens(model):
-        for path in ("language_model.model.embed_tokens",   # qwen3_5, _moe
-                     "model.embed_tokens"):                  # qwen4_exp
-            obj = model
-            try:
-                for part in path.split("."):
-                    obj = getattr(obj, part)
-                return obj
-            except AttributeError:
-                continue
-        raise AttributeError("no embed_tokens on the Qwen trunk")
+        return first_attr(model, ("language_model.model.embed_tokens",  # qwen3_5
+                                  "model.embed_tokens"))                # qwen4_exp
 
     def embed(self, model, key: List[Any], start: int, features):
         sl = list(key[start:])

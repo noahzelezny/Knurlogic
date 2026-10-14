@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from knurlogic.engine.model import weight_files
+from knurlogic.engine.model.trunk import first_attr
 from knurlogic.engine.vision import EncodedImage, ImageRef, VisionSpec, proc_hash
 
 _PATCH_PREFIX = "vision_model."
@@ -233,16 +234,8 @@ class Glm5VisionFamily:
         GLM text-only, or the multimodal `Model` (`.language_model.model.
         embed_tokens`) if ever built directly. Try both rather than assume
         one, the same defensiveness `fixtures_vision.StubFamily` uses."""
-        for path in ("language_model.model.embed_tokens",
-                     "model.embed_tokens", "embed_tokens"):
-            obj = model
-            try:
-                for part in path.split("."):
-                    obj = getattr(obj, part)
-                return obj
-            except AttributeError:
-                continue
-        raise AttributeError("no embed_tokens found on the glm5_next model")
+        return first_attr(model, ("language_model.model.embed_tokens",
+                                  "model.embed_tokens", "embed_tokens"))
 
     def embed(self, model, key, start, features) -> dict[str, Any]:
         import mlx.core as mx

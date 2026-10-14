@@ -24,6 +24,7 @@ import mlx.nn as nn
 from mlx.utils import tree_flatten, tree_unflatten
 
 from knurlogic.engine.model import weight_files
+from knurlogic.engine.model.trunk import text_model
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +72,7 @@ class MTPHeadQwen35:
         if h_source not in ("pre_norm", "post_norm"):
             raise ValueError(f"h_source must be 'pre_norm' or 'post_norm', "
                              f"got {h_source!r}")
-        text = getattr(model, "language_model", model)
+        text = text_model(model)
         self.model = model
         self.text = text
         self.core = text.model

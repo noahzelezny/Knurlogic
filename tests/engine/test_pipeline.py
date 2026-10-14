@@ -593,8 +593,9 @@ def _tiny(family):
 def _stage(model, start, end, *, recv, send):
     """`model` as the pipeline stage holding layers [start, end), its ends
     wrapped the way split() wraps them (no ring: nothing is called)."""
+    from knurlogic.engine.model import trunk
     from knurlogic.engine.split import pipeline as PL
-    keep = list(PL.core_of(model).layers)[start:end]
+    keep = list(trunk.core_of(model).layers)[start:end]
     if recv:
         keep[0] = PL.Recv(keep[0], 1, None, mx.float32)
     if send:
@@ -606,10 +607,11 @@ def _stage(model, start, end, *, recv, send):
 def test_unwrap_sees_through_both_ends_of_a_one_layer_stage():
     import mlx.nn as nn
 
+    from knurlogic.engine.model import trunk
     from knurlogic.engine.split import pipeline as PL
     lin = nn.Linear(2, 2)
     both = PL.Send(PL.Recv(lin, 1, None, mx.float32), 0, None, mx.float32)
-    assert PL.unwrap(both) is lin and PL.unwrap(lin) is lin
+    assert trunk.unwrap(both) is lin and trunk.unwrap(lin) is lin
     assert type(both) is not nn.Linear and both.weight is lin.weight
 
 
@@ -649,9 +651,9 @@ def test_the_flash_next_head_binds_on_any_stage(start, end, recv, send):
     import importlib
 
     from knurlogic.engine.families.qwen.heads.qwen4_exp import MTPHead
-    from knurlogic.engine.split import pipeline as PL
+    from knurlogic.engine.model import trunk
     model = _stage(_tiny("qwen4_exp"), start, end, recv=recv, send=send)
-    core = PL.core_of(model)
+    core = trunk.core_of(model)
     arch = importlib.import_module(type(core).__module__)
     head = MTPHead(model, arch)
     assert type(head.block) is arch.DecoderLayer
@@ -674,9 +676,10 @@ def test_restage_reads_the_layer_kinds_through_the_stage_ends(family):
     the tiny models' layers 0-2 are linear and layer 3 full attention, so
     the stage [2, 4) with both ends wrapped has its recurrent cache at 0 and
     its attention cache at 1."""
+    from knurlogic.engine.model import trunk
     from knurlogic.engine.split import pipeline as PL
     model = _stage(_tiny(family), 2, 4, recv=True, send=True)
-    core = PL.core_of(model)
+    core = trunk.core_of(model)
     assert (core.ssm_idx, core.fa_idx) == (0, 1)
     assert isinstance(core.layers[0], PL.Recv)
     assert isinstance(core.layers[1], PL.Send)

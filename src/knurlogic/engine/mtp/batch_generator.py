@@ -25,6 +25,7 @@ import mlx.core as mx
 from mlx_lm.generate import BatchGenerator, GenerationBatch, PromptProcessingBatch
 from mlx_lm.models.cache import make_prompt_cache
 
+from knurlogic.engine.model.trunk import core_of, text_model
 from knurlogic.engine.prompt_cache import report as cachereport
 from knurlogic.engine.runtime.control_tokens import stop_machine
 
@@ -209,8 +210,7 @@ class MTPBatchGenerator(BatchGenerator):
         if head is not None:
             spec = resolve(model)
             arch = spec.arch_module(model)
-            core = getattr(getattr(model, "language_model", model), "model",
-                           None)
+            core = getattr(text_model(model), "model", None)
             if core is None:
                 raise RuntimeError(
                     f"{type(model).__name__} exposes neither `.model` nor "
@@ -313,7 +313,7 @@ class MTPBatchGenerator(BatchGenerator):
                                  copy_caches=b.copy_caches,
                                  block_size=block_size)
         self._batch.finish_at = self._finish_at
-        core = PL.core_of(self.model)
+        core = core_of(self.model)
         if PL.run_of(core) is not None and outputs:
             self._stack.enter_context(PL.carry(core, outputs))
 
@@ -323,7 +323,7 @@ class MTPBatchGenerator(BatchGenerator):
         prefill chunk of a drafting row, and under tensor it holds the last
         layer's all_sum; left lazy here, the ranks' collectives part."""
         spec = resolve(self.model)
-        core = getattr(self.model, "language_model", self.model).model
+        core = core_of(self.model)
         self._batch.get_h = self._stack.enter_context(
             capture_input(core, spec.capture))
 

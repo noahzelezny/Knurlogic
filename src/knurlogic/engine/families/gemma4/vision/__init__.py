@@ -26,6 +26,7 @@ from knurlogic.engine.vision.key import Span, image_spans, is_sentinel, to_ids
 from knurlogic.engine.vision.scatter import merge as scatter_merge
 from .config import VisionConfig
 from knurlogic.engine.vision.quant import artifact_quantization, quantize_like
+from knurlogic.engine.model.trunk import core_of
 from .vision import VisionModel
 
 PATCH = 16
@@ -225,7 +226,7 @@ class Gemma4Vision:
         ids = mx.array(to_ids(sl, self.image_token_id))[None]
         # The served model is the gemma4 wrapper (text under
         # .language_model); tests hand the bare gemma4_text Model.
-        core = getattr(model, "language_model", model).model
+        core = core_of(model)
         embed_tokens = core.embed_tokens
         text_embeds = embed_tokens(ids)                          # unscaled
         input_embeddings = scatter_merge(text_embeds, sl, features)
