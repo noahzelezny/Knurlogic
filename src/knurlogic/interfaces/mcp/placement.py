@@ -2,10 +2,10 @@
 role words as well as names and ids, so an agent on anyone's Mac can say
 where without knowing what the Macs are called.
 
-  here    this Mac (the page's `me`)
-  peers   every peer answering this Mac's page
+  here    this machine (the page's `me`)
+  peers   every peer answering this machine's page
   all     here + peers
-  fit     this Mac if the model fits here (the `fit` tool's check), else the
+  fit     this machine if the model fits here (the `fit` tool's check), else the
           smallest set of answering Macs it fits on (cluster/launch's
           placement, the decision the page's Launch makes); alone only
 
@@ -70,7 +70,7 @@ def resolve_machines(words: list[str], artifact: str = "", split: str = "",
                                   "or other roles")
         return fit_machines(artifact, split, draft, vision)
     if set(low) == {"here"}:
-        return [], split, None      # this Mac alone: the empty list, no page
+        return [], split, None      # this machine alone: the empty list, no page
     st = page_client.page_get("/status.json")
     ms = _machines(st)
     me, peers = ms[0], ms[1:]
@@ -83,7 +83,7 @@ def resolve_machines(words: list[str], artifact: str = "", split: str = "",
             if not up:
                 seen = [f"{p['name']} ({p['state']})" for p in peers]
                 return [], split, _no(
-                    f"{lw}: no peer is answering this Mac's page",
+                    f"{lw}: no peer is answering this machine's page",
                     machines=([me["name"]] + seen))
             picked += ([me["id"]] if lw == "all" else []) \
                 + [p["id"] for p in up]
@@ -96,15 +96,15 @@ def resolve_machines(words: list[str], artifact: str = "", split: str = "",
     ids = sorted(dict.fromkeys(picked),
                  key=lambda i: order.index(i) if i in order else len(order))
     if ids == [me["id"]]:
-        return [], split, None      # resolved to this Mac alone: load here
+        return [], split, None      # resolved to this machine alone: load here
     return ids, (split or DEFAULT_SPLIT) if len(ids) >= 2 else split, None
 
 
 def fit_machines(artifact: str, split: str = "", draft: bool = True,
                  vision: bool = True) -> tuple:
-    """(ids, split, refusal) for `fit`: [] (this Mac, no page needed) when
+    """(ids, split, refusal) for `fit`: [] (this machine, no page needed) when
     the `fit` tool says it fits here; else the smallest set of answering
-    Macs cluster/launch.placement places it on -- this Mac and the peers
+    Macs cluster/launch.placement places it on -- this machine and the peers
     in page order, the first set of each size tried first."""
     from knurlogic.interfaces.mcp import inspection
     split = split or DEFAULT_SPLIT
@@ -118,8 +118,8 @@ def fit_machines(artifact: str, split: str = "", draft: bool = True,
         return [], split, None
     path = _local_path(artifact)
     if not path:
-        return [], split, _no("fit measures the model from this Mac's "
-                              "copy, and this Mac has none",
+        return [], split, _no("fit measures the model from this machine's "
+                              "copy, and this machine has none",
                               note=f"name the machines for {artifact!r}")
     st = page_client.page_get("/status.json")
     up = [m for m in _machines(st) if m["state"] == "answering"
@@ -136,7 +136,7 @@ def fit_machines(artifact: str, split: str = "", draft: bool = True,
     from knurlogic.tuning.knobs import mtp_of, vision_of
     sets = {**({} if draft else {"KNURLOGIC_MTP": "off"}),
             **({} if vision else {"KNURLOGIC_VISION": "off"})}
-    last = f"{here.get('verdict', 'will not fit')} on this Mac"
+    last = f"{here.get('verdict', 'will not fit')} on this machine"
     for k in range(2, len(up) + 1):
         try:
             shape = launch.shape_of(path, k, split, vision=vision_of(sets),

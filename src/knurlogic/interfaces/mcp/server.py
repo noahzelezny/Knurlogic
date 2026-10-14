@@ -14,7 +14,7 @@ SERVER_VERSION = "0"
 #: sent in the initialize result: how to drive these tools, for a model
 #: that has nothing else to read
 INSTRUCTIONS = (
-    "knurlogic manages local MLX models on this Mac and the Macs its page "
+    "knurlogic manages local MLX models on this machine and the Macs its page "
     "sees. The loop: `models` (what is on disk and whether it fits) -> "
     "`fit` (will this artifact fit now, with the arithmetic) -> "
     "`settings` (the resolved knobs and why) -> `ready` (is it safe to "
@@ -27,7 +27,7 @@ INSTRUCTIONS = (
     "shown), or exited (exit code and log tail). Once serving, the model "
     "answers OpenAI and Anthropic Messages requests at "
     "http://<machine>:<port>/v1 (the port and leader `load` returned; "
-    "127.0.0.1 for this Mac). `deps` says "
+    "127.0.0.1 for this machine). `deps` says "
     "which mlx builds are installed. No tool deletes or modifies model "
     "files. The levers, when a load does not fit or runs short of memory: "
     "`load`'s tune (`default`, fastest; `lean`, 512-token prompt chunks, MTP "

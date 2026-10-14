@@ -30,6 +30,7 @@ from knurlogic.interfaces.page import (
     prompt_cache,
     relay,
     router,
+    running,
 )
 from knurlogic.interfaces.ports import MODEL_PORT, PAGE_PORT
 from knurlogic.machine import identity
@@ -319,13 +320,15 @@ def serve_ui(host: str, port: int, serve_port: int, peers=(),
     reachable = host not in ("127.0.0.1", "localhost", "::1")
     nodes.PEERS = Peers(me, port, manual=peers, reachable=reachable).start()
     nodes.start_discovery(me, host, port, reachable)
+    loaded = loads.loaded_fn()
     routes = documents.routes(
         status_fn=nodes.status_fn,
         settings_fn=documents.machine_settings(split_room=loads.room_across),
         models_fn=documents.models_document(serving="",
                                             flagged=updates.flagged),
-        loaded_fn=loads.loaded_fn(),
+        loaded_fn=loaded,
         load_fn=loads.load_fn(serve_port))
+    routes[running.RUNNING_PATH] = running.route(loaded)
     # /status.json?light=1: the liveness document every peer polls
     full_status = routes["/status.json"]
     routes["/status.json"] = lambda q, _n=0: (

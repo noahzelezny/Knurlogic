@@ -21,7 +21,7 @@ SCAN = 200
 #: what a runnable repo needs; the rest (READMEs, images) is left behind
 WANTED = ("*.json", "*.safetensors", "*.txt", "*.model", "*.jinja",
           "*.tiktoken")
-GATED_HINT = "run `hf auth login` on this Mac with an account that has access"
+GATED_HINT = "run `hf auth login` on this machine with an account that has access"
 
 _DOWNLOADS: dict = {}
 _LOCK = threading.RLock()

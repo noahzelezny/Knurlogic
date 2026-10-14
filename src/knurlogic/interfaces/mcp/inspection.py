@@ -1,4 +1,4 @@
-"""The MCP's read-only tools: what this Mac can do and what it holds.
+"""The MCP's read-only tools: what this machine can do and what it holds.
 
 ready (is it safe to load now), fit (will this artifact fit, with the
 arithmetic), state (what is loaded, here and on the peers the page sees),
@@ -159,7 +159,7 @@ def _vision_terms(vb) -> dict[str, Any] | None:
 
 def state(**_) -> dict[str, Any]:
     """What is loaded on this machine, in every runtime, and where the RAM
-    went -- plus `models`: every model resident on this Mac and the peers
+    went -- plus `models`: every model resident on this machine and the peers
     answering its page, a cluster job once."""
     from knurlogic.machine import loaded
     doc = loaded.survey()
@@ -167,23 +167,21 @@ def state(**_) -> dict[str, Any]:
     from knurlogic.engine.vision import served_vision
     from knurlogic.interfaces import spawn
     spec = served_vision()
-    # across machines: what the page on this Mac sees (its own residency and
-    # each answering peer's). Without the page, this Mac's survey alone.
+    # across machines: the page's /running.json (its own residency and
+    # each answering peer's). Without the page, this machine's survey alone.
+    from knurlogic.interfaces.page import running
     try:
-        page = page_client.page_get("/loaded.json?peers=1")
-    except page_client.PageDown as e:
-        page, page_note = None, str(e)
-    else:
+        across = page_client.page_get(running.RUNNING_PATH)
         page_note = ""
-    here = page_client.me_name()
-    everywhere = page_client.models_across(
-        page if page is not None else {"resident": doc.get("resident", [])},
-        here)
+    except page_client.PageDown as e:
+        across = running.document({"resident": doc.get("resident", [])})
+        page_note = str(e)
+    everywhere = across.get("models") or []
     return {
         # one entry per model: a cluster job once, on its leader, with its
         # machines, split, link, job and rank 0's `requests`
         "models": everywhere,
-        "machines": page_client.machines_of(page, here),
+        "machines": across.get("machines") or [],
         **({"page": page_note} if page_note else {}),
         "resident": doc.get("resident", []),
         "runtimes": doc.get("runtimes", []),
@@ -240,7 +238,7 @@ def models(fits_only: bool = False, **_) -> dict[str, Any]:
 
 
 def model_folders(add: str = "", remove: str = "", **_) -> dict[str, Any]:
-    """The model folders this Mac remembers; `add` or `remove` one."""
+    """The model folders this machine remembers; `add` or `remove` one."""
     from pathlib import Path
 
     from knurlogic.machine import folders

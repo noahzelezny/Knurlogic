@@ -70,8 +70,8 @@ def test_a_killed_rank_comes_back(two_pages, monkeypatch):
         assert job["recovery"]["attempts"] == 1
         assert R.served_view(p.port, True)["state"] == "recovered"
         # the MCP's models: one entry, carrying it
-        from knurlogic.interfaces.mcp import page_client
-        ms = page_client.models_across(doc, "A")
+        from knurlogic.interfaces.page import running
+        ms = running.models_across(doc, "A")
         assert [m["recovery"]["state"] for m in ms] == ["recovered"]
     finally:
         if new:
@@ -125,8 +125,8 @@ def test_out_of_memory_is_failed_not_relaunched(two_pages, monkeypatch):
     # MCP's models
     down = page_loads.with_jobs({"resident": []})["recovery"]
     assert [d["state"] for d in down] == ["failed"]
-    from knurlogic.interfaces.mcp import page_client
-    ms = page_client.models_across({"resident": [], "recovery": down}, "A")
+    from knurlogic.interfaces.page import running
+    ms = running.models_across({"resident": [], "recovery": down}, "A")
     assert ms[0]["state"] == "failed" and ms[0]["machines"] == ["A", "B"]
 
 

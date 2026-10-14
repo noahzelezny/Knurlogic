@@ -19,7 +19,7 @@ function wiredHTML(doc, m){
   const cur=doc.wired_current_gib, rec=doc.wired_recommended_gib,
         inst=doc.wired_installed_gib, tgt=doc.wired_target_gib??cur;
   const host=own?'':(m.page||'').replace(/^https?:\/\//,'').replace(/:\d+$/,'');
-  const run=own ? 'Run this in Terminal on this Mac. sudo asks for its admin password; it lasts until the Mac restarts.'
+  const run=own ? 'Run this in Terminal on this machine. sudo asks for its admin password; it lasts until the Mac restarts.'
     : `Run this in Terminal on ${esc(m.name)} (on it, or over ssh ${esc(host)}). sudo asks for that Mac's admin password; knurlogic cannot run it for you, and it lasts until that Mac restarts.`;
   return `<div class="wired">
     <div class="sidelab" style="margin-top:0">wired limit · ${esc(w.key)}</div>
@@ -76,7 +76,7 @@ function factsHTML(n){
 // that peer's page to set its own (each Mac keeps its allowance itself).
 function allowHTML(a, m, own){
   const head='<div class="sidelab">knurlogic allowance<i class="info down" tabindex="0">i<span class="bub">'
-    +'The most memory knurlogic may use on this Mac. Models are loaded only if they fit under it; '
+    +'The most memory knurlogic may use on this machine. Models are loaded only if they fit under it; '
     +'the rest stays free for everything else on the machine.</span></i></div>';
   if(!a) return `<div class="allow">${head}<div class="msg">${own?'not read':
     'not reported: that machine\'s knurlogic predates the allowance'}</div></div>`;

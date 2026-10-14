@@ -140,7 +140,7 @@ def main(argv=None) -> int:
     p.add_argument("artifact", nargs="?",
                    help="the artifact to check (not needed with --cluster)")
     p.add_argument("--cluster", action="store_true",
-                   help="check what stops this Mac and the others finding "
+                   help="check what stops this machine and the others finding "
                         "each other: addresses, firewall, Bonjour, peers. "
                         "Run it on each Mac.")
     p.add_argument("--port", type=int, default=PAGE_PORT,
