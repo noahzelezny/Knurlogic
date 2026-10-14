@@ -31,6 +31,7 @@ from pathlib import Path
 
 import numpy as np
 
+from knurlogic.engine.model import weight_files
 from knurlogic.machine.artifact import safetensors_layout
 from knurlogic.machine.units import gib
 
@@ -52,9 +53,8 @@ class _Source:
 
     def __init__(self, root: Path):
         self.root = Path(root)
-        idx = json.loads((self.root / "model.safetensors.index.json")
-                         .read_text())["weight_map"]
-        self.files = {k: v for k, v in idx.items() if k.startswith("mtp.")}
+        self.files = {k: v for k, v in weight_files.weight_map(self.root).items()
+                      if k.startswith("mtp.")}
         self._hdr: dict = {}
 
     def meta(self, name: str) -> tuple[dict, Path, int]:

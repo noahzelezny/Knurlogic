@@ -20,7 +20,7 @@ import numpy as np
 
 from knurlogic.engine.model import weight_files
 from knurlogic.engine.model.added_tokens import added_tokens
-from knurlogic.engine.model.packed import artifact_quantization, quantize_like
+from knurlogic.engine.model.packed import quantize_like
 from knurlogic.engine.vision import (
     EncodedImage,
     Family,
@@ -126,7 +126,7 @@ class QwenVision(Family):
         weights = tower.sanitize(weights)
         dtype = next(iter(weights.values())).dtype
         tower.set_dtype(dtype)
-        quantize_like(tower, weights, artifact_quantization(model_path).get("mode"))
+        quantize_like(tower, weights, model_path)
         tower.load_weights(list(weights.items()), strict=True)
         tower.eval()
         mx.eval(tower.parameters())

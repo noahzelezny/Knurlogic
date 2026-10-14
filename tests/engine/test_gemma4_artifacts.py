@@ -42,7 +42,7 @@ def test_stop_tokens_are_the_generation_configs(art):
 def test_the_tool_parser_is_inferred_as_gemma4(art):
     """The template's <|tool_call> ... <tool_call|> names mlx-lm's gemma4
     parser (mlx_lm.tokenizer_utils._infer_tool_parser, through
-    engine/model/load.tool_support); a tokenizer_config.json
+    engine/model/loading.tool_support); a tokenizer_config.json
     tool_parser_type, which mlx-lm reads before inferring (the 26B VQ
     artifact sets one), names the same parser."""
     pytest.importorskip("mlx_lm")

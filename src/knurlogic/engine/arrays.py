@@ -16,7 +16,9 @@ def arrays_of(root, unique: bool = False, limit: int = 2_000_000) -> list:
     dicts (an nn.Module is one), lists, tuples, sets and plain objects'
     attributes -- so also arrays in "_"-named attributes and helper objects
     that nn.Module.parameters() skips (a bundled model.py's VQ codebooks).
-    Cycle-safe; `limit` bounds the objects visited."""
+    Cycle-safe; `limit` bounds the objects visited. Callers pass a cache or
+    other bounded holder, never an object that holds the model (the walk
+    would list every weight)."""
     import mlx.core as mx
     seen: set = set()
     found: list = []

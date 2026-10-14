@@ -43,7 +43,7 @@ class RMSNormNoScale(nn.Module):
 
     square = staticmethod(_power_square)
 
-    def __init__(self, dim: int | None = None, eps: float = 1e-6):
+    def __init__(self, dim: int | None = None, *, eps: float = 1e-6):
         super().__init__()
         self.eps = eps
 

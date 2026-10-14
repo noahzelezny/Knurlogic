@@ -22,13 +22,9 @@ import mlx.core as mx
 import mlx.nn as nn
 from mlx.utils import tree_flatten
 
-from knurlogic.engine.model import weight_files
 from knurlogic.engine.model.trunk import text_model
 from knurlogic.engine.mtp.head_base import (
     GraftHead,
-    fill,
-    mixed_predicate,
-    read_recipe,
     save_sidecar,
 )
 
@@ -151,12 +147,10 @@ class Qwen35Head(GraftHead):
         mx.eval(self.block.parameters())
         return self
 
-    def quantize(self, bits=6, group_size=32, expert_bits=None):
-        eb = bits if expert_bits is None else expert_bits
-        nn.quantize(self.block, class_predicate=mixed_predicate(
-            bits, eb, group_size, _KEEP_FP))
-        mx.eval(self.block.parameters())
-        return self
+    KEEP_FP = _KEEP_FP
+
+    def _modules(self):
+        return {"block": self.block}
 
     # ------------------------------------------------------------- sidecar
     def _config(self, bits, group_size, expert_bits):
@@ -178,8 +172,13 @@ class Qwen35Head(GraftHead):
                             self._config(bits, group_size, expert_bits))
 
     @classmethod
-    def from_sidecar(cls, model, arch, path):
-        w = weight_files.load(path)
+    def _from_recipe(cls, model, arch, recipe):
+        return cls(model, arch,
+                   fc_order=recipe.get("fc_order", "eh"),
+                   h_source=recipe.get("h_source", "pre_norm"),
+                   norm_shift=recipe.get("norm_shift", 1.0))
+
+    def _sidecar_tensors(self, w):
         # Older sidecars store the shifted norm gains in
         # float32 (the accumulate dtype leaked into the file). Seven tensors
         # — the two layernorms, q_norm/k_norm, and the three pre-fc norms —
@@ -187,32 +186,19 @@ class Qwen35Head(GraftHead):
         # head_dim 256 exceeds Metal's 32 KB threadgroup cap and aborts the
         # runner with "Unable to load kernel steel_attention_float32_...".
         # Everything else in the head is bf16, so follow it.
-        _dt = w["fc.weight"].dtype
-        if _dt != mx.float32:
-            w = {k: (v.astype(_dt) if v.dtype == mx.float32 else v)
-                 for k, v in w.items()}
-        cfg = read_recipe(path)
-        head = cls(model, arch,
-                   fc_order=cfg.get("fc_order", "eh"),
-                   h_source=cfg.get("h_source", "pre_norm"),
-                   norm_shift=cfg.get("norm_shift", 1.0))
-        bits, gs = cfg.get("bits"), cfg.get("group_size", 32)
-        if bits:
-            # Replay the recipe exactly: a mixed-bit sidecar rebuilt as
-            # uniform gives every expert tensor the wrong packed shape.
-            eb = cfg.get("expert_bits") or bits
-            nn.quantize(head.block,
-                        class_predicate=mixed_predicate(bits, eb, gs,
-                                                        _KEEP_FP))
-        fill(head.block, w, "block.")
+        dt = w["fc.weight"].dtype
+        if dt == mx.float32:
+            return w
+        return {k: (v.astype(dt) if v.dtype == mx.float32 else v)
+                for k, v in w.items()}
+
+    def _fill_rest(self, w):
         # The shift is baked into the stored tensors; pass 0.0 so loading a
         # sidecar can never double-count it.
-        head.norm_e = head._norm(w["norm_e.weight"], 0.0)
-        head.norm_h = head._norm(w["norm_h.weight"], 0.0)
-        head.norm_out = head._norm(w["norm_out.weight"], 0.0)
-        head.fc = w["fc.weight"]
-        mx.eval(head.block.parameters())
-        return head
+        self.norm_e = self._norm(w["norm_e.weight"], 0.0)
+        self.norm_h = self._norm(w["norm_h.weight"], 0.0)
+        self.norm_out = self._norm(w["norm_out.weight"], 0.0)
+        self.fc = w["fc.weight"]
 
     # --------------------------------------------------------------- draft
     def _trunk(self, h_row, nxt_id, cache=None):

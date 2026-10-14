@@ -55,12 +55,12 @@ def one_hot(indices: mx.array, num_classes: int) -> mx.array:
     return (mx.expand_dims(indices, -1) == mx.arange(num_classes)).astype(mx.float32)
 
 
-class RMSNorm(nn.Module):
+class EncoderRMSNorm(nn.Module):
     """The encoder layers' norms. knurlogic edit 7: HF's Gemma4RMSNorm --
     (x * rsqrt(mean(x^2) + eps)) * w in float32, rounded once to the
-    working dtype; mx.fast.rms_norm rounds x * rsqrt first and again after
-    the weight (a quarter of bf16 elements a step off). The tower runs once
-    per image, so the unfused form costs nothing that matters."""
+    working dtype. The fused mx.fast.rms_norm runs on float32 inputs here;
+    on bf16 it rounds x * rsqrt first and again after the weight (a
+    quarter of bf16 elements a step off)."""
 
     def __init__(self, dim: int, eps: float = 1e-6):
         super().__init__()
@@ -193,13 +193,11 @@ class VisionTransformerBlock(nn.Module):
         super().__init__()
         self.self_attn = VisionAttention(config)
         self.mlp = VisionMLP(config)
-        self.input_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-        self.post_attention_layernorm = RMSNorm(config.hidden_size,
-                                                eps=config.rms_norm_eps)
-        self.pre_feedforward_layernorm = RMSNorm(config.hidden_size,
-                                                 eps=config.rms_norm_eps)
-        self.post_feedforward_layernorm = RMSNorm(config.hidden_size,
-                                                  eps=config.rms_norm_eps)
+        eps = config.rms_norm_eps
+        self.input_layernorm = EncoderRMSNorm(config.hidden_size, eps=eps)
+        self.post_attention_layernorm = EncoderRMSNorm(config.hidden_size, eps=eps)
+        self.pre_feedforward_layernorm = EncoderRMSNorm(config.hidden_size, eps=eps)
+        self.post_feedforward_layernorm = EncoderRMSNorm(config.hidden_size, eps=eps)
 
     def __call__(self, x: mx.array, positions: mx.array,
                  mask: Optional[mx.array] = None) -> mx.array:

@@ -382,11 +382,11 @@ def _prefill_chunk(model, head, get_h, chunk, cache, dcache, kw: dict,
         # Evaluate the cache and the captured hidden state, never the
         # logits: forcing them would materialise the lm_head projection for
         # every prompt position (loop.py says the same).
-        want = [c.state for c in cache if hasattr(c, "state")]
+        want = arrays_of(cache)
         kept = None
         if block:
             head.advance(get_h(), dcache)
-            want += dcache.state
+            want += arrays_of(dcache)
         elif drafts:
             kept = get_h()
             want.append(kept)
@@ -409,7 +409,7 @@ def _enter_decoding(head, get_h, ids, t1, dcache, h_chunks: list,
     None."""
     if block:
         head.advance(get_h(), dcache)
-        mx.eval(t1, dcache.state)
+        mx.eval(t1, arrays_of(dcache))
         return None
     if not drafts:
         mx.eval(t1)

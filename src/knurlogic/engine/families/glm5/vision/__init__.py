@@ -124,8 +124,8 @@ class Glm5Vision(Family):
         if not weights:
             return 0
         weights = tower.sanitize(weights)
-        from knurlogic.engine.model.packed import artifact_quantization, quantize_like
-        quantize_like(tower, weights, artifact_quantization(model_path).get("mode"))
+        from knurlogic.engine.model.packed import quantize_like
+        quantize_like(tower, weights, model_path)
         tower.update(tree_unflatten(list(weights.items())))
         mx.eval(tower.parameters())
         return len(weights)

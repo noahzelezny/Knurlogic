@@ -30,13 +30,15 @@ def artifact_quantization(model_path) -> dict[str, Any]:
     return cfg.get("quantization") or cfg.get("quantization_config") or {}
 
 
-def recipe(weights: dict, path: str, mod, mode: str | None = None
-           ) -> dict | None:
+def recipe(weights: dict, path: str, mod, quant: dict | None = None,
+           prefix: str = "") -> dict | None:
     """The to_quantized kwargs the packed `path` in `weights` was written
-    with, or None when it is not packed (or `mod` cannot quantize). `mode`
-    names the scaled mode of a layer without biases when the artifact says
-    which; otherwise mxfp4 / mxfp8 by bit width. `weights` may hold anything
-    with a `.shape` (a header's shapes check a file without loading it)."""
+    with, or None when it is not packed (or `mod` cannot quantize). `quant`
+    is the artifact's quantization block: a layer without biases takes the
+    mode of its own entry there (`prefix + path`, e.g. an nvfp4 layer under
+    an mxfp4 top level), else the block's top-level mode, else mxfp4 /
+    mxfp8 by bit width. `weights` may hold anything with a `.shape` (a
+    header's shapes check a file without loading it)."""
     s = weights.get(f"{path}.scales")
     if s is None or not hasattr(mod, "to_quantized"):
         return None
@@ -46,6 +48,10 @@ def recipe(weights: dict, path: str, mod, mode: str | None = None
     if f"{path}.biases" in weights:
         kind = "affine"
     else:
+        quant = quant or {}
+        layer = quant.get(prefix + path)
+        mode = ((layer.get("mode") if isinstance(layer, dict) else None)
+                or quant.get("mode"))
         kind = (mode if mode not in (None, "affine")
                 else _SCALED_MODES.get(bits))
         if kind is None:
@@ -54,17 +60,21 @@ def recipe(weights: dict, path: str, mod, mode: str | None = None
     return {"group_size": gs, "bits": bits, "mode": kind}
 
 
-def quantize_like(module, weights: dict, mode: str | None = None) -> int:
+def quantize_like(module, weights: dict, model_path=None,
+                  prefix: str = "") -> int:
     """Quantize the layers of `module` that `weights` (keys relative to
-    `module`) holds packed, each to its own recipe. -> how many."""
+    `module`) holds packed, each to its own recipe, the scaled modes read
+    from the config.json of the artifact at `model_path` (`prefix`: the
+    module's path there, for per-layer entries). -> how many."""
     import mlx.nn as nn
     if not any(k.endswith(".scales") for k in weights):
         return 0
+    quant = artifact_quantization(model_path) if model_path else {}
     n = 0
 
     def pick(path, m):
         nonlocal n
-        r = recipe(weights, path, m, mode)
+        r = recipe(weights, path, m, quant, prefix)
         n += r is not None
         return r or False
 

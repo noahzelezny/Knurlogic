@@ -34,7 +34,7 @@ REVERIFY = (
     "`_lru._lrus` (engine/vision/cachehook.py), and non-int hashable tokens "
     "(tests/test_vision_key.py runs the real one); (3) TokenizerWrapper's "
     "think/tool fields (engine/runtime/request.py) and _infer_tool_parser's "
-    "signature (engine/model/load.tool_support); "
+    "signature (engine/model/loading.tool_support); "
     "(4) the full suite and tests/api on a served model. Then update "
     "pyproject.toml's dependency pins and [tool.knurlogic.pins] together.")
 

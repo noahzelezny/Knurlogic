@@ -648,7 +648,7 @@ def _checkpoint(root, name, *, trunk_vision, extra=()):
 
 
 def _load(monkeypatch, path):
-    """engine/model/load.load_unlocked, the tokenizer stubbed (the tiny
+    """engine/model/loading.load_unlocked, the tokenizer stubbed (the tiny
     checkpoint has none)."""
     import mlx_lm.utils as U
 
