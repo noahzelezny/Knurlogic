@@ -132,7 +132,8 @@ class Job:
     #: the prompt cache entry it was served came from disk, unused since
     #: its restore: {"tokens", "read_ms"} (usage.knurlogic.cache.disk)
     disk: dict | None = None
-    #: the request's id (the client's X-Request-Id, else a ULID), as usage.knurlogic.request_id
+    #: the request's id (the client's X-Request-Id, else a ULID), as
+    #: usage.knurlogic.request_id
     request_id: str | None = None
     #: who made it (X-Client-Session / -Role / -Run; telemetry.md): the
     #: owner of the prompt-cache entries it makes. No session: owns nothing

@@ -13,28 +13,13 @@ from __future__ import annotations
 
 import argparse
 import datetime as _dt
-import hashlib
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 from knurlogic.engine import families
+from knurlogic.engine.arch import digest
 from knurlogic.machine.processes import PROC_ERRORS
-
-
-def _sha256(p: Path) -> str:
-    return hashlib.sha256(p.read_bytes()).hexdigest()
-
-
-def _mlx_lm_version(python: str) -> str:
-    try:
-        out = subprocess.run(
-            [python, "-c", "import mlx_lm;print(mlx_lm.__version__)"],
-            capture_output=True, text=True, check=True)
-        return out.stdout.strip()
-    except PROC_ERRORS:
-        return "unknown"
 
 
 def _models_dir(python: str, host: str) -> Path:
@@ -55,23 +40,15 @@ def _host_version(python: str, host: str) -> str:
         return "unknown"
 
 
-def _dir_digest(d: Path) -> str:
-    """Digest of a package: every .py, path-and-content, sorted."""
-    h = hashlib.sha256()
-    for f in sorted(d.rglob("*.py")):
-        h.update(str(f.relative_to(d)).encode())
-        h.update(f.read_bytes())
-    return h.hexdigest()
-
-
 def vendor(module: str, python: str, note: str, host: str,
-           family: str) -> int:
+           family: str, say) -> int:
     """Copy `module` into engine/families/<family>/architecture/. The family
     must be listed (engine/families/__init__.py) and its manifest must name
-    the module -- vendoring is part of adding a family, not a way around it."""
+    the module -- vendoring is part of adding a family, not a way around it.
+    What it did goes to `say(line, is_error)` (the CLI prints it); returns
+    the exit code."""
     if family not in families.FAMILIES:
-        print(f"no family {family!r}; listed: {families.FAMILIES}",
-              file=sys.stderr)
+        say(f"no family {family!r}; listed: {families.FAMILIES}", True)
         return 2
     ARCH_DIR = families.architecture_dir(family)
     PROVENANCE = ARCH_DIR / "PROVENANCE.md"
@@ -80,27 +57,27 @@ def vendor(module: str, python: str, note: str, host: str,
     is_pkg = pkg.is_dir() and (pkg / "__init__.py").is_file()
     src = pkg if is_pkg else flat
     if not (is_pkg or flat.is_file()):
-        print(f"no {module} (file or package) in {src_dir}", file=sys.stderr)
+        say(f"no {module} (file or package) in {src_dir}", True)
         return 2
 
     ARCH_DIR.mkdir(parents=True, exist_ok=True)
     dst = ARCH_DIR / (module if is_pkg else f"{module}.py")
     existed = dst.exists()
     if is_pkg:
-        if existed and _dir_digest(dst) == _dir_digest(src):
-            print(f"{module}: already vendored, identical")
+        if existed and digest(dst) == digest(src):
+            say(f"{module}: already vendored, identical")
             return 0
         if existed:
             shutil.rmtree(dst)
         shutil.copytree(src, dst,
                         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-        digest = _dir_digest(dst)
+        sha = digest(dst)
     else:
-        if existed and _sha256(dst) == _sha256(src):
-            print(f"{module}: already vendored, identical")
+        if existed and digest(dst) == digest(src):
+            say(f"{module}: already vendored, identical")
             return 0
         shutil.copy2(src, dst)
-        digest = _sha256(dst)
+        sha = digest(dst)
     ver = _host_version(python, host)
 
     header = ("# Vendored architecture modules\n\n"
@@ -116,18 +93,18 @@ def vendor(module: str, python: str, note: str, host: str,
             f"- interpreter: `{python}`\n"
             f"- host package: {host} {ver}\n"
             f"- layout: {'package' if is_pkg else 'file'}\n"
-            f"- sha256: `{digest}`\n"
+            f"- sha256: `{sha}`\n"
             f"- note: {note or '(none)'}\n")
-    print(f"{module}: {'re-' if existed else ''}vendored from {src}")
-    print(f"  {host} {ver}  sha256 {digest[:16]}...")
-    print(f"  -> `knurlogic smoke --pin` on a real artifact records the pin "
-          f"in {family}/architecture/pins.json")
-    print(f"  -> RECORD THE LICENSE in {family}/architecture/THIRD-PARTY.md: copied "
-          f"source carries its project's terms with it")
+    say(f"{module}: {'re-' if existed else ''}vendored from {src}")
+    say(f"  {host} {ver}  sha256 {sha[:16]}...")
+    say(f"  -> `knurlogic smoke --pin` on a real artifact records the pin "
+        f"in {family}/architecture/pins.json")
+    say(f"  -> RECORD THE LICENSE in {family}/architecture/THIRD-PARTY.md: copied "
+        f"source carries its project's terms with it")
     return 0
 
 
-def main(argv=None) -> int:
+def main(argv, say) -> int:
     p = argparse.ArgumentParser(prog="knurlogic vendor")
     p.add_argument("module", help="e.g. qwen4_exp")
     p.add_argument("--python", required=True,
@@ -139,8 +116,5 @@ def main(argv=None) -> int:
     p.add_argument("--family", required=True,
                    help="the family folder it belongs to (engine/families/)")
     a = p.parse_args(argv)
-    return vendor(a.module, a.python, a.note, a.host, a.family)
+    return vendor(a.module, a.python, a.note, a.host, a.family, say)
 
-
-if __name__ == "__main__":
-    raise SystemExit(main())

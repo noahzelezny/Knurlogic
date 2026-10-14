@@ -138,8 +138,3 @@ def known() -> list[Path]:
         except OSError:
             continue
     return out
-
-
-def kind_of(d: Path) -> str:
-    """"fallback" or "models" for a root."""
-    return "fallback" if Path(d) == fallback() else "models"

@@ -185,8 +185,9 @@ def test_the_registry_lists_memory_and_disk_once_each():
     from mlx_lm.models.cache import KVCache
 
     from knurlogic.engine.prompt_cache import disk as D
+    from knurlogic.engine.prompt_cache import location as LOC
     key = D.identity("/nonexistent/tiny")
-    d = D.root() / D.key_id(key)
+    d = LOC.fallback() / D.key_id(key)
 
     def kv():
         c = KVCache()

@@ -75,6 +75,8 @@ from knurlogic.machine.files import read_json, write_json
 from knurlogic.machine.units import GIB
 from knurlogic.tuning import knobs
 
+from . import location
+
 logger = logging.getLogger(__name__)
 
 FORMAT = 1
@@ -102,18 +104,10 @@ class Unserializable(ValueError):
 
 # ------------------------------------------------------------- settings
 
-def root() -> Path:
-    """The per-split format's root, and the fallback for the per-layer
-    one (location.fallback)."""
-    from . import location
-    return location.fallback()
-
-
 def _roots(base: Path | None) -> list:
     """`base`, or every root this machine's cache has used."""
     if base is not None:
         return [Path(base)]
-    from . import location
     return location.known()
 
 
@@ -158,7 +152,7 @@ def budget_bytes(base: Path | None = None) -> int:
             return max(int(float(v) * GIB), 0)
         except ValueError:
             pass
-    base = base or root()
+    base = base or location.fallback()
     held = sum(s for _, s, _ in _units(base))
     probe = base
     while not probe.exists() and probe != probe.parent:
@@ -541,7 +535,7 @@ def sweep(base: Path | None = None, now: float | None = None,
     counts unpinned files only. Returns what it removed; `removed`, when
     given, gets each entry file deleted (a ring's rank 0 names them to the
     other ranks, which never sweep on their own)."""
-    base = base or root()
+    base = base or location.fallback()
     now = time.time() if now is None else now
     ttl, gone_ttl, gone_lru = ttl_s(), 0, 0
     files = _units(base)
@@ -785,7 +779,7 @@ def save(lru, key: dict, base: Path | None = None, *, owners=None,
              "entries": 0, "not_worth": 0}
     if lru is None or not enabled() or key is None:
         return stats
-    base = base or root()
+    base = base or location.fallback()
     d = base / key_id(key)
     have = {h: f for _, _, h, f in entries(d)}
     gen = max((g for g, _, _, _ in entries(d)), default=0) + 1
@@ -866,7 +860,7 @@ def candidates(key: dict, max_n: int, max_bytes: int | None = None,
     inserted). The TTL and budget are applied first."""
     if not enabled() or key is None or max_n <= 0:
         return []
-    base = base or root()
+    base = base or location.fallback()
     if sweep_first:
         sweep(base)
     fs = [e[3] for e in entries(base / key_id(key))[-max_n:]]

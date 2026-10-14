@@ -14,6 +14,7 @@ mx = pytest.importorskip("mlx.core")
 from test_scheduler import Tok, _collect, _job  # noqa: E402
 
 from knurlogic.engine.prompt_cache import disk as D  # noqa: E402
+from knurlogic.engine.prompt_cache import location as LOC  # noqa: E402
 from knurlogic.engine.prompt_cache.memory import PromptCache  # noqa: E402
 
 
@@ -285,7 +286,7 @@ def test_rank_0_journals_owner_drop_and_pin_and_a_follower_applies_them(
                        saves.append((only_new, select)))
     assert follower.of_session("s1") == [] and len(follower.lru) == 1
     assert [D._header(f)["owner"]["session"]
-            for f, _, _ in D._all_files(D.root())] == ["s2"]
+            for f, _, _ in D._all_files(LOC.fallback())] == ["s2"]
     assert saves == [(True, {(5, 2, 3, 4)}), (False, None)]
     assert not apply_cache_op({"op": "set"}, follower, "m", last, None)
 
@@ -622,7 +623,7 @@ def test_a_follower_parks_and_reads_back_by_name(tmp_path, monkeypatch):
     from knurlogic.engine.split.link import Desync
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
     key = _key()
-    d = D.root() / D.key_id(key)
+    d = LOC.fallback() / D.key_id(key)
     f = PromptCache(10)
     toks = [1, 2, 3, 4, 5, 6, 7, 8]
     f.insert("m", toks, _kv(), "assistant", owner=_own("pm"))
@@ -658,7 +659,7 @@ def test_only_rank_0_sweeps_and_names_what_it_deleted(tmp_path, monkeypatch):
     pc = PromptCache(10)
     pc.insert("m", [1, 2, 3, 4], _kv(4), "assistant", owner=_own("a"))
     D.save(pc.lru, _key(), owners=pc.owners, sweep_after=False)
-    old = [p for p in (D.root() / D.key_id(_key())).iterdir()
+    old = [p for p in (LOC.fallback() / D.key_id(_key())).iterdir()
            if p.suffix == ".safetensors"]
     import os
     for p in old:

@@ -12,6 +12,7 @@ from __future__ import annotations
 import importlib
 from dataclasses import dataclass
 
+from knurlogic.engine import backend
 from knurlogic.machine.units import GIB
 
 #: Packages that can host a model architecture, in lookup order.
@@ -49,8 +50,7 @@ def memory() -> dict:
     except ImportError:
         return {"available": False}
     try:
-        info = (mx.device_info() if hasattr(mx, "device_info")
-                else mx.metal.device_info())
+        info = backend.device_info()
         ws = int(info.get("max_recommended_working_set_size", 0))
         total = int(info.get("memory_size", ws))
         device = info.get("device_name", "unknown")

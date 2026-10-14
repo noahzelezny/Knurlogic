@@ -261,10 +261,10 @@ def test_the_old_per_split_files_still_restore_at_load(tmp_path):
     _, warm = _collect(s.submit(_job(p + [5, 6, 7], max_tokens=4)))
     assert warm["knurlogic"]["cache"]["disk"]["tokens"] >= len(p) - 1
     # a new save: the per-layer format only
-    olds = len(D._all_files(D.root()))
+    olds = len(D._all_files(LOC.fallback()))
     assert s.save_prompt_cache().done.wait(60)
-    assert len(D._all_files(D.root())) == olds
-    assert LY.units(D.root())
+    assert len(D._all_files(LOC.fallback())) == olds
+    assert LY.units(LOC.fallback())
 
 
 # --- where it lives ------------------------------------------------------------

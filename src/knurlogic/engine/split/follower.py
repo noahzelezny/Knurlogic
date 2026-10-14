@@ -9,6 +9,7 @@ import logging
 
 import mlx.core as mx
 
+from knurlogic.engine.prompt_cache import location as prompt_location
 from knurlogic.engine.prompt_cache.ring import apply_cache_op
 from knurlogic.engine.runtime.executor import (
     Admission,
@@ -238,7 +239,7 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
                 for u in op["uids"]:
                     chunks.pop(u, None)
             elif apply_cache_op(op, cache, model_key, last, save_disk,
-                                prompt_disk.root() / prompt_disk.key_id(
+                                prompt_location.fallback() / prompt_disk.key_id(
                                     disk_key) if disk_key else None,
                                 disk_key, store=store, link=link):
                 pass

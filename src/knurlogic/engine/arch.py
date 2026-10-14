@@ -18,18 +18,14 @@ from pathlib import Path
 # the one home for what a family is; nothing here is hand-kept.
 from knurlogic.engine import families as _families
 
-#: TWO HOST PACKAGES. mlx_lm.models
-#: holds flat text-model files (qwen4_exp.py is 1136 lines -- the real
-#: language model). mlx_vlm.models holds PACKAGES of the same names
-#: (`<arch>/{__init__,config,language,vision,<arch>}.py`, ~1400 lines) where
-#: the top-level file is multimodal glue and `language.py` carries the text
-#: half. glm5_next exists ONLY in mlx_vlm, which is why it read as "missing"
-#: when only mlx_lm was searched.
-#:
-#: Which host actually loads a given artifact depends on the loader, not only
-#: on the config: Flash-Next declares `language_model_only: false` yet its
-#: quantizer scores it through mlx_lm. So `host` here records where a
-#: module LIVES; choosing the host per artifact is still an open question.
+#: THE HOST PACKAGE (HOST_PACKAGES): mlx_lm alone. mlx_lm.models holds flat
+#: text-model files (qwen4_exp.py is 1136 lines -- the real language model).
+#: A multimodal architecture mlx_lm does not have (glm5_next's
+#: `<arch>/{__init__,config,language,vision,<arch>}.py` package, where
+#: `language.py` carries the text half) is vendored into its family
+#: (engine/families/<family>/architecture/), never imported from mlx_vlm.
+#: So `host` here records where a module is registered; ARCH_HOST names
+#: the parent a vendored package registers under.
 from knurlogic.engine.model import HOST_PACKAGES
 
 _MAPS = _families.build_maps()
@@ -50,6 +46,19 @@ ARCH_FOR_MODEL_TYPE = _MAPS["arch_for_model_type"]
 #: Modules that inherit another's arithmetic. A drift in the base reaches
 #: every artifact of the subclass, which is how one file came to cover 11.
 ARCH_DEPENDS_ON = _MAPS["arch_depends_on"]
+
+def digest(p: Path) -> str:
+    """sha256 hex of a module: a file's bytes, or a package's every .py,
+    path and content, in sorted order. What a pin records."""
+    h = hashlib.sha256()
+    if p.is_dir():
+        for f in sorted(p.rglob("*.py")):
+            h.update(str(f.relative_to(p)).encode())
+            h.update(f.read_bytes())
+    else:
+        h.update(p.read_bytes())
+    return h.hexdigest()
+
 
 def _load_pins() -> dict:
     """Digests recorded by `knurlogic smoke --pin` on a clean pass.
@@ -197,14 +206,8 @@ def check(model_type: str, models_dir: Path | None = None) -> list:
         present = bool(p and p.exists())
         if not present:
             sha = None
-        elif p.is_dir():
-            h = hashlib.sha256()
-            for f in sorted(p.rglob("*.py")):
-                h.update(str(f.relative_to(p)).encode())
-                h.update(f.read_bytes())
-            sha = h.hexdigest()
         else:
-            sha = hashlib.sha256(p.read_bytes()).hexdigest()
+            sha = digest(p)
         rows.append(ArchStatus(mod, present, p if present else None, sha,
                                PINNED_SHA256.get(mod), vendored))
     return rows

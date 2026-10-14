@@ -231,10 +231,8 @@ class MemoryGuard:
 
     def _working_set(self) -> int:
         if self.working_set is None:
-            import importlib  # engine.model exports a load() function
-            load = importlib.import_module("knurlogic.engine.model.load")
-            self.working_set = int(load.memory().get("working_set_bytes")
-                                   or 0)
+            from knurlogic.engine.model.load import memory
+            self.working_set = int(memory().get("working_set_bytes") or 0)
         return self.working_set
 
     def _margin(self, extra: int = 0, chunk: int | None = None) -> int:
