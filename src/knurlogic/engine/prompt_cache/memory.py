@@ -9,19 +9,14 @@ made and saved."""
 
 from __future__ import annotations
 
-import os
-
 REUSE_ENV = "KNURLOGIC_PROMPT_CACHE_REUSE"
 
 
 def reuse_on(env=None) -> bool:
     """KNURLOGIC_PROMPT_CACHE_REUSE as this launch set it (os.environ): on
     unless off; a bad value is on (the launch refuses it)."""
-    from knurlogic.tuning.knobs import on_off
-    try:
-        return on_off((os.environ if env is None else env).get(REUSE_ENV))
-    except ValueError:
-        return True
+    from knurlogic.tuning.knobs import env_on
+    return env_on(REUSE_ENV, True, env)
 
 
 class PromptCache:
