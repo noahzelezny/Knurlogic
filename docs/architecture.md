@@ -62,9 +62,10 @@ page / MCP / CLI  ->  tuning.resolve  ->  interfaces.serve  ->  engine
 
 1. You pick two or more machines on the page, or pass `machines` to the MCP
    `load` tool. The page you pressed Launch on is the coordinator.
-2. Every machine's page checks the request against its own disk, memory,
-   software and links (`cluster/launch.py`, `cluster/checks.py`). Nothing
-   starts unless every machine can.
+2. The coordinator places the model (`tuning/placement.py`) and picks the
+   cable (`cluster/links.py`); every machine's page checks the request
+   against its own disk, memory, software and links (`cluster/launch.py`,
+   `cluster/checks.py`). Nothing starts unless every machine can.
 3. Each page starts its own ranks. Pipeline or tensor parallelism runs in
    `engine/`; ranks talk over the link found by `cluster/links.py`.
 4. Each rank writes a heartbeat under `~/.cache/knurlogic/jobs/`; its page

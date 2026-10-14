@@ -32,8 +32,11 @@ everything can:
 - **plan** -- gather each machine's facts (its status' `cluster` block:
   chip, working set under its allowance, memory bandwidth, Thunderbolt
   addresses, RDMA, versions), order the ranks (`tuning/rank_order.rank_order`)
-  and place the model (tensor: an equal share each; pipeline:
-  `tuning/pipeline_split.pipeline_shares`). Deterministic, and shown before
+  and place the model (`tuning/placement.placement`; tensor: an equal share
+  each; pipeline: `tuning/pipeline_split.pipeline_shares`), each rank
+  against its machine's budget (`machine/memory/wired.budget_of`), and pick
+  the cable (`cluster/links.py`: `shared_subnets`, `ring_ips`,
+  `rdma_device`). Deterministic, and shown before
   anything loads.
 - **prepare** -- a `Prepare` message (`POST /peer/v1/msg`, an envelope:
   docs/design/orchestration.md) to every page (this one

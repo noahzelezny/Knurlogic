@@ -17,18 +17,19 @@ each value. The why: [settings](../design/settings.md); memory:
 | `tuning/context_window.py` | `model_window`, long context (YaRN): `long_context_of`, `long_context_refusal`, `context_ceiling`, `settle_context`, `long_context_config`, `with_long_context`, `long_context_room` |
 | `tuning/checks.py` | every refusal: `check_knob` (one value), `clean_sets` and `PATH_KEYS` (a request's knobs, `launch_knobs`), `refuse_sets` (a set on one artifact), `settings_refusal`, `launch_refusal`, `launch_fit` (a whole launch, before a process starts) |
 | `tuning/live.py` | live or restart: `LIVE_KNOBS` (what a running server can change), `knob_reach` (live, restart, or no effect on this artifact) |
-| `tuning/fit.py` | the memory arithmetic: `kv_bytes_per_token`, `step_margin`, `fit_reserve`, `rank_margin`, `context_room`, `room_for`, `vision_budget`, `vision_freed_bytes`, `mtp_head_bytes`, `single_fit_check`; the widths the room allows: `decode_chunk_for`, `prefill_chunk_by_room` |
-| `tuning/resolve.py` | `resolve(artifact, budget, ...)` returns a `Resolution` (env, notes, warnings, vision, ranges, preset), or a `ClusterResolution` when given nodes (`resolve_cluster`). Emitting: `emit`, `emit_cache_limit`. A preset applied: `preset_env`, `apply_preset_overrides`. Launch: `model_launch`, `kv_refusal` |
+| `tuning/fit.py` | the memory arithmetic: `kv_bytes_per_token`, `step_margin`, `fit_reserve`, `rank_margin`, a split rank's share and its check (`rank_share_bytes`, `share_refusal`), `context_room`, `room_for`, `vision_budget`, `vision_freed_bytes`, `mtp_head_bytes`, `single_fit_check`; the widths the room allows: `decode_chunk_for`, `prefill_chunk_by_room` |
+| `tuning/resolve.py` | `resolve(artifact, budget, ...)` returns a `Resolution` (env, notes, warnings, vision, ranges, preset), or a `ClusterResolution` when given nodes (`resolve_cluster`). Emitting: `emit`, `emit_cache_limit`. A preset applied: `preset_env`, `launch_settings` (the preset under a launch's own model knobs), `apply_preset_overrides`. Launch: `model_launch`, `kv_refusal` |
 | `tuning/tensor_split.py` | the tensor split: `TENSOR_TYPES`, `tensor_refusals`, `tensor_placement`, `trunk_headers`, `tensor_split_refusals`, `tensor_unverified` |
 | `tuning/pipeline_split.py` | the pipeline split: `PIPELINE_TYPES`, `pipeline_refusals`, `pipeline_layer_bytes`, `pipeline_shares`, `leader_bytes` |
 | `tuning/rank_order.py` | which machine leads and the ring's order: `rank_order`, `leader_key`, `LINK_SPEED` |
+| `tuning/placement.py` | where a split's ranks go: `placement` (rank order and each rank's share against its machine's budget), `rank_room_chunk` (the prompt chunk a rank's own room allows) |
 | `tuning/preferences.py` | the saved knurlogic-wide settings (`~/.config/knurlogic/settings.json`): `get`, `set`, `invalid`, `launch_sets`, `prompt_cache_env`, `compaction_env` |
 | `tuning/strategy.py` | the machine's default preset (`strategy.json`) |
 
 The import order inside the package, lowest first: `measured`,
 `numerics`, `rank_order` -> `presets`, `fit`, `tensor_split` ->
 `context_window`, `pipeline_split` -> `knobs` -> `groups`, `live` ->
-`checks`, `resolve` -> `preferences`, `strategy`. A module reaches a
+`checks`, `resolve`, `placement` -> `preferences`, `strategy`. A module reaches a
 sibling's names through the module (`measured.PREFILL_CHUNK_DEFAULT`), so
 a test that patches one patches it for every caller. `checks` imports
 `resolve`, `fit` and `preferences` inside its launch functions, since

@@ -28,7 +28,7 @@ the page on this Mac (`mcp/page_client.py`: `page_get`, `page_post`;
 address from `KNURLOGIC_PAGE`). `load`'s role words in `machines`
 (`here`, `peers`, `all`, `fit`) are resolved to page node ids in
 `mcp/placement.py` (`resolve_machines`; `fit_machines` reuses the `fit`
-tool and `cluster/launch.placement`).
+tool and `tuning/placement.placement`).
 
 The CLI's commands: `ui`, `serve`, `doctor`, `smoke`, `vendor`,
 `connect`, `mcp`, `loaded`, `mtp`, `models`, `deps`. Most live in the

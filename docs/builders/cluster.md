@@ -14,14 +14,15 @@ share a model) is [splits](splits.md).
 |---|---|
 | `discovery/` | `Discovery`: `_knurlogic._tcp` through the OS's own responder -- Bonjour (`bonjour.py`, `dns_sd.h`) on macOS, Avahi (`avahi.py`, libavahi-client) on Linux; register one advertisement, browse, resolve |
 | `peers.py` | `Peers` / `Peer`: named, remembered or introduced peers and their state (`answering`, `stale`, `gone`, `version_mismatch`); `peers.json` |
-| `links.py` | which link reaches a peer (`link_of`, `kind_of_iface`, `thunderbolt`, `rdma`), and `Gate`: answer only on loopback and Thunderbolt under `--host cluster` |
-| `protocol.py` | the control-plane messages: the envelope `{v, kind, from, job?, seq, ts, body}`, one frozen dataclass per kind (`Hello`, `Prepare`, `Start`, `Stop`, `Failure`, ...), `check_version` |
+| `links.py` | which link reaches a peer (`link_of`, `kind_of_iface`, `thunderbolt`, `rdma`), and `Gate`: answer only on loopback and Thunderbolt under `--host cluster`; the cable a job runs on (`shared_subnets`, `rdma_pair_reason`, `ring_ips`, `rdma_device`, `BAD_CABLES`) |
+| `protocol.py` | the control-plane messages: the envelope `{v, kind, from, job?, seq, ts, body}`, one frozen dataclass per kind (`Hello`, `Prepare`, `Start`, `Stop`, `Failure`, ...), `check_version`; the link names (`LINK_NAMES`, `link_name`, `backend`) |
 | `transport.py` | the one client (`send`, `send_all`) and server half (`handle`) of the control plane; `PeerUnreachable`, `PeerRefused` |
-| `launch.py` | a job across machines: `check_spec`, `placement`, `prepare` then `start` (two phases), `launch`, `stop`, `watch_once`, `peer_verdict`, `failover`, `jobs_document`, `rank_argv` / `rank_env` |
+| `launch.py` | a job across machines: `check_spec`, `prepare` then `start` (two phases), `launch`, `stop`, `watch_once`, `peer_verdict`, `failover`, `jobs_document`, `rank_argv` / `rank_env`. Placement is `tuning/placement.py`'s, the budget `machine/memory/wired.py`'s |
 | `weights.py` | weight streaming's cluster half: `read_plan` (who reads from whose disk, and in what turn), `serve` (a `Weights` message: a shard's byte range on the machine holding the files), `reader` (the rank's client). The page sends the bytes (`interfaces/page/server.py`, `_send_range`) |
-| `jobs.py` | a job's files and its ranks' progress markers (`Marker`, `read_marker`; a rank writes its own through engine/split/marker.py: `progress`, `chunk_done`, `after_load`), `Watch`, `phase_of`, the job registry, `terminate`, `wait_gone`. Stdlib only |
+| `jobs.py` | a job's files and its ranks' progress markers (`Marker`, `read_marker`; a rank writes its own through engine/split/marker.py: `progress`, `chunk_done`, `after_load`), `Watch`, `phase_of`, the job registry, `log_tail`, `terminate`, `wait_gone`. Stdlib only |
 | `recovery.py` | bounded auto-relaunch: `track_cluster`, `track_single`, `tick`, `cancel_job`, `view`; persisted in `recovery.json` and `recovery-models.json` |
 | `checks.py` | `knurlogic doctor --cluster`: interfaces, firewall, sleep, Bonjour browse (`report`) |
+| `__init__.py` | `NET_ERRORS`, `REFUSED_EXIT` (serve's refusal exit status), `every` (the one background loop: the watcher, recovery, the peer poll, a rank's marker) |
 
 Hooks outside it:
 

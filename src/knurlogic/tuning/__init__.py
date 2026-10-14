@@ -22,6 +22,7 @@ be, and why.
   tensor_split.py    the tensor split's arithmetic and refusals
   pipeline_split.py  the pipeline split's arithmetic and refusals
   rank_order.py      which machine leads a ring, and the ring's order
+  placement.py       where a split's ranks go, and a rank's prompt chunk
   preferences.py     the saved knurlogic-wide settings (settings.json)
   strategy.py        the machine's default preset (strategy.json)
 

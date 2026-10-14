@@ -7,15 +7,19 @@ across them.
   launch.py     a cluster job, page to page: prepare, start, watch, stop.
   jobs.py       a job's files, rank progress markers and health verdict.
   recovery.py   a model that died unasked is relaunched, bounded.
-  links.py      which link a peer is reached over and a page answers on.
-  protocol.py   the control-plane contract: the message envelope and kinds.
+  links.py      which link a peer is reached over and a page answers on,
+                and the cable a job runs on.
+  protocol.py   the control-plane contract: the message envelope and kinds,
+                and the link names.
   transport.py  the one client of the control plane, page to page.
   checks.py     `knurlogic doctor --cluster`: what stops Macs finding each
                 other, each with the fix.
 
 launch.py and recovery.py never import interfaces/: the page injects its
 status, peers, children and load at startup (interfaces/page/server.py
-wire, called by make_handler). Nothing here imports mlx.
+wire, called by make_handler). Nothing here imports mlx. Below: what a
+call to another page can raise, serve's refusal exit status, and `every`,
+the one background loop.
 """
 
 import http.client  # noqa: E402
