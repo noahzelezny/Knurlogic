@@ -21,18 +21,13 @@ drives draft acceptance to exactly 0.0. Do not "simplify" it back.
 from __future__ import annotations
 
 import mlx.core as mx
-import mlx.nn as nn
 from mlx.utils import tree_flatten
 from mlx_lm.models.base import create_attention_mask
 
-from knurlogic.engine.model import weight_files
 from knurlogic.engine.model.trunk import unwrap
 from knurlogic.engine.mtp.head_base import (
     GraftHead,
-    fill,
-    mixed_predicate,
     prefixed,
-    read_recipe,
     save_sidecar,
 )
 
@@ -118,17 +113,14 @@ class Qwen4ExpHead(GraftHead):
         mx.eval(self.block.parameters(), self.mixer.parameters())
         return self
 
-    def quantize(self, bits=6, group_size=32, expert_bits=None):
-        """Quantize the head. `expert_bits` overrides `bits` for the MoE
-        expert stack, which is 96.5% of the weight; `bits` then applies to the
-        3.5% of small modules, where protecting precision costs almost
-        nothing. `expert_bits=None` reproduces the uniform recipe."""
-        eb = bits if expert_bits is None else expert_bits
-        for m in (self.block, self.mixer):
-            nn.quantize(m, class_predicate=mixed_predicate(
-                bits, eb, group_size, _KEEP_FP))
-        mx.eval(self.block.parameters(), self.mixer.parameters())
-        return self
+    # `quantize` (GraftHead): `expert_bits` overrides `bits` for the MoE
+    # expert stack, which is 96.5% of the weight; `bits` then applies to the
+    # 3.5% of small modules, where protecting precision costs almost
+    # nothing. `expert_bits=None` reproduces the uniform recipe.
+    KEEP_FP = _KEEP_FP
+
+    def _modules(self):
+        return {"block": self.block, "mixer": self.mixer}
 
     # ------------------------------------------------------------- sidecar
     def save(self, path, bits, group_size=32, expert_bits=None):
@@ -144,28 +136,11 @@ class Qwen4ExpHead(GraftHead):
                                          "fa_idx": self.fa_idx},
                             mtplx_compatible="false")
 
-    @classmethod
-    def from_sidecar(cls, model, arch, path):
-        w = weight_files.load(path)
-        cfg = read_recipe(path)
-        head = cls(model, arch)
-        bits, gs = cfg.get("bits"), cfg.get("group_size", 32)
-        if bits:
-            # Build the quantized module shape first, then fill it. The recipe
-            # must be replayed exactly -- a mixed-bit sidecar loaded as uniform
-            # gives every expert tensor the wrong packed shape.
-            eb = cfg.get("expert_bits") or bits
-            for m in (head.block, head.mixer):
-                nn.quantize(m, class_predicate=mixed_predicate(bits, eb, gs,
-                                                               _KEEP_FP))
-        fill(head.block, w, "block.")
-        fill(head.mixer, w, "mixer.")
-        head.norm_e = head._norm(head.D, w["norm_e.weight"])
-        head.norm_h = head._norm(head.hc * head.D, w["norm_h.weight"],
-                                 group_size=head.D)
-        head.fc = w["fc.weight"]
-        mx.eval(head.block.parameters(), head.mixer.parameters())
-        return head
+    def _fill_rest(self, w):
+        self.norm_e = self._norm(self.D, w["norm_e.weight"])
+        self.norm_h = self._norm(self.hc * self.D, w["norm_h.weight"],
+                                 group_size=self.D)
+        self.fc = w["fc.weight"]
 
     # --------------------------------------------------------------- draft
     def _trunk(self, h_row, nxt_id, cache=None):

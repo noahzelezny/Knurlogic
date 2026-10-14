@@ -31,20 +31,25 @@ RECIPE_KEY = "vqlab_mtp"
 EXPERT_SUBSTR = "switch_mlp"
 
 
-def mixed_predicate(bits, expert_bits, group_size, keep_fp=()):
-    """An nn.quantize class_predicate: the expert stack (`EXPERT_SUBSTR`) at
-    `expert_bits`, every other quantizable layer at `bits`, and layers whose
-    path ends with one of `keep_fp` left full precision. nn.quantize hands
-    the predicate every submodule, norms included, so it gates on
-    `to_quantized`, not on names."""
+def mixed_predicate(bits, expert_bits, group_size, keep_fp=(),
+                    expert_match=None):
+    """An nn.quantize class_predicate: the expert stack at `expert_bits`,
+    every other quantizable layer at `bits`, and layers whose path ends
+    with one of `keep_fp` left full precision. A path is an expert's when
+    `expert_match(path)` says so (default: it names `EXPERT_SUBSTR`).
+    nn.quantize hands the predicate every submodule, norms included, so it
+    gates on `to_quantized`, not on names."""
     keep_fp = tuple(keep_fp)
+    if expert_match is None:
+        def expert_match(path):
+            return EXPERT_SUBSTR in path
 
     def predicate(path, mod):
         if not hasattr(mod, "to_quantized"):
             return False
         if keep_fp and path.endswith(keep_fp):
             return False
-        b = expert_bits if EXPERT_SUBSTR in path else bits
+        b = expert_bits if expert_match(path) else bits
         return {"group_size": group_size, "bits": b}
     return predicate
 
@@ -86,7 +91,74 @@ class DraftHead:
 class GraftHead(DraftHead):
     """A head built from an upstream bf16 `mtp.*` graft and saved as a
     `vqlab_mtp` sidecar. Needs `core` (the trunk core), `tie` and
-    `lm_head`."""
+    `lm_head`, and names its sidecar-held modules in `_modules()` {sidecar
+    prefix: module}. Hooks a head overrides: `KEEP_FP` and `expert_match`
+    (the quantize recipe), `_quantized()` (the modules it quantizes),
+    `_from_recipe` (construction from the recipe), `_sidecar_tensors`
+    (tensors as read) and `_fill_rest` (what `_modules()` does not hold)."""
+
+    #: path suffixes the quantize recipe keeps full precision
+    KEEP_FP: tuple = ()
+    #: path -> whether it is the expert stack's (None: `EXPERT_SUBSTR`)
+    expert_match = None
+
+    def _modules(self) -> dict:
+        """{sidecar prefix: module} for the sidecar-held modules."""
+        raise NotImplementedError
+
+    def _quantized(self):
+        """The modules the quantize recipe runs over, one pass each."""
+        return self._modules().values()
+
+    def _quantize(self, bits, group_size, expert_bits) -> None:
+        """Apply the recipe (lazy: nothing evaluated)."""
+        pred = mixed_predicate(bits, expert_bits, group_size, self.KEEP_FP,
+                               type(self).expert_match)
+        for m in self._quantized():
+            nn.quantize(m, class_predicate=pred)
+
+    def _params(self) -> list:
+        """The arrays of the sidecar-held modules."""
+        return [p for m in self._modules().values()
+                for _, p in tree_flatten(m.parameters())]
+
+    def quantize(self, bits=6, group_size=32, expert_bits=None):
+        """Quantize the head: the expert stack at `expert_bits` (default
+        `bits`), the rest at `bits`. This is the recipe `from_sidecar`
+        replays, so changing it is a new head format."""
+        self._quantize(bits, group_size,
+                       bits if expert_bits is None else expert_bits)
+        mx.eval(self._params())
+        return self
+
+    @classmethod
+    def _from_recipe(cls, model, arch, recipe: dict):
+        """A fresh head for a sidecar saved with `recipe`."""
+        return cls(model, arch)
+
+    def _sidecar_tensors(self, w: dict) -> dict:
+        """The sidecar's tensors as this head loads them."""
+        return w
+
+    def _fill_rest(self, w: dict) -> None:
+        """Fill what `_modules()` does not hold."""
+
+    @classmethod
+    def from_sidecar(cls, model, arch, path):
+        """Load a head from its sidecar: replay the saved quantize recipe
+        so the packed shapes line up (a mixed-bit sidecar rebuilt as
+        uniform gives every expert tensor the wrong shape), then fill."""
+        recipe = read_recipe(path)
+        head = cls._from_recipe(model, arch, recipe)
+        w = head._sidecar_tensors(weight_files.load(path))
+        bits, gs = recipe.get("bits"), recipe.get("group_size", 32)
+        if bits:
+            head._quantize(bits, gs, recipe.get("expert_bits") or bits)
+        for name, mod in head._modules().items():
+            fill(mod, w, name + ".")
+        head._fill_rest(w)
+        mx.eval(head._params())
+        return head
 
     def draft_logits(self, h_row, nxt_id, cache=None):
         """(trunk hidden at t, token t+1) -> logits for token t+2."""

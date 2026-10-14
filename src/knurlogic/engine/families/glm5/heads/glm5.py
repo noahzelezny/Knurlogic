@@ -24,9 +24,8 @@ import mlx.core as mx
 import mlx.nn as nn
 from mlx.utils import tree_flatten
 
-from knurlogic.engine.model import weight_files
 from knurlogic.engine.model.trunk import text_model
-from knurlogic.engine.mtp.head_base import GraftHead, fill, read_recipe, save_sidecar
+from knurlogic.engine.mtp.head_base import GraftHead, fill, prefixed, save_sidecar
 
 _GLUE = ("eh_proj", "enorm", "hnorm", "shared_head")
 
@@ -90,7 +89,7 @@ class Glm5Head(GraftHead):
         rest by name.
         """
         cfg = self.cfg
-        w = {k[len(prefix):]: v for k, v in g.items() if k.startswith(prefix)}
+        w = dict(prefixed(g, prefix))
         if not w:
             raise ValueError(f"no graft keys under prefix {prefix!r}")
 
@@ -128,31 +127,22 @@ class Glm5Head(GraftHead):
                 f"tensor, e.g. {missing[:4]}")
         for name, mod in mods.items():
             fill(mod, w, name + ".")
-        mx.eval([p for m in mods.values()
-                 for _, p in tree_flatten(m.parameters())])
+        mx.eval(self._params())
         return self
 
-    def quantize(self, bits=6, group_size=32, expert_bits=None):
-        """Quantize the head: the expert stack takes `expert_bits` (~96% of
-        the weight), everything else `bits`. This is also the recipe
-        `from_sidecar` replays, so it must match the published heads: the
-        router gate stays bf16 (it has no `to_quantized`) and the DSA
-        indexer is `bits`/gs32 (mtp-head-q6: wk/wq_b/weights_proj at 6-bit,
-        32-wide groups). Any other recipe changes the packed shapes and is
-        a new head format."""
-        eb = bits if expert_bits is None else expert_bits
+    # The quantize recipe must match the published heads: the expert
+    # stack (switch_mlp and the shared experts, ~96% of the weight) at
+    # `expert_bits`, everything else at `bits`; the router gate stays bf16
+    # (it has no `to_quantized`) and the DSA indexer is `bits`/gs32
+    # (mtp-head-q6: wk/wq_b/weights_proj at 6-bit, 32-wide groups). Any
+    # other recipe changes the packed shapes and is a new head format.
+    @staticmethod
+    def expert_match(path):
+        return ".switch_mlp." in path or path.endswith(
+            ("gate_proj", "up_proj", "down_proj"))
 
-        def predicate(path, mod):
-            if not hasattr(mod, "to_quantized"):
-                return False
-            if ".switch_mlp." in path or path.endswith(
-                    ("gate_proj", "up_proj", "down_proj")):
-                return {"group_size": group_size, "bits": eb}
-            return {"group_size": group_size, "bits": bits}
-
-        for m in (self.self_attn, self.mlp):
-            nn.quantize(m, class_predicate=predicate)
-        return self
+    def _quantized(self):
+        return (self.self_attn, self.mlp)
 
     def save(self, path, bits, group_size=32, expert_bits=None):
         flat = {}
@@ -162,24 +152,6 @@ class Glm5Head(GraftHead):
         return save_sidecar(path, flat, {
             "family": "glm5_next", "bits": bits,
             "group_size": group_size, "expert_bits": expert_bits})
-
-    @classmethod
-    def from_sidecar(cls, model, arch, path):
-        w = weight_files.load(path)
-        cfg = read_recipe(path)
-        head = cls(model, arch)
-        bits, gs = cfg.get("bits"), cfg.get("group_size", 32)
-        if bits:
-            # Replay the exact quantization recipe before filling, or the
-            # packed shapes will not line up (same trap as the qwen heads).
-            head.quantize(bits=bits, group_size=gs,
-                          expert_bits=cfg.get("expert_bits"))
-        mods = head._modules()
-        for name, mod in mods.items():
-            fill(mod, w, name + ".")
-        mx.eval([p for m in mods.values()
-                 for _, p in tree_flatten(m.parameters())])
-        return head
 
     # --------------------------------------------------------------- draft
     def _trunk(self, h_row, nxt_id, cache=None):
