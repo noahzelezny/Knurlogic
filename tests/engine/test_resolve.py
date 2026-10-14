@@ -269,7 +269,7 @@ def test_a_rank_is_judged_on_its_share_not_the_whole_artifact():
 
 
 def test_a_pipeline_ranks_share_is_its_layers_plus_what_every_rank_holds():
-    from knurlogic.interfaces.serve import pipeline_share_bytes
+    from knurlogic.tuning.pipeline_split import pipeline_share_bytes
     per = [GIB] * 8
     # rank 0 holds the LAST counts[0] layers, rank 1 the first counts[1]
     assert pipeline_share_bytes(per, GIB, 0, 2, [6, 2]) == 7 * GIB

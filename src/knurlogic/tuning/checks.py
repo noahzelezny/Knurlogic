@@ -196,3 +196,43 @@ def launch_fit(a, overrides, tune: str = "default", draft: bool = True,
         draft = False
     return single_fit_check(a, budget_bytes, draft, launch.get("kv_bits"),
                             launch.get("vision", True))
+
+
+def ring_refusals(a, ring: dict, working_set_gib: float) -> list:
+    """Why this rank of a split (`ring`: serve's --split, --rank, --world,
+    --link and the rest) cannot join it, with the numbers; [] when it
+    can."""
+    from knurlogic.tuning.tensor_split import tensor_split_refusals
+    why = []
+    if ring.get("split") not in ("tensor", "pipeline"):
+        why.append(f"--split {ring.get('split')!r}: this build splits "
+                   f"'tensor' or 'pipeline'")
+    if not 0 <= int(ring["rank"]) < int(ring["world"]):
+        why.append(f"rank {ring['rank']} is outside a world of "
+                   f"{ring['world']}")
+    if working_set_gib <= 0:
+        why.append("a ring needs --working-set-gib: every rank's memory "
+                   "guard is stated, not detected")
+    if not ring.get("prefill_chunk"):
+        why.append("a ring needs --prefill-chunk: the prompt chunk is "
+                   "ring-wide, never resolved per rank")
+    if ring.get("link") == "ring" and not ring.get("hosts"):
+        why.append("--link ring needs --hosts (one address:port per rank)")
+    if ring.get("link") == "ring" and ring.get("hosts") and \
+            len(ring["hosts"]) != int(ring["world"]):
+        why.append(f"--hosts names {len(ring['hosts'])} ranks for a world "
+                   f"of {ring['world']}")
+    if ring.get("link") == "jaccl" and not (ring.get("ibv_devices")
+                                            and ring.get("coordinator")):
+        why.append("--link jaccl needs --ibv-devices and --coordinator")
+    if ring.get("split") == "pipeline":
+        from knurlogic.tuning.pipeline_split import pipeline_refusals
+        why += pipeline_refusals(a.raw_config, int(ring["world"]))
+        n = ring.get("layers") or []
+        if n and len(n) != int(ring["world"]):
+            why.append(f"--layers names {len(n)} ranks for a world of "
+                       f"{ring['world']}")
+    else:
+        why += tensor_split_refusals(a.path, int(ring["world"]),
+                                     a.raw_config)
+    return why

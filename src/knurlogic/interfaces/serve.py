@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from dataclasses import dataclass, field
 
 from knurlogic.engine import arch, mtp
 from knurlogic.engine import model as engine
@@ -28,83 +29,10 @@ from knurlogic.machine.artifact import Artifact
 from knurlogic.machine.memory import wired
 from knurlogic.machine.processes import PROC_ERRORS
 from knurlogic.machine.units import GIB, MIB, gib
-from knurlogic.tuning.checks import refuse_sets, settings_refusal
+from knurlogic.tuning import prompt_cache
+from knurlogic.tuning.checks import refuse_sets, ring_refusals, settings_refusal
 from knurlogic.tuning.live import LIVE_KNOBS
 from knurlogic.tuning.resolve import resolve
-
-#: prompt-cache entries one conversation keeps: its system prompt, turns
-#: and segment checkpoints (on a hybrid model each checkpoint is a whole
-#: entry). A server-wide cap of 10 evicts four agents' entries on a
-#: hybrid model: each agent needs its own
-PROMPT_CACHE_PER_AGENT = 10
-#: a ring counts at most this many concurrent agents (its decode
-#: concurrency, which every rank has from the same argv)
-PROMPT_CACHE_AGENTS_MAX = 8
-#: one machine: the entry cap under the byte cap -- bytes decide
-PROMPT_CACHE_ENTRIES_BYTE_SIZED = 256
-#: one machine: the share of the headroom (working set less the model)
-#: the prompt cache may hold; the memory guard takes it back before a
-#: request's own KV would not fit
-PROMPT_CACHE_HEADROOM_SHARE = 0.5
-
-
-def prompt_cache_policy(serving: dict, world: int, working_set: int,
-                        holds: int) -> tuple:
-    """(size, bytes or None, why) of the prompt cache.
-
-    One machine: sized by bytes -- PROMPT_CACHE_HEADROOM_SHARE of what the
-    working set leaves beside the model -- with a generous entry cap, so
-    it is memory, not a count, that evicts. A ring: count-based by design
-    (every rank must evict the same entries; bytes are each rank's own),
-    so the count is PROMPT_CACHE_PER_AGENT per concurrent agent. An
-    explicit --prompt-cache-size / --prompt-cache-gib wins."""
-    size = int(serving.get("prompt_cache_size") or 0)
-    cap = serving.get("prompt_cache_bytes")
-    dc = int(serving.get("decode_concurrency") or 32)
-    agents = max(1, min(dc, PROMPT_CACHE_AGENTS_MAX))
-    per = (f"{PROMPT_CACHE_PER_AGENT} per agent x {agents} concurrent "
-           f"agents (decode concurrency {dc}, at most "
-           f"{PROMPT_CACHE_AGENTS_MAX} counted)")
-    if world > 1:
-        if size:
-            return size, None, (f"{size} entries (--prompt-cache-size); a "
-                                f"ring's prompt cache is count-based")
-        n = PROMPT_CACHE_PER_AGENT * agents
-        return n, None, (f"{n} entries: {per}; a ring's prompt cache is "
-                         f"count-based -- every rank evicts the same "
-                         f"entries -- and the memory guard still takes "
-                         f"entries back first")
-    if cap:
-        n = size or PROMPT_CACHE_ENTRIES_BYTE_SIZED
-        return n, int(cap), (f"{gib(int(cap))} "
-                             f"(--prompt-cache-gib), up to {n} entries")
-    room = int(working_set or 0) - int(holds or 0)
-    if room > 0:
-        b = int(room * PROMPT_CACHE_HEADROOM_SHARE)
-        n = size or PROMPT_CACHE_ENTRIES_BYTE_SIZED
-        return n, b, (f"{gib(b)} ({PROMPT_CACHE_HEADROOM_SHARE:.0%}"
-                      f" of the {gib(room)} the working set leaves "
-                      f"beside the model), up to {n} entries: sized by "
-                      f"memory, not a count")
-    n = size or PROMPT_CACHE_PER_AGENT * agents
-    return n, None, (f"{n} entries" + ("" if size else f": {per}")
-                     + "; the working set is unknown, so not sized by bytes")
-
-
-def pipeline_share_bytes(per: list, other: int, rank: int, world: int,
-                         counts=None, leader: int = 0) -> int:
-    """What pipeline rank `rank` holds: its layers (rank 0 the LAST
-    `counts[0]`, as launch.prepare places them) plus what every rank
-    holds, plus `leader` (the head and tower) on rank 0. Counts not given
-    yet (the resolver's split is made once the ring is up): an even share
-    of the layers."""
-    own = int(other) + (int(leader) if rank == 0 else 0)
-    if counts:
-        start = sum(counts[rank + 1:])
-        return sum(per[start:start + counts[rank]]) + own
-    return -(-sum(per) // max(world, 1)) + own
-
-
 
 #: the serve flag that sets a knob, where one exists (else --set K=V)
 _FLAG_FOR = {"KNURLOGIC_KV_BITS": "--kv-bits",
@@ -146,11 +74,58 @@ REFUSED_EXIT = 78
 REFUSING = "REFUSING: "
 
 
+class Refused(Exception):
+    """A launch serve refuses: the REFUSING line(s) it prints before it
+    exits with REFUSED_EXIT."""
+
+
+@dataclass
+class Launch:
+    """What resolve_launch settled for one `knurlogic serve`: the artifact,
+    the ring and this rank's share of it, the launch settings, the budget
+    and the resolver's answer; `forced` is what apply_launch set over it."""
+    a: Artifact
+    ring: dict
+    world: int
+    share: int | None
+    overrides: dict
+    tune: str
+    profile: str | None
+    working_set_gib: float
+    launch: dict
+    kv_bits: int | None
+    long_context: str
+    draft: bool
+    vision: bool
+    rounding: object
+    ws: int
+    adv: dict
+    r: object
+    forced: dict = field(default_factory=dict)
+
+
 def run(path: str, host: str, port: int, working_set_gib: float,
         profile: str | None, tune: str = "default",
         overrides: dict | None = None, draft: bool = True,
         serving: dict | None = None, ring: dict | None = None) -> int:
+    """`knurlogic serve`: register the artifact, resolve its launch, apply
+    and report it, then serve it (or follow rank 0). A refusal prints its
+    REFUSING line(s) and returns REFUSED_EXIT."""
     a = Artifact.load(path)
+    try:
+        register_artifact(a)
+        launch = resolve_launch(a, working_set_gib, profile, tune, overrides,
+                                draft, ring)
+        apply_launch(launch)
+    except Refused as e:
+        print(e, file=sys.stderr)
+        return REFUSED_EXIT
+    return serve_launch(launch, host, port, serving)
+
+
+def register_artifact(a: Artifact) -> None:
+    """Register the artifact's architecture -- the same registration a
+    switch gets (interfaces/load_checks.py); Refused when it cannot load."""
     print(f"artifact  {a.path.name}  ({a.model_type}, {a.gib:.1f} GiB)")
     print(f"engine    {engine.describe()}")
 
@@ -162,75 +137,90 @@ def run(path: str, host: str, port: int, working_set_gib: float,
                f"engine ships")
     missing = load_checks.register(a)
     if missing:
-        print(f"REFUSING: no implementation for {missing}. This artifact "
-              f"cannot load, and starting a server that 500s on every request "
-              f"helps nobody.", file=sys.stderr)
-        return REFUSED_EXIT
+        raise Refused(f"{REFUSING}no implementation for {missing}. This "
+                      f"artifact cannot load, and starting a server that "
+                      f"500s on every request helps nobody.")
 
+
+def _ring_share(a: Artifact, ring: dict, world: int, working_set_gib: float,
+                overrides: dict | None) -> tuple:
+    """(this rank's share in bytes, the overrides with the ring-wide knobs)
+    for a rank of a split: checked (Refused), its environment, marker and
+    read plan set."""
+    ring_why = ring_refusals(a, ring, working_set_gib)
+    if ring_why:
+        raise Refused("\n".join([f"REFUSING a {world}-rank "
+                                 f"{ring.get('split')} split of "
+                                 f"{a.path.name}:",
+                                 *(f"  - {w}" for w in ring_why)]))
+    if ring.get("split") == "pipeline":
+        from knurlogic.tuning import fit, pipeline_split
+        per, other = pipeline_split.pipeline_layer_bytes(a)
+        # rank 0 holds the tower only with vision on and the head only
+        # with MTP on -- the ring-wide sets, never this rank's --no-draft,
+        # so every rank computes the same split
+        from knurlogic.tuning.knobs import canonical_sets, mtp_of, vision_of
+        rs = canonical_sets(dict(overrides or {}))
+        lead = pipeline_split.leader_bytes(a, vision=vision_of(rs), mtp=mtp_of(rs))
+        bw = ring.get("bandwidth_gbs") or identity.chip_bandwidth_gbs(identity.chip())
+        # every rank's working set and bandwidth are gathered once the
+        # ring is up; the split is computed the same way on every rank
+        ring["pipeline"] = {
+            "layer_bytes": per, "other_bytes": other,
+            "leader_bytes": lead,
+            "reserve": fit.fit_reserve(a.raw_config),
+            "working_set": int(working_set_gib * GIB),
+            "bandwidth_gbs": bw, "counts": ring.get("layers") or None}
+        share = pipeline_split.pipeline_share_bytes(per, other, int(ring["rank"]),
+                                     world, ring.get("layers") or None,
+                                     leader=lead)
+        print(f"pipeline  rank {ring['rank']} of {world} over "
+              f"{ring['link']}: {len(per)} layers, "
+              f"{gib(sum(per))} split by layer + "
+              f"{gib(other)} on every rank; memory bandwidth "
+              + (f"{bw:g} GB/s" if bw else "unknown here"))
+    else:
+        from knurlogic.tuning.knobs import canonical_sets, mtp_of, vision_of
+        from knurlogic.tuning.pipeline_split import leader_bytes
+        from knurlogic.tuning.tensor_split import tensor_placement
+        pl = tensor_placement(a, world)
+        # rank 0 alone holds the head (MTP on) and the tower (vision on)
+        rs = canonical_sets(dict(overrides or {}))
+        share = int(pl["per_rank_bytes"]) + (leader_bytes(
+            a, vision=vision_of(rs), mtp=mtp_of(rs))
+            if int(ring["rank"]) == 0 else 0)
+        print(f"tensor    rank {ring['rank']} of {world} over "
+              f"{ring['link']}: holds ~{pl['per_rank_bytes'] / GIB:.1f} "
+              f"GiB ({pl['sharded_bytes'] / GIB:.1f} split {world} ways "
+              f"+ {pl['replicated_bytes'] / GIB:.1f} replicated)")
+    _ring_env(ring)
+    _ring_marker(ring)
+    _read_plan(a)
+    # what this rank holds once loaded (rank 0: its share plus the MTP
+    # head and tower it alone holds): the page's load % is against it
+    from knurlogic.engine.split import marker
+    marker.progress(share_bytes=int(share or 0) or None)
+    # the ring-wide knobs beat the resolver like any --set
+    overrides = dict(overrides or {})
+    overrides.pop("VQLAB_PREFILL_CHUNK", None)
+    overrides["KNURLOGIC_PREFILL_CHUNK"] = str(int(ring["prefill_chunk"]))
+    if ring.get("decode_chunk"):
+        overrides["VQ_DECODE_CHUNK"] = str(int(ring["decode_chunk"]))
+    return share, overrides
+
+
+def resolve_launch(a: Artifact, working_set_gib: float, profile: str | None,
+                   tune: str, overrides: dict | None, draft: bool,
+                   ring: dict | None) -> Launch:
+    """The launch settled: the model's launch settings, the budget and the
+    resolver's answer for this artifact (and this rank's share of a
+    split), each refusal raised as Refused with its reason."""
     ring = ring or {}
     world = int(ring.get("world") or 1)
     share = None
     if world > 1:
-        ring_why = _ring_refusals(a, ring, working_set_gib, overrides or {})
-        if ring_why:
-            print(f"REFUSING a {world}-rank {ring.get('split')} split of "
-                  f"{a.path.name}:", file=sys.stderr)
-            for w in ring_why:
-                print(f"  - {w}", file=sys.stderr)
-            return REFUSED_EXIT
-        if ring.get("split") == "pipeline":
-            from knurlogic.tuning import fit, pipeline_split
-            per, other = pipeline_split.pipeline_layer_bytes(a)
-            # rank 0 holds the tower only with vision on and the head only
-            # with MTP on -- the ring-wide sets, never this rank's --no-draft,
-            # so every rank computes the same split
-            from knurlogic.tuning.knobs import canonical_sets, mtp_of, vision_of
-            rs = canonical_sets(dict(overrides or {}))
-            lead = pipeline_split.leader_bytes(a, vision=vision_of(rs), mtp=mtp_of(rs))
-            bw = ring.get("bandwidth_gbs") or identity.chip_bandwidth_gbs(identity.chip())
-            # every rank's working set and bandwidth are gathered once the
-            # ring is up; the split is computed the same way on every rank
-            ring["pipeline"] = {
-                "layer_bytes": per, "other_bytes": other,
-                "leader_bytes": lead,
-                "reserve": fit.fit_reserve(a.raw_config),
-                "working_set": int(working_set_gib * GIB),
-                "bandwidth_gbs": bw, "counts": ring.get("layers") or None}
-            share = pipeline_share_bytes(per, other, int(ring["rank"]),
-                                         world, ring.get("layers") or None,
-                                         leader=lead)
-            print(f"pipeline  rank {ring['rank']} of {world} over "
-                  f"{ring['link']}: {len(per)} layers, "
-                  f"{gib(sum(per))} split by layer + "
-                  f"{gib(other)} on every rank; memory bandwidth "
-                  + (f"{bw:g} GB/s" if bw else "unknown here"))
-        else:
-            from knurlogic.tuning.knobs import canonical_sets, mtp_of, vision_of
-            from knurlogic.tuning.pipeline_split import leader_bytes
-            from knurlogic.tuning.tensor_split import tensor_placement
-            pl = tensor_placement(a, world)
-            # rank 0 alone holds the head (MTP on) and the tower (vision on)
-            rs = canonical_sets(dict(overrides or {}))
-            share = int(pl["per_rank_bytes"]) + (leader_bytes(
-                a, vision=vision_of(rs), mtp=mtp_of(rs))
-                if int(ring["rank"]) == 0 else 0)
-            print(f"tensor    rank {ring['rank']} of {world} over "
-                  f"{ring['link']}: holds ~{pl['per_rank_bytes'] / GIB:.1f} "
-                  f"GiB ({pl['sharded_bytes'] / GIB:.1f} split {world} ways "
-                  f"+ {pl['replicated_bytes'] / GIB:.1f} replicated)")
-        _ring_env(ring)
-        _ring_marker(ring)
-        _read_plan(a)
-        # what this rank holds once loaded (rank 0: its share plus the MTP
-        # head and tower it alone holds): the page's load % is against it
-        from knurlogic.engine.split import marker
-        marker.progress(share_bytes=int(share or 0) or None)
-        # the ring-wide knobs beat the resolver like any --set
-        overrides = dict(overrides or {})
-        overrides.pop("VQLAB_PREFILL_CHUNK", None)
-        overrides["KNURLOGIC_PREFILL_CHUNK"] = str(int(ring["prefill_chunk"]))
-        if ring.get("decode_chunk"):
-            overrides["VQ_DECODE_CHUNK"] = str(int(ring["decode_chunk"]))
+        share, overrides = _ring_share(a, ring, world, working_set_gib,
+                                       overrides)
 
     # The model's own launch settings (MTP, its controller, KV precision):
     # read before the resolver, since the KV bits change what the context
@@ -253,35 +243,29 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         print(f"  note: {n}")
     why = settings_refusal(a, overrides)
     if why:
-        print(f"REFUSING: {why}", file=sys.stderr)
-        return REFUSED_EXIT
+        raise Refused(f"{REFUSING}{why}")
     overrides = preferences.launch_sets(overrides)
     why = refuse_sets(a, overrides)
     if why:
-        print(f"REFUSING: {why}", file=sys.stderr)
-        return REFUSED_EXIT
+        raise Refused(f"{REFUSING}{why}")
     try:
         tune = presets.preset_of(overrides.pop("KNURLOGIC_PRESET", None), tune)
     except ValueError as e:
-        print(f"REFUSING: {e}", file=sys.stderr)
-        return REFUSED_EXIT
+        raise Refused(f"{REFUSING}{e}") from None
     try:
         launch = knobs.engine_settings({**preset_env(a, tune),
                                         **{k: v for k, v in overrides.items()
                                            if k in knobs.MODEL_KNOBS}})
     except ValueError as e:
-        print(f"REFUSING: {e}", file=sys.stderr)
-        return REFUSED_EXIT
+        raise Refused(f"{REFUSING}{e}") from None
     kv_bits = launch.get("kv_bits")
     why = kv_refusal(a, kv_bits)
     if why:
-        print(f"REFUSING: {why}", file=sys.stderr)
-        return REFUSED_EXIT
+        raise Refused(f"{REFUSING}{why}")
     long_context = launch.get("long_context", "off")
     why = context_window.long_context_refusal(a.model_type, long_context)
     if why:
-        print(f"REFUSING: {why}", file=sys.stderr)
-        return REFUSED_EXIT
+        raise Refused(f"{REFUSING}{why}")
     if launch.get("mtp") is False:
         draft = False
     vision = launch.get("vision", True)
@@ -308,8 +292,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         from knurlogic.tuning.fit import single_fit_check
         chk = single_fit_check(a, ws, draft, kv_bits, vision)
         if chk["state"] == "cannot":
-            print(f"REFUSING: {chk['why']}", file=sys.stderr)
-            return REFUSED_EXIT
+            raise Refused(f"{REFUSING}{chk['why']}")
     adv = wired.advise(a.bytes_on_disk)
     if adv.get("action") == "raise":
         print("\n" + wired.render(adv) + "\n")
@@ -328,12 +311,23 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         why = long_context_room(a, ws, a.bytes_on_disk if share is None
                                 else share, ctx, kv_bits)
         if why:
-            print(f"REFUSING: KNURLOGIC_LONG_CONTEXT=yarn: {why}",
-                  file=sys.stderr)
-            return REFUSED_EXIT
+            raise Refused(f"{REFUSING}KNURLOGIC_LONG_CONTEXT=yarn: {why}")
     print(f"preset    {tune}" + (
         f" (overridden: {', '.join(sorted(r.preset['overridden']))})"
         if r.preset.get("overridden") else ""))
+    return Launch(a=a, ring=ring, world=world, share=share,
+                  overrides=overrides, tune=tune, profile=profile,
+                  working_set_gib=working_set_gib, launch=launch,
+                  kv_bits=kv_bits, long_context=long_context, draft=draft,
+                  vision=vision, rounding=rounding, ws=ws, adv=adv, r=r)
+
+
+def apply_launch(L: Launch) -> None:
+    """Set the resolved environment (an explicit --set over the resolver's
+    value) and report it: every knob, the notes, the warnings and the
+    runtime that will execute."""
+    from knurlogic.tuning import knobs
+    a, r, ring, world, overrides = L.a, L.r, L.ring, L.world, L.overrides
     # An explicit --set WINS over the resolver. Most of these knobs are read
     # at import and compiled into kernel source, so startup is the only
     # moment they can be chosen at all -- which makes "the resolver decides
@@ -376,9 +370,21 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         from knurlogic.engine.model.load import vq_without_runtime
         why = vq_without_runtime(a.path)
         if why:
-            print(f"\nREFUSING: {why}", file=sys.stderr)
-            return REFUSED_EXIT
+            raise Refused(f"\n{REFUSING}{why}")
+    L.forced = forced
 
+
+def serve_launch(L: Launch, host: str, port: int,
+                 serving: dict | None) -> int:
+    """Serve the launch: the status, settings and load routes, the prompt
+    cache's size, and the HTTP server (lifecycle.serve) -- or, on a rank
+    of a split past 0, follow rank 0."""
+    a, r, ring, world, share = L.a, L.r, L.ring, L.world, L.share
+    tune, profile, launch, draft = L.tune, L.profile, L.launch, L.draft
+    kv_bits, long_context, vision = L.kv_bits, L.long_context, L.vision
+    rounding, ws, adv, forced = L.rounding, L.ws, L.adv, L.forced
+    working_set_gib = L.working_set_gib
+    from knurlogic.engine import matmul_padding
     rows = arch.check(a.model_type)
 
     def _resolve_for(ws_bytes, tune_name):
@@ -476,7 +482,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         return snap, text
 
     serving = dict(serving or {})
-    pc_size, pc_bytes, pc_why = prompt_cache_policy(
+    pc_size, pc_bytes, pc_why = prompt_cache.prompt_cache_policy(
         serving, world, ws, share if share is not None else a.bytes_on_disk)
     serving["prompt_cache_size"] = pc_size
     serving.pop("prompt_cache_bytes", None)
@@ -646,45 +652,6 @@ def _ring_chips(text: str) -> list | None:
         return None
     return [c for c in v if isinstance(c, dict)] \
         if isinstance(v, list) else None
-
-
-def _ring_refusals(a: Artifact, ring: dict, working_set_gib: float,
-                   overrides: dict) -> list:
-    """Why this rank cannot join a tensor split, with the numbers."""
-    from knurlogic.tuning.tensor_split import tensor_split_refusals
-    why = []
-    if ring.get("split") not in ("tensor", "pipeline"):
-        why.append(f"--split {ring.get('split')!r}: this build splits "
-                   f"'tensor' or 'pipeline'")
-    if not 0 <= int(ring["rank"]) < int(ring["world"]):
-        why.append(f"rank {ring['rank']} is outside a world of "
-                   f"{ring['world']}")
-    if working_set_gib <= 0:
-        why.append("a ring needs --working-set-gib: every rank's memory "
-                   "guard is stated, not detected")
-    if not ring.get("prefill_chunk"):
-        why.append("a ring needs --prefill-chunk: the prompt chunk is "
-                   "ring-wide, never resolved per rank")
-    if ring.get("link") == "ring" and not ring.get("hosts"):
-        why.append("--link ring needs --hosts (one address:port per rank)")
-    if ring.get("link") == "ring" and ring.get("hosts") and \
-            len(ring["hosts"]) != int(ring["world"]):
-        why.append(f"--hosts names {len(ring['hosts'])} ranks for a world "
-                   f"of {ring['world']}")
-    if ring.get("link") == "jaccl" and not (ring.get("ibv_devices")
-                                            and ring.get("coordinator")):
-        why.append("--link jaccl needs --ibv-devices and --coordinator")
-    if ring.get("split") == "pipeline":
-        from knurlogic.tuning.pipeline_split import pipeline_refusals
-        why += pipeline_refusals(a.raw_config, int(ring["world"]))
-        n = ring.get("layers") or []
-        if n and len(n) != int(ring["world"]):
-            why.append(f"--layers names {len(n)} ranks for a world of "
-                       f"{ring['world']}")
-    else:
-        why += tensor_split_refusals(a.path, int(ring["world"]),
-                                     a.raw_config)
-    return why
 
 
 def _ring_env(ring: dict) -> None:

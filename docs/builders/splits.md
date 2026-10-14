@@ -33,7 +33,7 @@ Outside it:
 - `engine/families/<family>/pipeline_stage.py` and the manifest's
   `pipeline` / `tensor` / `tensor_split` entries.
 - `interfaces/serve.py`: a rank's launch (`_ring_env`, `_ring_refusals`,
-  `pipeline_share_bytes`); a rank >= 1 calls `follower.serve_follower`.
+  `tuning/pipeline_split.pipeline_share_bytes`); a rank >= 1 calls `follower.serve_follower`.
 - `interfaces/http/lifecycle.py` (`watch_ring`): rank 0's server watches
   the ring.
 - `tuning/tensor_split.py`: `tensor_refusals`, `tensor_sharded`,
