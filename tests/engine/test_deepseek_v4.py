@@ -22,11 +22,11 @@ sys.path.insert(0, str(FIX))
 
 cu = pytest.importorskip("transformers.utils.chat_template_utils")
 
-import encoding_dsv4 as official  # noqa: E402
+import encoding_dsv4 as official
 
-from knurlogic.engine import templates  # noqa: E402
-from knurlogic.engine.families.deepseek import chat_template as dsml  # noqa: E402
-from knurlogic.engine.runtime import prompt as P  # noqa: E402
+from knurlogic.engine import templates
+from knurlogic.engine.families.deepseek import chat_template as dsml
+from knurlogic.engine.runtime import prompt as P
 
 TEMPLATE = templates.text("deepseek_v4")
 BOS, EOS = "<｜begin▁of▁sentence｜>", "<｜end▁of▁sentence｜>"

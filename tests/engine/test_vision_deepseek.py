@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "tests" / "support" / "goldens"))
 
-import build_deepseek_v4_vision as G  # noqa: E402
+import build_deepseek_v4_vision as G
 
 REF = Path(os.environ.get("KNURLOGIC_TEST_DEEPSEEK_V4_VISION")
            or "/nonexistent")
@@ -385,7 +385,7 @@ IMG_ID = 60     # the placeholder's id in the tiny vocab
 
 
 def _random(module, rng):
-    import mlx.nn as nn  # noqa: F401
+    from mlx import nn  # noqa: F401
     from mlx.utils import tree_flatten, tree_unflatten
     w = []
     for k, v in tree_flatten(module.parameters()):
@@ -615,7 +615,7 @@ def test_vision_tag_needs_a_tower_in_the_artifact(tmp_path):
         d.mkdir()
         (d / "config.json").write_text(json.dumps(cfg))
         (d / "model.safetensors.index.json").write_text(json.dumps(
-            {"weight_map": {k: "model.safetensors" for k in keys}}))
+            {"weight_map": dict.fromkeys(keys, "model.safetensors")}))
     assert registry.registered("deepseek_v4")
     assert not registry.registered("deepseek_v4", tmp_path / "flash")
     assert not registry.registered("deepseek_v4", tmp_path / "teacher")
@@ -693,7 +693,7 @@ def test_a_vision_config_with_no_vision_weights_loads_text_only(
         state.VISION.update(error="")
 
 
-def test_a_conversion_without_the_tower_but_with_the_trunks_vision_tensors_loads_text_only(  # noqa: E501
+def test_a_conversion_without_the_tower_but_with_the_trunks_vision_tensors_loads_text_only(
         tmp_path, monkeypatch):
     """Every vision-only trunk tensor kept (bias_vl, the image rows, the
     hash layers' bias) but no tower: built as the config says, so those

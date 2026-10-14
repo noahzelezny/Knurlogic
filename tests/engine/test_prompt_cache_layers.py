@@ -16,12 +16,12 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 mx = pytest.importorskip("mlx.core")
 
-from test_prompt_disk import Host, _forced  # noqa: E402
-from test_scheduler import Tok, _collect, _job  # noqa: E402
+from test_prompt_disk import Host, _forced
+from test_scheduler import Tok, _collect, _job
 
-from knurlogic.engine.prompt_cache import disk as D  # noqa: E402
-from knurlogic.engine.prompt_cache import layers as LY  # noqa: E402
-from knurlogic.engine.prompt_cache import location as LOC  # noqa: E402
+from knurlogic.engine.prompt_cache import disk as D
+from knurlogic.engine.prompt_cache import layers as LY
+from knurlogic.engine.prompt_cache import location as LOC
 
 
 def _key(**kw):

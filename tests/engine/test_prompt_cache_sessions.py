@@ -11,11 +11,11 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 mx = pytest.importorskip("mlx.core")
 
-from test_scheduler import Tok, _collect, _job  # noqa: E402
+from test_scheduler import Tok, _collect, _job
 
-from knurlogic.engine.prompt_cache import disk as D  # noqa: E402
-from knurlogic.engine.prompt_cache import location as LOC  # noqa: E402
-from knurlogic.engine.prompt_cache.memory import PromptCache  # noqa: E402
+from knurlogic.engine.prompt_cache import disk as D
+from knurlogic.engine.prompt_cache import location as LOC
+from knurlogic.engine.prompt_cache.memory import PromptCache
 
 
 def _key(**kw):
@@ -413,7 +413,7 @@ def test_a_pin_never_moves_a_session_out_of_memory(sched):
 def _chat(system, user, **kw):
     from knurlogic.engine.runtime import prompt as P
     from knurlogic.engine.runtime.scheduler import Job
-    say = lambda ids: " ".join(str(i) for i in ids)     # noqa: E731
+    say = lambda ids: " ".join(str(i) for i in ids)
     return Job(P.ChatRequest(messages=[
         {"role": "system", "content": say(system)},
         {"role": "user", "content": say(user)}]), P.PromptArgs(), **kw)
@@ -516,7 +516,7 @@ def test_entries_no_session_owns_can_be_dropped(sched):
                             session="e1", keep_latest=True)))
     _collect(s.submit(_job(s.prompts[2], max_tokens=3)))        # nobody's
     assert s.save_prompt_cache().done.wait(60)
-    mine = lambda: [f for f in D.list_disk()                   # noqa: E731
+    mine = lambda: [f for f in D.list_disk()
                     if f["model"] == "tiny-sessionless"]
     assert any(f["session"] is None for f in mine())           # the shared
     young = s.drop_sessionless(older_than_s=3600)

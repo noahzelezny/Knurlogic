@@ -5,9 +5,9 @@ import pytest
 
 mx = pytest.importorskip("mlx.core")
 
-from mlx_lm.models.gated_delta import gated_delta_ops  # noqa: E402
+from mlx_lm.models.gated_delta import gated_delta_ops
 
-from knurlogic.engine import backend, gated_delta  # noqa: E402
+from knurlogic.engine import backend, gated_delta
 
 T = 2 * gated_delta.CHUNK + 5
 

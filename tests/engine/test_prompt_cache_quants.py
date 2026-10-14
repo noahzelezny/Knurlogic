@@ -16,15 +16,15 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 mx = pytest.importorskip("mlx.core")
 
-from test_prompt_cache_convert import _equal, _setup  # noqa: E402
-from test_prompt_cache_layers import LINK, _gather_as, _lru_of  # noqa: E402
-from test_prompt_cache_tensor import _layout_parts, _share  # noqa: E402
+from test_prompt_cache_convert import _equal, _setup
+from test_prompt_cache_layers import LINK, _gather_as, _lru_of
+from test_prompt_cache_tensor import _layout_parts, _share
 
-from knurlogic.engine.arrays import arrays_of  # noqa: E402
-from knurlogic.engine.prompt_cache import convert as CV  # noqa: E402
-from knurlogic.engine.prompt_cache import disk as D  # noqa: E402
-from knurlogic.engine.prompt_cache import layers as LY  # noqa: E402
-from knurlogic.engine.prompt_cache import quants as QT  # noqa: E402
+from knurlogic.engine.arrays import arrays_of
+from knurlogic.engine.prompt_cache import convert as CV
+from knurlogic.engine.prompt_cache import disk as D
+from knurlogic.engine.prompt_cache import layers as LY
+from knurlogic.engine.prompt_cache import quants as QT
 
 FP = "0123456789abcdef"
 

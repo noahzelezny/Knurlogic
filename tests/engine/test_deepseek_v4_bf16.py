@@ -20,8 +20,8 @@ sys.path.insert(0, str(ROOT / "tests" / "support" / "goldens"))
 mx = pytest.importorskip("mlx.core")
 nn = pytest.importorskip("mlx.nn")
 
-import build_deepseek_v4_bf16 as B  # noqa: E402
-from backends import gpu_rounding  # noqa: E402
+import build_deepseek_v4_bf16 as B
+from backends import gpu_rounding
 
 GOLD = dict(np.load(B.OUT))
 INP = B.inputs()

@@ -74,7 +74,7 @@ def status_fn(_n=0):
             snaps.append({**status.snapshot(
                 node=p.name or p.host, role="remote", reachable=False,
                 memory_fn=lambda: {"available": False},
-                machine_fn=lambda: {}),
+                machine_fn=dict),
                 "found_by": sorted(p.found_by), "state": p.state,
                 "problem": p.problem, "address": p.key})
     # what a coordinator page needs of this machine to place a rank on it

@@ -17,7 +17,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 mx = pytest.importorskip("mlx.core")
 
-from test_prompt_cache_layers import (  # noqa: E402
+from test_prompt_cache_layers import (
     LINK,
     _gather_as,
     _key,
@@ -25,12 +25,12 @@ from test_prompt_cache_layers import (  # noqa: E402
     _model,
     _parts,
 )
-from test_prompt_disk import _forced  # noqa: E402
+from test_prompt_disk import _forced
 
-from knurlogic.engine.prompt_cache import disk as D  # noqa: E402
-from knurlogic.engine.prompt_cache import layers as LY  # noqa: E402
-from knurlogic.engine.prompt_cache import transfer as TR  # noqa: E402
-from knurlogic.interfaces.page import prompt_cache as PC  # noqa: E402
+from knurlogic.engine.prompt_cache import disk as D
+from knurlogic.engine.prompt_cache import layers as LY
+from knurlogic.engine.prompt_cache import transfer as TR
+from knurlogic.interfaces.page import prompt_cache as PC
 
 
 class _Handler:

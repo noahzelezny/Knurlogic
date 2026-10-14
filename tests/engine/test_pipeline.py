@@ -79,7 +79,7 @@ def test_uneven_layers_are_checked_exactly():
     assert s["bounds"] == [(3, 4), (0, 3)] and s["layers"] == [1, 3]
     assert s["bytes"] == [3 * GIB, 5 * GIB]
     # and when no contiguous cut fits, the count split's arithmetic is said
-    with pytest.raises(ValueError, match="layers 2..3 are 6.0 GiB"):
+    with pytest.raises(ValueError, match=r"layers 2\.\.3 are 6\.0 GiB"):
         pipeline_split.pipeline_shares(per, _ranks(8, 8))
 
 
@@ -605,7 +605,7 @@ def _stage(model, start, end, *, recv, send):
 
 
 def test_unwrap_sees_through_both_ends_of_a_one_layer_stage():
-    import mlx.nn as nn
+    from mlx import nn
 
     from knurlogic.engine.model import trunk
     from knurlogic.engine.split import pipeline as PL
@@ -622,7 +622,7 @@ def test_overlap_finds_a_stages_send_and_is_undone_on_the_way_out(
     OVERLAP=off leaves every send synchronous (the A/B)."""
     import types
 
-    import mlx.nn as nn
+    from mlx import nn
 
     from knurlogic.engine.split import pipeline as PL
     send = PL.Send(PL.Recv(nn.Linear(2, 2), 1, None, mx.float32), 0, None,

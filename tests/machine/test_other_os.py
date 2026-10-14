@@ -52,7 +52,7 @@ def test_linux_temperature_is_the_hottest_sensor(monkeypatch):
         "k10temp": [t(current=61.25)], "nvme": [t(current=40.0),
                                                 t(current=0.0)]}, raising=False)
     assert metrics._temp_c() == 61.2
-    monkeypatch.setattr(metrics.psutil, "sensors_temperatures", lambda: {},
+    monkeypatch.setattr(metrics.psutil, "sensors_temperatures", dict,
                         raising=False)
     assert metrics._temp_c() is None
 

@@ -28,8 +28,8 @@ sys.path.insert(0, str(ROOT / "tests" / "support" / "goldens"))
 
 mx = pytest.importorskip("mlx.core")
 
-import build_glm5_next_bf16 as G  # noqa: E402
-from backends import bf16_gather  # noqa: E402
+import build_glm5_next_bf16 as G
+from backends import bf16_gather
 
 GOLD = dict(np.load(G.OUT))
 

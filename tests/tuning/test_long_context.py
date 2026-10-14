@@ -21,11 +21,11 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
-from knurlogic.machine.artifact import Artifact  # noqa: E402
-from knurlogic.tuning import checks, context_window  # noqa: E402
-from knurlogic.tuning.context_window import long_context_room  # noqa: E402
-from knurlogic.machine.units import GIB  # noqa: E402
-from knurlogic.tuning.resolve import resolve  # noqa: E402
+from knurlogic.machine.artifact import Artifact
+from knurlogic.machine.units import GIB
+from knurlogic.tuning import checks, context_window
+from knurlogic.tuning.context_window import long_context_room
+from knurlogic.tuning.resolve import resolve
 
 FACTOR, ORIG = 4.0, 262144
 
@@ -189,7 +189,7 @@ def _attns(model):
 
 @pytest.mark.parametrize("fam", ["qwen3_5", "qwen3_5_moe"])
 def test_qwen3_5_off_is_plain_rope(fam):
-    import mlx.nn as nn
+    from mlx import nn
     model, _ = _tiny(fam, "off")
     for a in _attns(model):
         assert type(a.rope) is nn.RoPE

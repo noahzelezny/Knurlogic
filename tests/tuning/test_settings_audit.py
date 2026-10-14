@@ -140,7 +140,7 @@ def test_the_old_cache_limit_name_is_accepted_and_reaches_an_old_runtime():
     assert knobs.engine_settings({**env, **sets})["cache_limit_gb"] == 2.0
 
 
-from test_cluster_jobs import cache  # noqa: E402,F401 (a fixture)
+from test_cluster_jobs import cache  # noqa: F401
 
 
 def test_a_cluster_job_runs_the_saved_prompt_chunk(cache, monkeypatch):

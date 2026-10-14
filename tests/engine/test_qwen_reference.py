@@ -25,8 +25,8 @@ sys.path.insert(0, str(ROOT / "tests" / "support" / "goldens"))
 
 mx = pytest.importorskip("mlx.core")
 
-import build_qwen_reference as G  # noqa: E402
-from backends import gpu_rounding  # noqa: E402
+import build_qwen_reference as G
+from backends import gpu_rounding
 
 #: float32 on both sides, different kernels and summation orders: measured
 #: max |diff| ~1e-6 on logits of magnitude ~4

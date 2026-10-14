@@ -5,7 +5,7 @@ own words; a server that refuses anyway exits REFUSED_EXIT and says why."""
 import json
 
 import pytest
-from test_cluster_jobs import SHAPE, info, spec  # noqa: F401
+from test_cluster_jobs import SHAPE, info, spec
 
 from knurlogic.cluster import launch as C
 from knurlogic.interfaces import serve
@@ -44,7 +44,7 @@ def test_prepare_refuses_bad_settings_before_a_rank_starts(cache):
                           resolve=lambda i: str(d),
                           info=info("Apple M3 Ultra", "192.0.2.2"),
                           shape=lambda p, w, sp, vision=True, mtp=True: SHAPE,
-                          registry=lambda: {})
+                          registry=dict)
     assert code == 200 and not doc["ok"]
     assert "launch settings are refused" in doc["refused"]
     assert "bogus" in doc["refused"]
@@ -69,7 +69,7 @@ def test_a_serve_refusal_exits_with_its_own_code():
 
 # --- a saved context past the model's window never bricks a launch --------
 
-from knurlogic.tuning import context_window  # noqa: E402
+from knurlogic.tuning import context_window
 
 QWEN = {"max_position_embeddings": 262144}
 

@@ -26,7 +26,7 @@ nothing else runs. Design: docs/design/drafting.md.
   seed.py             seed a head over a prompt in prefill-sized chunks
 """
 
-from ._artifacts import (  # noqa: F401 -- re-exported, the package's API
+from ._artifacts import (
     BUILT,
     DECLARED,
     GRAFTABLE,

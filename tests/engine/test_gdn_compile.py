@@ -14,8 +14,8 @@ import pytest
 
 mx = pytest.importorskip("mlx.core")
 
-import tensor_ring_worker as W  # noqa: E402
-from backends import bf16_gather  # noqa: E402
+import tensor_ring_worker as W
+from backends import bf16_gather
 
 IDS = [[5, 17, 3, 99, 42, 7, 64, 11, 23], [8, 2, 77, 13, 5, 61, 40, 9, 30]]
 THEN = [[31, 104, 331, 32, 439, 214], [7, 12, 250, 3, 88, 19]]

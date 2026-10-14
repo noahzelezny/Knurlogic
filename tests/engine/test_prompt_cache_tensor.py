@@ -18,16 +18,16 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 mx = pytest.importorskip("mlx.core")
 
-from test_prompt_cache_layers import LINK, _gather_as, _key, _lru_of  # noqa: E402
-from test_prompt_cache_transfer import _Peer  # noqa: E402
-from test_prompt_disk import _family, _forced  # noqa: E402
+from test_prompt_cache_layers import LINK, _gather_as, _key, _lru_of
+from test_prompt_cache_transfer import _Peer
+from test_prompt_disk import _family, _forced
 
-from knurlogic.engine.arrays import arrays_of  # noqa: E402
-from knurlogic.engine.prompt_cache import disk as D  # noqa: E402
-from knurlogic.engine.prompt_cache import layers as LY  # noqa: E402
-from knurlogic.engine.prompt_cache import slices as SL  # noqa: E402
-from knurlogic.engine.prompt_cache import transfer as TR  # noqa: E402
-from knurlogic.engine.split import tensor_rules as TRL  # noqa: E402
+from knurlogic.engine.arrays import arrays_of
+from knurlogic.engine.prompt_cache import disk as D
+from knurlogic.engine.prompt_cache import layers as LY
+from knurlogic.engine.prompt_cache import slices as SL
+from knurlogic.engine.prompt_cache import transfer as TR
+from knurlogic.engine.split import tensor_rules as TRL
 
 
 def _host(model, layout):
@@ -291,7 +291,7 @@ def test_fewer_kv_heads_than_ranks_one_holder_writes_each(tmp_path,
 def test_a_family_without_a_spec_keeps_the_per_split_format():
     """No cache spec (or units that do not split): part_of is None and the
     per-split format is used; uses_layers says so on every rank."""
-    model = NS(layers=[], make_cache=lambda: [])
+    model = NS(layers=[], make_cache=list)
     host = _host(model, {"split": "tensor", "world": 2, "rank": 0})
     assert TRL.cache_cuts(NS(model_type="gemma4", layers=[])) is None
     assert not LY.uses_layers(host)

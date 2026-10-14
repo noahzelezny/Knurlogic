@@ -50,7 +50,7 @@ def test_discovery_reads_saved_folders(tmp_path, monkeypatch):
     f = tmp_path / "External Drive"
     _model(f / "qwen-x")
     folders.add(str(f))
-    monkeypatch.setattr(discover, "_running_tool_roots", lambda: [])
+    monkeypatch.setattr(discover, "_running_tool_roots", list)
     assert f in [p for _s, p in discover._roots()]
     assert any(r.path == f / "qwen-x" for r in discover.find())
 
@@ -60,7 +60,7 @@ def test_unmounted_folder_skipped_quietly(tmp_path, monkeypatch):
     f.mkdir(parents=True)
     folders.add(str(f))
     f.rmdir()
-    monkeypatch.setattr(discover, "_running_tool_roots", lambda: [])
+    monkeypatch.setattr(discover, "_running_tool_roots", list)
     assert f not in [p for _s, p in discover._roots()]
     assert folders.saved() == [str(f)]          # still remembered
 

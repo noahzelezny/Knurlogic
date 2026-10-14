@@ -21,7 +21,7 @@ import json
 from abc import ABC, abstractmethod
 
 import mlx.core as mx
-import mlx.nn as nn
+from mlx import nn
 from mlx.utils import tree_flatten, tree_unflatten
 
 from knurlogic.engine.model import packed, weight_files
@@ -133,7 +133,7 @@ class GraftHead(DraftHead):
         return self
 
     @classmethod
-    def _from_recipe(cls, model, arch, recipe: dict):
+    def _from_recipe(cls, model, arch, _recipe: dict):
         """A fresh head for a sidecar saved with `recipe`."""
         return cls(model, arch)
 
@@ -225,12 +225,12 @@ class PackedSidecar(ABC):
     def _check_keys(self, w: dict) -> None:
         """Refuse sidecar keys this head cannot hold (before renaming): none
         by default."""
-        return None
+        return
 
     def _prepare(self, mw: dict) -> None:
         """Swap modules the sidecar packs in a non-mlx format (before the
         quantize pass): none by default."""
-        return None
+        return
 
     def bind(self, w: dict) -> dict:
         """Shape this head to sidecar tensors and check it matches them

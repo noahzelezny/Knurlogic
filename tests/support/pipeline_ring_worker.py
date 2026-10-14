@@ -799,7 +799,7 @@ def _v4_mtp_tiny(tmp):
     drafts are steered to "the last token again" (the tiny model's greedy
     loops accept some)."""
     import mlx.core as mx
-    import mlx.nn as nn
+    from mlx import nn
     from mlx.utils import tree_flatten, tree_unflatten
     from tensor_ring_worker import build_deepseek_v4
 

@@ -10,7 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from knurlogic.machine.memory import allowance, wired  # noqa: E402
+from knurlogic.machine.memory import allowance, wired
 
 GIB = 1 << 30
 

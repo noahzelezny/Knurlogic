@@ -7,8 +7,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from knurlogic.engine.runtime.memory_guard import OutOfMemory  # noqa: E402
-from knurlogic.engine.runtime.scheduler import (  # noqa: E402,E501
+from knurlogic.engine.runtime.memory_guard import OutOfMemory
+from knurlogic.engine.runtime.scheduler import (
     Job,
     RingFailed,
     Scheduler,
@@ -105,7 +105,7 @@ def test_mcp_state_lists_requests_per_model(monkeypatch):
         {"name": "m", "where": "http://127.0.0.1:9", "requests": req},
         {"name": "x", "where": "http://127.0.0.1:11434", "requests": None}],
         "runtimes": ["knurlogic"], "memory": {}})
-    monkeypatch.setattr(spawn, "children", lambda: [])
+    monkeypatch.setattr(spawn, "children", list)
     monkeypatch.setitem(identity._ID, "name", "here")
     st = mcp.state()           # no page (conftest): this Mac's survey
     assert st["requests"] == [dict(req, model="m", machine="here",

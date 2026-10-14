@@ -38,7 +38,7 @@ class _BlockMlxVlm:
     def find_spec(self, name, path=None, target=None):
         if name == "mlx_vlm":
             raise ImportError("mlx_vlm is not installed (test double)")
-        return None
+        return
 
 
 @pytest.fixture
@@ -469,6 +469,6 @@ def test_glm_vision_weights_are_read_under_glms_own_tower_names(
 
     from knurlogic.engine.vision import registry as R
     (tmp_path / "model.safetensors.index.json").write_text(json.dumps(
-        {"weight_map": {n: "model.safetensors" for n in names}}))
+        {"weight_map": dict.fromkeys(names, "model.safetensors")}))
     cfg = {"model_type": "glm5_next", "vision_config": {"depth": 2}}
     assert R.vision_weights(cfg, tmp_path)["state"] == state

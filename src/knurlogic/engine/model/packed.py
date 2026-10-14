@@ -66,7 +66,7 @@ def quantize_like(module, weights: dict, model_path=None,
     `module`) holds packed, each to its own recipe, the scaled modes read
     from the config.json of the artifact at `model_path` (`prefix`: the
     module's path there, for per-layer entries). -> how many."""
-    import mlx.nn as nn
+    from mlx import nn
     if not any(k.endswith(".scales") for k in weights):
         return 0
     quant = artifact_quantization(model_path) if model_path else {}

@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from itertools import accumulate
 
 import mlx.core as mx
-import mlx.nn as nn
+from mlx import nn
 
 from knurlogic.engine.vision._base import BaseModelConfig, ensure_fused_sdpa
 from knurlogic.engine.vision.layers import rotate_half

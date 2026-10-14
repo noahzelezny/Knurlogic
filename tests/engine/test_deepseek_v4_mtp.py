@@ -21,7 +21,7 @@ sys.path.insert(0, str(ROOT / "tests" / "support" / "goldens"))
 mx = pytest.importorskip("mlx.core")
 nn = pytest.importorskip("mlx.nn")
 
-import build_deepseek_v4 as G  # noqa: E402
+import build_deepseek_v4 as G
 
 #: VQ Lab's head beside its Flash build (optional; headers only)
 #: (the Flash VQ build's folder; set KNURLOGIC_TEST_DEEPSEEK_V4_HEAD)

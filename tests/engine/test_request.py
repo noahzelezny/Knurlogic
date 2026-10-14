@@ -11,9 +11,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 pytest.importorskip("mlx_lm")
 
-from knurlogic.engine.runtime.control_tokens import control_machine  # noqa: E402
-from knurlogic.engine.runtime.executor import Token  # noqa: E402
-from knurlogic.engine.runtime.request import Request  # noqa: E402
+from knurlogic.engine.runtime.control_tokens import control_machine
+from knurlogic.engine.runtime.executor import Token
+from knurlogic.engine.runtime.request import Request
 
 # A toy vocabulary: one string per id. 90 = end of turn.
 VOCAB = {1: "<think>", 2: "</think>", 3: "<tool_call>", 4: "</tool_call>",
@@ -127,7 +127,7 @@ def test_a_stop_found_the_moment_the_text_completes_it():
 
 
 def test_a_tool_call_is_parsed_and_the_finish_says_tool_calls():
-    parse = lambda text, tools: json.loads(text)  # noqa: E731
+    parse = lambda text, tools: json.loads(text)
     got, req = run([10, 3, 17, 4, 90], tool_parser=parse)
     assert got["content"] == "The"
     [tc] = got["tool_calls"]
@@ -137,7 +137,7 @@ def test_a_tool_call_is_parsed_and_the_finish_says_tool_calls():
 
 
 def test_an_unclosed_tool_call_is_still_reported_at_the_end():
-    parse = lambda text, tools: json.loads(text)  # noqa: E731
+    parse = lambda text, tools: json.loads(text)
     got, _ = run([3, 17], tool_parser=parse)
     assert len(got["tool_calls"]) == 1 and got["finish"] == "length"
 
@@ -243,7 +243,7 @@ def test_thinking_close_cut_at_every_boundary_never_leaks_a_partial_tag():
 
 
 def test_tool_calls_after_thinking_close_are_parsed():
-    parse = lambda text, tools: json.loads(text)  # noqa: E731
+    parse = lambda text, tools: json.loads(text)
     got, _ = _run_thinking([1, 15, 31, 32, 33, 34, 10, 3, 17, 4, 90],
                            tool_parser=parse)
     assert got["reasoning"] == " Hmm" and got["content"] == "The"

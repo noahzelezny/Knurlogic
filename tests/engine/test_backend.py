@@ -4,7 +4,7 @@ import pytest
 
 pytest.importorskip("mlx.core")
 
-from knurlogic.engine import backend, kvattn  # noqa: E402
+from knurlogic.engine import backend, kvattn
 
 
 def test_the_back_end_is_named():

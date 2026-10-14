@@ -1,8 +1,8 @@
 """The load-time warm-up: one tiny generation before the host says ready."""
 import importlib
 
-import mlx.nn as nn
 import pytest
+from mlx import nn
 
 from knurlogic.engine.arrays import arrays_of
 from knurlogic.engine.runtime import model_host as H

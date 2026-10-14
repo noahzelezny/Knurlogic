@@ -12,12 +12,12 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from knurlogic.engine.vision import (  # noqa: E402
+from knurlogic.engine.vision import (
     ImageRef,
     KeyMismatch,
-    registry,  # noqa: E402
+    registry,
 )
-from knurlogic.engine.vision import key as K  # noqa: E402
+from knurlogic.engine.vision import key as K
 
 PAD = 99
 A = ImageRef("a" * 64, "p1", 3, (1, 2, 6))

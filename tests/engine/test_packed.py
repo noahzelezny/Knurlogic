@@ -1,7 +1,7 @@
 """engine/model/packed: a packed layer's recipe read off its tensors."""
 from types import SimpleNamespace
 
-import mlx.nn as nn
+from mlx import nn
 
 from knurlogic.engine.model.packed import recipe
 

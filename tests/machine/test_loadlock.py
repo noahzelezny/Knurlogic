@@ -17,7 +17,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
-from knurlogic.machine import loadlock  # noqa: E402
+from knurlogic.machine import loadlock
 
 HOLD = """
 import sys, time
@@ -131,7 +131,7 @@ def test_ring_ranks_on_one_machine_do_not_deadlock_on_the_lock(
     import importlib
     import threading
 
-    import mlx.nn as nn
+    from mlx import nn
 
     from knurlogic.engine.runtime import model_host as H
     L = importlib.import_module("knurlogic.engine.model.loading")

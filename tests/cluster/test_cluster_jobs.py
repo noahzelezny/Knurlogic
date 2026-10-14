@@ -102,7 +102,7 @@ def test_placement_leaves_the_step_margin():
     least 4 GiB) is refused; the reason says what each rank leaves."""
     ms = [{"name": "A", **info("Apple M4 Max", "192.0.2.1", ws=7 * GIB)},
           {"name": "B", **info("Apple M3 Ultra", "192.0.2.2")}]
-    with pytest.raises(ValueError, match="4.0 GiB step margin"):
+    with pytest.raises(ValueError, match=r"4\.0 GiB step margin"):
         C.placement(ms, SHAPE, "tensor")              # 4 of 7 GiB: 3 left
     ms[0]["working_set_bytes"] = 8 * GIB
     t = C.placement(ms, SHAPE, "tensor")
@@ -218,7 +218,7 @@ def prep(s, **kw):
                      info=kw.get("info", info("Apple M3 Ultra", "192.0.2.2")),
                      shape=lambda p, w, sp, vision=True, mtp=True:
                      kw.get("shape", SHAPE),
-                     registry=lambda: {})
+                     registry=dict)
 
 
 @pytest.fixture
@@ -289,7 +289,7 @@ def test_the_cluster_block_carries_the_build(monkeypatch):
     monkeypatch.setattr(C, "_INFO", {"doc": None, "at": 0.0})
     monkeypatch.setattr(C.identity, "chip", lambda: "Apple M4 Max")
     monkeypatch.setattr(C, "_selfheal", lambda: False)
-    monkeypatch.setattr(links, "thunderbolt", lambda: [])
+    monkeypatch.setattr(links, "thunderbolt", list)
     monkeypatch.setattr(links, "rdma", lambda: {"available": False})
     v = C.node_info(0)["versions"]
     assert v["build"] == C.build_fingerprint()
@@ -922,7 +922,7 @@ def test_prepare_refuses_a_share_beside_what_another_job_holds(cache):
     held = [("job 41648583878fcdfc rank 1", 54699, int(49.5 * GIB))]
     code, doc = C.prepare(spec(), resolve=lambda i: "/m/x", info=ws,
                           shape=lambda p, w, s, vision=True, mtp=True: big,
-                          registry=lambda: {},
+                          registry=dict,
                           held=lambda job: held)
     assert not doc["ok"], doc
     r = doc["refused"]
@@ -930,7 +930,7 @@ def test_prepare_refuses_a_share_beside_what_another_job_holds(cache):
     assert "pid 54699" in r and "41648583878fcdfc" in r
     code, doc = C.prepare(spec(), resolve=lambda i: "/m/x", info=ws,
                           shape=lambda p, w, s, vision=True, mtp=True: big,
-                          registry=lambda: {},
+                          registry=dict,
                           held=lambda job: [])
     assert doc["ok"], doc
     C.PREPARED.clear()
@@ -1120,7 +1120,7 @@ def test_start_refuses_when_a_stopped_rank_will_not_go(cache, monkeypatch):
 def test_a_stop_whose_rank_outlives_the_reap_is_finished_by_the_watcher(
         cache, monkeypatch):
     job = "41648583878fcdfc"
-    monkeypatch.setattr(C, "_peer_pages", lambda: {})
+    monkeypatch.setattr(C, "_peer_pages", dict)
     p = slow_rank(job, 1, 3)
     out = C.stop(job, propagate=False, grace=0.2, reap=0.1)
     # SIGKILL takes a Popen at once; a slow reaper is modelled by the
@@ -1177,7 +1177,7 @@ def test_a_slow_page_whose_machine_is_there_keeps_the_job(monkeypatch):
     answer while its machine accepts a connection is slow, not gone."""
     monkeypatch.setattr(C, "_PEER_OK", {})
     monkeypatch.setattr(C, "_PEER_SLOW", set())
-    monkeypatch.setattr(C, "peers_fn", lambda: [])
+    monkeypatch.setattr(C, "peers_fn", list)
     job = "ab12cd34ef567890"
     recs = [{"job": job, "rank": 0, "pid": 1, "t": 0.0,
              "nodes": [{"rank": 0, "id": "a", "name": "M4"},
@@ -1231,7 +1231,7 @@ def test_watch_keeps_a_job_whose_peer_page_is_slow(monkeypatch):
                        {"rank": 1, "id": "b", "name": "M3"}]}]
     monkeypatch.setattr(J, "by_job", lambda: {job: recs})
     monkeypatch.setattr(C, "_peer_pages", lambda: {"b": "192.0.2.1:8765"})
-    monkeypatch.setattr(C, "peers_fn", lambda: [])
+    monkeypatch.setattr(C, "peers_fn", list)
     monkeypatch.setattr(C, "_page_up", lambda page, timeout=2.0: True)
 
     def down(page, j):
@@ -1650,7 +1650,7 @@ def test_a_late_stop_keeps_the_failovers_relaunch(cache, monkeypatch):
     """The coordinator's failover can move a job to the next cable before
     the failing rank's stop reaches it; that stop must not erase where the
     job went (it did, now and then, in a Linux container)."""
-    monkeypatch.setattr(C, "_peer_pages", lambda: {})
+    monkeypatch.setattr(C, "_peer_pages", dict)
     job = "81648583878fcdfc"
     C.SPECS[job] = spec(job=job)
     C.ENDED[job] = {"reason": "link init failed; relaunched on cable "
@@ -1666,7 +1666,7 @@ def test_an_unload_is_recorded_as_requested(cache, monkeypatch):
     """The page drops a launch's card for a requested stop and shows a
     failure otherwise (picker.js followLaunch reads the ended kind): an
     unload, which carries no kind of its own, is recorded as requested."""
-    monkeypatch.setattr(C, "_peer_pages", lambda: {})
+    monkeypatch.setattr(C, "_peer_pages", dict)
     job = "51648583878fcdfc"
     C.SPECS[job] = spec(job=job)
     C.stop(job, reason="unloaded", post=lambda *a, **k: {})

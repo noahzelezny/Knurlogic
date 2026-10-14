@@ -47,7 +47,7 @@ def recurrence(q, k, v, g, beta, state, mask=None, *, use_kernel=True,
 def ops(q, k, v, g, beta, state, mask=None):
     """mlx-lm's gated_delta_ops, the state evaluated every CHUNK tokens
     (the same arithmetic; evaluation only bounds what is alive)."""
-    B, T, Hk, Dk = q.shape
+    _, T, Hk, _ = q.shape
     Hv = v.shape[-2]
     if (r := Hv // Hk) > 1:
         q, k = mx.repeat(q, r, -2), mx.repeat(k, r, -2)

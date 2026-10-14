@@ -13,17 +13,17 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-import fixtures_vision as fv  # noqa: E402
+import fixtures_vision as fv
 
-from knurlogic.engine.vision import (  # noqa: E402
+from knurlogic.engine.vision import (
     EncodedImage,
     ImageEvicted,
     ImageRef,
     ImageRejected,
     ImageTooLarge,
-    images,  # noqa: E402
+    images,
 )
-from knurlogic.engine.vision.store import (  # noqa: E402
+from knurlogic.engine.vision.store import (
     DEFAULT_MAX_BYTES,
     ImageStore,
 )
@@ -205,7 +205,7 @@ def test_garbage_and_oversize_are_rejected(monkeypatch):
 
 def test_stub_family_end_to_end():
     mx = pytest.importorskip("mlx.core")
-    import mlx.nn as nn
+    from mlx import nn
 
     from knurlogic.engine.vision import key as K
     D, PAD = 64, 500

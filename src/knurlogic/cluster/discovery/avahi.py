@@ -176,19 +176,19 @@ class Discovery:
         return True
 
     # -- callbacks, on the loop thread ------------------------------------
-    def _on_client(self, client, state, ud):
+    def _on_client(self, _client, state, _ud):
         if state == CLIENT_FAILURE:
             self.errors.append("avahi-daemon went away; nothing more is "
                                "found until the page restarts")
 
-    def _on_group(self, group, state, ud):
+    def _on_group(self, _group, state, _ud):
         if state in (GROUP_COLLISION, GROUP_FAILURE):
             self.errors.append("register: " + (
                 "the name is taken" if state == GROUP_COLLISION
                 else "failed"))
 
-    def _on_browse(self, b, ifi, proto, event, name, regtype, domain, flags,
-                   ud):
+    def _on_browse(self, _b, ifi, proto, event, name, regtype, domain,
+                   _flags, _ud):
         key = ((name or b"").decode(errors="replace"), ifi)
         if event == BROWSER_NEW:
             _lib().avahi_service_resolver_new(
@@ -202,8 +202,8 @@ class Discovery:
         elif event == BROWSER_FAILURE:
             self.errors.append("browse: failed")
 
-    def _on_resolve(self, r, ifi, proto, event, name, regtype, domain, host,
-                    addr, port, txt, flags, ud):
+    def _on_resolve(self, r, ifi, _proto, event, name, _regtype, _domain,
+                    _host, addr, port, txt, _flags, _ud):
         lib = _lib()
         if event == RESOLVER_FOUND and addr:
             buf = ctypes.create_string_buffer(64)

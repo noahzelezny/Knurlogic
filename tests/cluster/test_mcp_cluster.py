@@ -244,7 +244,7 @@ def page_a(tmp_path, monkeypatch, owned_procs):
                 for port in servers.registry()]}
         return doc
     monkeypatch.setattr(documents, "loaded_document", local_residency)
-    monkeypatch.setattr("knurlogic.machine.loaded.survey", lambda: {})
+    monkeypatch.setattr("knurlogic.machine.loaded.survey", dict)
     serve_port = T.free_port()
     loaded = page_loads.loaded_fn()
     routes = documents.routes(status_fn=page_nodes.status_fn,

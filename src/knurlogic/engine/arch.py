@@ -204,10 +204,7 @@ def check(model_type: str, models_dir: Path | None = None) -> list:
             _host, p = locate(mod)
             vendored = False
         present = bool(p and p.exists())
-        if not present:
-            sha = None
-        else:
-            sha = digest(p)
+        sha = digest(p) if present else None
         rows.append(ArchStatus(mod, present, p if present else None, sha,
                                PINNED_SHA256.get(mod), vendored))
     return rows

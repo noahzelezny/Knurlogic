@@ -17,12 +17,12 @@ sys.path.insert(0, str(ROOT))
 
 mx = pytest.importorskip("mlx.core")
 
-import fixtures_vision as fv  # noqa: E402
-import fixtures_vision_gemma4 as g4fv  # noqa: E402
+import fixtures_vision as fv
+import fixtures_vision_gemma4 as g4fv
 
-from knurlogic.engine.families.gemma4.vision import Gemma4Vision  # noqa: E402
-from knurlogic.engine.vision import ImageRef  # noqa: E402
-from knurlogic.engine.vision.key import expand  # noqa: E402
+from knurlogic.engine.families.gemma4.vision import Gemma4Vision
+from knurlogic.engine.vision import ImageRef
+from knurlogic.engine.vision.key import expand
 
 
 def _tiny_family() -> Gemma4Vision:
@@ -60,7 +60,7 @@ def _write_quantized_embed(tmp_path):
     whose tower is plain -- the layout gemma e4b VQ ships."""
     import json
 
-    import mlx.nn as nn
+    from mlx import nn
     from mlx.utils import tree_flatten
     fam = _tiny_family()
     gs = 32
@@ -92,7 +92,7 @@ def test_g1_quantized_embedder_can_fail(tmp_path, monkeypatch):
     import knurlogic.engine.families.gemma4.vision as g4
     _write_quantized_embed(tmp_path)
     monkeypatch.setattr(g4, "quantize_like", lambda *a, **k: 0)
-    with pytest.raises(ValueError, match="scales|biases"):
+    with pytest.raises(ValueError, match=r"scales|biases"):
         _tiny_family().load_weights(str(tmp_path))
 
 

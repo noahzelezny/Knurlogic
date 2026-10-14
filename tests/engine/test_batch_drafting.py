@@ -287,7 +287,7 @@ def test_failed_admission_can_fail(monkeypatch):
     gen = bg.MTPBatchGenerator(model, head, prefill_step_size=16)
     monkeypatch.setattr(bg, "admit", lambda *a, **k: (_ for _ in ()).throw(
         RuntimeError("boom")))
-    monkeypatch.setattr(gen, "_failed_responses", lambda: [])
+    monkeypatch.setattr(gen, "_failed_responses", list)
     gen.insert(prompts[:1], max_tokens=[5])
     prs, _ = gen.next()
     assert not any(isinstance(r.progress, Exception) for r in prs)

@@ -26,8 +26,8 @@ sys.path.insert(0, str(ROOT / "tests/support/goldens"))
 
 mx = pytest.importorskip("mlx.core")
 
-from backends import gpu_rounding  # noqa: E402
-from build_gemma4_text import np_weights  # noqa: E402
+from backends import gpu_rounding
+from build_gemma4_text import np_weights
 
 GOLD = np.load(ROOT / "tests/support/goldens/gemma4_text.npz")
 #: float32 both sides; the reference and MLX differ only in summation order
@@ -172,7 +172,7 @@ def test_text_rmsnorm_is_within_one_bf16_ulp_of_the_reference():
     measured slower at decode (architecture/PROVENANCE.md, "RMSNorm
     rounding"). The unscaled norm (v_norm, the router's) rounds once and
     matches."""
-    import mlx.nn as nn
+    from mlx import nn
     norm = nn.RMSNorm(1024, eps=1e-6)
     norm.weight = _bf16("ops/w")
     ulps = _ulps(norm(_bf16("ops/x")), _bf16("ops/norm"))

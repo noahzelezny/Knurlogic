@@ -10,13 +10,13 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 mx = pytest.importorskip("mlx.core")
 
-from knurlogic.engine import backend  # noqa: E402
+from knurlogic.engine import backend
 
 pytestmark = pytest.mark.skipif(
     not backend.metal(), reason="the decode kernel is Metal's; elsewhere "
     "kvattn stays off (tests/engine/test_backend.py)")
 
-from test_batch_drafting import _run  # noqa: E402
+from test_batch_drafting import _run
 
 
 def _tiny(vocab=512):

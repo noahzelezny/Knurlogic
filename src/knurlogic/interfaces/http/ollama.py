@@ -140,7 +140,7 @@ def _durations(usage: dict, started: float) -> dict:
     # so the time is taken from the timings, not from the prompt size
     pre = max(ttft - queue, 0)
     dec = ((out - 1) / t["decode_tok_s"]) if t.get("decode_tok_s") else 0
-    ns = lambda s: int(s * 1e9)             # noqa: E731
+    ns = lambda s: int(s * 1e9)  # noqa: E731
     total = ttft + dec if ttft else time.time() - started
     return {"total_duration": ns(total), "load_duration": 0,
             "prompt_eval_count": prompt, "prompt_eval_duration": ns(pre),

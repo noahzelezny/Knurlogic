@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src"
 sys.path.insert(0, str(SRC))
 
-from knurlogic.engine import families  # noqa: E402
+from knurlogic.engine import families
 
 
 def test_every_family_folder_is_listed_and_every_listed_one_exists():

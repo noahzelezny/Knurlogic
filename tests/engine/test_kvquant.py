@@ -9,7 +9,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 mx = pytest.importorskip("mlx.core")
 
-from test_batch_drafting import _run, _tiny  # noqa: E402
+from test_batch_drafting import _run, _tiny
 
 
 def _kv(shape, seed=0, dtype=None):

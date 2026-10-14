@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 
 import mlx.core as mx
-import mlx.nn as nn
+from mlx import nn
 from mlx.utils import tree_flatten
 
 from knurlogic.engine.model.trunk import text_model

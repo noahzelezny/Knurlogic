@@ -17,8 +17,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "engine"))
 
 mx = pytest.importorskip("mlx.core")
 
-from test_batch_drafting import _tiny  # noqa: E402
-from test_scheduler import Host, Tok  # noqa: E402
+from test_batch_drafting import _tiny
+from test_scheduler import Host, Tok
 
 
 class DTok(Tok):
@@ -29,7 +29,7 @@ class DTok(Tok):
 @pytest.fixture(scope="module")
 def url():
     """One server for the module, never stopped (see test_scheduler)."""
-    import mlx.nn as nn
+    from mlx import nn
 
     from knurlogic.engine.mtp import binding
     from knurlogic.engine.runtime.scheduler import Scheduler

@@ -166,6 +166,5 @@ MANIFEST = {
                                  "visual.", "model.visual.",
                                  "model.language_model.visual.",
                                  "vision_tower."]}},
-    "sampling": {"non_thinking": {
-        t: _NON_THINKING for t in ("qwen3_5", "qwen3_5_moe", "qwen4_exp")}},
+    "sampling": {"non_thinking": dict.fromkeys(("qwen3_5", "qwen3_5_moe", "qwen4_exp"), _NON_THINKING)},
 }

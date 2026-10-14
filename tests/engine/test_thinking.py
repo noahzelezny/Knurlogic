@@ -15,7 +15,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
-from knurlogic.engine.model import thinking as T  # noqa: E402
+from knurlogic.engine.model import thinking as T
 
 MODELS = Path(os.environ.get("KNURLOGIC_MODELS",
                            Path.home() / ".exo" / "models"))

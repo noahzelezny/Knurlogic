@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "tests" / "support" / "goldens"))
 
-from knurlogic.tuning import fit, pipeline_split  # noqa: E402
+from knurlogic.tuning import fit, pipeline_split
 
 ARCH = ROOT / "src/knurlogic/engine/families/deepseek/architecture"
 # A local DeepSeek-V4-Flash artifact directory (optional).
@@ -94,7 +94,7 @@ def test_the_real_artifact_splits_m3_ultra_96_and_m4_max_128_by_bytes():
 mx = pytest.importorskip("mlx.core")
 nn = pytest.importorskip("mlx.nn")
 
-import build_deepseek_v4 as G  # noqa: E402
+import build_deepseek_v4 as G
 
 
 def _load(model_config=None):

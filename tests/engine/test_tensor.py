@@ -480,8 +480,7 @@ def test_a_follower_applies_a_set_even_while_parked(monkeypatch):
     load = importlib.import_module("knurlogic.engine.model.loading")
     got = []
     monkeypatch.setattr(load, "apply_live",
-                        lambda env: got.append(env) or {
-                            k: "applied" for k in env})
+                        lambda env: got.append(env) or dict.fromkeys(env, "applied"))
     link = _FakeLink([
         {"ops": [{"op": "set", "name": "KNURLOGIC_CACHE_LIMIT_GB",
                   "value": "20"}, {"op": "park"}]},
@@ -825,7 +824,7 @@ def test_without_the_runtime_split_load_config_adds_nothing(tmp_path):
 def test_a_module_the_runtime_split_is_not_cut_again():
     import types
 
-    import mlx.nn as nn
+    from mlx import nn
 
     from knurlogic.engine.split import tensor as T
     from knurlogic.engine.split.tensor_rules import RULES
@@ -993,7 +992,7 @@ def _probe_module(perm=None, experts=None):
     """y = x @ W.T with W stored under a parameter name no rule knows;
     `perm` stores the output rows out of order (read back through it),
     `experts` adds a per-expert axis the module indexes."""
-    import mlx.nn as nn
+    from mlx import nn
 
     class Probe(nn.Module):
         def __init__(self):
@@ -1039,7 +1038,7 @@ def test_skipzero_cut_by_rows_mixes_experts():
     # the real module's geometry: codes [NLIVE, W] and row_table [E, OUT];
     # a row cut of the packed codes leaves the (whole) table's rows
     # unhalved, so the part is refused unrun
-    import mlx.nn as nn
+    from mlx import nn
 
     from knurlogic.engine.split.tensor_rules import A2S, Rule
     from knurlogic.engine.split.viability import check_module

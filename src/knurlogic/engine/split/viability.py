@@ -83,10 +83,10 @@ def check_module(m, rule, n: int, key_dim: int = 0, seed: int = 0):
         x = mx.random.normal((TOKENS, 1, 1, IN), key=kx).astype(mx.float16)
         idx = mx.random.randint(0, g["num_experts"], (TOKENS, TOP_K),
                                 key=ki).astype(mx.uint32)
-        run = lambda mod, xx: mod(xx, idx)              # noqa: E731
+        run = lambda mod, xx: mod(xx, idx)  # noqa: E731
     else:
         x = mx.random.normal((TOKENS, IN), key=kx).astype(mx.float16)
-        run = lambda mod, xx: mod(xx)                   # noqa: E731
+        run = lambda mod, xx: mod(xx)  # noqa: E731
     whole = run(m, x).astype(mx.float32)
     if rule.kind == A2S:
         split = mx.concatenate([run(p, x).astype(mx.float32)

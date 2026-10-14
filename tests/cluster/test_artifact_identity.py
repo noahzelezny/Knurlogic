@@ -53,7 +53,7 @@ def test_symlinked_pins_read_through(tmp_path):
 
 def test_same_identity_is_the_same_weights_one_is_chosen(tmp_path,
                                                           monkeypatch):
-    monkeypatch.setattr(A, "_network_mounts", lambda: [])
+    monkeypatch.setattr(A, "_network_mounts", list)
     a = _art(tmp_path / "s1", "one", b"a")
     b = _art(tmp_path / "s2", "two", b"a")
     ident = A.identity(a)
@@ -126,7 +126,7 @@ def test_a_differing_local_copy_yields_to_the_shared_one(tmp_path,
     assert A.prefer_shared(A.identity(same), "m", [shared, same]) == \
         (A.identity(same), "")
     # no shared copy at all
-    monkeypatch.setattr(A, "_network_mounts", lambda: [])
+    monkeypatch.setattr(A, "_network_mounts", list)
     assert A.prefer_shared(A.identity(local), "m", paths) == \
         (A.identity(local), "")
 
@@ -153,7 +153,7 @@ def test_spec_name_is_never_a_path():
 def test_the_plain_name_beats_a_prefixed_copy(tmp_path, monkeypatch):
     # sp190--X sorts before X on some paths; without a picked name every
     # machine should still land on X, so the ranks name the same folder
-    monkeypatch.setattr(A, "_network_mounts", lambda: [])
+    monkeypatch.setattr(A, "_network_mounts", list)
     a = _art(tmp_path / "a", "sp190--Qwen--M", b"a")
     b = _art(tmp_path / "b", "Qwen--M", b"a")
     ident = A.identity(a)
@@ -270,14 +270,14 @@ def test_flush_races_writers_without_losing_entries(tmp_path, monkeypatch):
                 with A._DISK.lock:
                     A._DISK._live()[k] = [[], "v"]
                     A._DISK._schedule()
-        except Exception as e:      # noqa: BLE001
+        except Exception as e:
             errors.append(e)
 
     def flusher():
         try:
             for _ in range(50):
                 A._DISK.flush()
-        except Exception as e:      # noqa: BLE001
+        except Exception as e:
             errors.append(e)
 
     ts = [threading.Thread(target=writer, args=(keys[i::4],))

@@ -7,7 +7,7 @@ of them imports the pipeline split just to find the layers.
 
 from __future__ import annotations
 
-import mlx.nn as nn
+from mlx import nn
 
 _MISSING = object()
 

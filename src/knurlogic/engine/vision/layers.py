@@ -9,7 +9,7 @@ its `square` says, so each tower keeps the form it was matched with.
 from __future__ import annotations
 
 import mlx.core as mx
-import mlx.nn as nn
+from mlx import nn
 
 
 def _power_square(x: mx.array) -> mx.array:

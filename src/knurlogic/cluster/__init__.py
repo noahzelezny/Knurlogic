@@ -22,9 +22,9 @@ call to another page can raise, serve's refusal exit status, and `every`,
 the one background loop.
 """
 
-import logging  # noqa: E402
-import threading  # noqa: E402
-import time  # noqa: E402
+import logging
+import threading
+import time
 
 #: `knurlogic serve`'s exit status when it refuses to start (bad settings,
 #: a model it cannot load as asked): deterministic, so the page fails the

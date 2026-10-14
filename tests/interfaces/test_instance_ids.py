@@ -9,7 +9,7 @@ from types import SimpleNamespace
 # the MCP cluster fixtures live beside the cluster tests
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "cluster"))
 
-from test_mcp_cluster import JOB, REQS, STATUS, page, residency  # noqa: E402, F401
+from test_mcp_cluster import JOB, REQS, STATUS, page, residency  # noqa: F401
 
 from knurlogic.interfaces import mcp, spawn
 from knurlogic.interfaces.page import running
@@ -56,7 +56,7 @@ def test_instance_of_a_cluster_rank_is_its_job_id(monkeypatch):
 
 
 def test_instance_of_an_unregistered_port_is_empty(monkeypatch):
-    monkeypatch.setattr(servers, "registry", lambda: {})
+    monkeypatch.setattr(servers, "registry", dict)
     assert loaded._instance_of("http://127.0.0.1:8080") == ""
     assert loaded._instance_of("http://x") == ""          # no port at all
 
@@ -93,7 +93,7 @@ def test_models_across_carries_a_cluster_jobs_instance_as_its_job_id():
     assert len(m) == 1 and m[0]["instance"] == "j1"
 
 
-def test_unload_by_instance_reaches_this_macs_own_server(page):  # noqa: F811
+def test_unload_by_instance_reaches_this_macs_own_server(page):
     page.answer = {"stopped": "small"}
     out = mcp.unload(instance="deadbeefcafefeed")
     # the fixture's residency() has no such instance; assert the no-match
@@ -101,14 +101,14 @@ def test_unload_by_instance_reaches_this_macs_own_server(page):  # noqa: F811
     assert "error" in out
 
 
-def test_unload_by_instance_matches_like_unload_by_job(monkeypatch, page):  # noqa: F811
+def test_unload_by_instance_matches_like_unload_by_job(monkeypatch, page):
     page.answer = {"stopped": "j1", "told": ["B"]}
     out = mcp.unload(instance="j1")
     assert page.posts == [{"action": "unload", "job": "j1"}]
     assert out["instance"] == "j1"
 
 
-def test_unload_needs_a_name(page):  # noqa: F811
+def test_unload_needs_a_name(page):
     out = mcp.unload()
     assert "error" in out
     assert "instance" in out["error"]
@@ -130,7 +130,7 @@ def test_residency_reports_the_instance(monkeypatch):
 def test_residency_omits_instance_when_unknown(monkeypatch):
     from knurlogic.interfaces.http import residency as res_api
 
-    monkeypatch.setattr(servers, "registry", lambda: {})
+    monkeypatch.setattr(servers, "registry", dict)
     host = SimpleNamespace(status=lambda: {
         "state": "ready", "model": "/p/A", "memory_bytes": 1 << 30})
     sched = SimpleNamespace(width=1, requests=lambda: REQS)
@@ -138,7 +138,7 @@ def test_residency_omits_instance_when_unknown(monkeypatch):
     assert "instance" not in doc["data"][0]
 
 
-def test_unload_of_a_failed_job_clears_its_record_by_its_first_id(page):  # noqa: F811
+def test_unload_of_a_failed_job_clears_its_record_by_its_first_id(page):
     """A failed cluster job runs nowhere: its unload is an unload by job
     (the page clears recovery's record on every Mac and says so), never a
     stop of a port nobody serves; the id its load answered finds it, and

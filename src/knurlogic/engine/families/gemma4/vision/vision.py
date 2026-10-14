@@ -17,12 +17,13 @@ from functools import partial
 from typing import Optional
 
 import mlx.core as mx
-import mlx.nn as nn
 import numpy as np
+from mlx import nn
 
 from knurlogic.engine.vision._base import ensure_fused_sdpa
 from knurlogic.engine.vision.layers import RMSNorm as VisionRMSNorm
 from knurlogic.engine.vision.layers import RMSNormNoScale, rotate_half
+
 from .config import VisionConfig
 
 

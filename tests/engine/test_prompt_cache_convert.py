@@ -16,16 +16,16 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 mx = pytest.importorskip("mlx.core")
 
-from test_prompt_cache_layers import LINK, _gather_as, _key, _lru_of  # noqa: E402
-from test_prompt_cache_tensor import _layout_parts, _share  # noqa: E402
-from test_prompt_disk import _family, _forced  # noqa: E402
+from test_prompt_cache_layers import LINK, _gather_as, _key, _lru_of
+from test_prompt_cache_tensor import _layout_parts, _share
+from test_prompt_disk import _family, _forced
 
-from knurlogic.engine import kvquant as KQ  # noqa: E402
-from knurlogic.engine.arrays import arrays_of  # noqa: E402
-from knurlogic.engine.prompt_cache import convert as CV  # noqa: E402
-from knurlogic.engine.prompt_cache import disk as D  # noqa: E402
-from knurlogic.engine.prompt_cache import layers as LY  # noqa: E402
-from knurlogic.engine.prompt_cache import slices as SL  # noqa: E402
+from knurlogic.engine import kvquant as KQ
+from knurlogic.engine.arrays import arrays_of
+from knurlogic.engine.prompt_cache import convert as CV
+from knurlogic.engine.prompt_cache import disk as D
+from knurlogic.engine.prompt_cache import layers as LY
+from knurlogic.engine.prompt_cache import slices as SL
 
 #: the largest |logit| difference allowed between a converted 16 -> 8
 #: entry's next tokens and a native 8-bit prefill's (tiny qwen3_5_moe,

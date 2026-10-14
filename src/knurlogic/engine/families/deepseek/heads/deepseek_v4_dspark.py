@@ -56,7 +56,7 @@ from __future__ import annotations
 import dataclasses
 
 import mlx.core as mx
-import mlx.nn as nn
+from mlx import nn
 
 from knurlogic.engine.model.trunk import text_model
 from knurlogic.engine.mtp.head_base import PackedSidecar

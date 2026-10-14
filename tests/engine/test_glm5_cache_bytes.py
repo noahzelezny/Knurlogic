@@ -17,8 +17,8 @@ sys.path.insert(0, str(ROOT / "tests" / "support" / "goldens"))
 
 mx = pytest.importorskip("mlx.core")
 
-import build_glm5_next as G  # noqa: E402
-from backends import bf16_gather  # noqa: E402
+import build_glm5_next as G
+from backends import bf16_gather
 
 CFG = dict(G.CONFIG, kv_lora_rank=64)
 

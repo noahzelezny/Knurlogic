@@ -52,7 +52,7 @@ def cached_tokens(usage: dict) -> int:
 
 def handler_over(transport: Callable, *, translate: Callable,
                  error_body: Callable, answer: Callable, events: Callable,
-                 streams: Callable = lambda req, oai: bool(req.get("stream")),
+                 streams: Callable = lambda req, _oai: bool(req.get("stream")),
                  stream_type: str = "text/event-stream") -> Callable:
     """A dialect's handler(body, write, start_response) over `transport`.
 

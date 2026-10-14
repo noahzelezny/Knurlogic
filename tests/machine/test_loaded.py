@@ -124,7 +124,7 @@ def test_nothing_running_is_an_ordinary_answer(monkeypatch):
     # And the server record: the survey reads ~/.cache/knurlogic/servers.json
     # now, and this test first failed because a real model WAS running.
     from knurlogic.machine import servers
-    monkeypatch.setattr(servers, "registry", lambda: {})
+    monkeypatch.setattr(servers, "registry", dict)
     doc = loaded.survey()
     assert doc["resident"] == []
     assert "nothing reports a loaded model" in loaded.render(doc)

@@ -41,16 +41,16 @@ sys.path.insert(0, str(ROOT / "src"))
 
 mx = pytest.importorskip("mlx.core")
 
-import fixtures_vision as fv  # noqa: E402
-from test_image_cache import (  # noqa: E402,F401
+import fixtures_vision as fv
+from test_image_cache import (
     Harness,
     cached,
     data_url,
     first_top,
-    server,
+    server,  # noqa: F401
 )
 
-from knurlogic.engine.vision import key as K  # noqa: E402
+from knurlogic.engine.vision import key as K
 
 VOCAB = 512
 EOS = 500

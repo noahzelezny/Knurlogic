@@ -86,7 +86,7 @@ def _largest_remainder(n: int, weights: list, floor: list, cap: list) -> list:
             # remainders: the largest fractional part first, lower rank on a
             # tie
             order = sorted(free, key=lambda i: (-(want[i] - int(want[i])), i))
-            give = {i: 0 for i in free}
+            give = dict.fromkeys(free, 0)
             for i in order[:left]:
                 give[i] = 1
         for i, g in give.items():

@@ -70,9 +70,9 @@ def test_start_asks_once_in_the_background(tmp_path):
 
 
 def test_offline_skips_the_check(tmp_path, monkeypatch):
-    assert updates.start(lambda: [], offline_flag=True) is None
+    assert updates.start(list, offline_flag=True) is None
     monkeypatch.setenv("HF_HUB_OFFLINE", "1")
-    assert updates.start(lambda: []) is None
+    assert updates.start(list) is None
 
 
 def test_models_json_carries_update(tmp_path, monkeypatch):
