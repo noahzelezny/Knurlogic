@@ -418,12 +418,9 @@ def machine_settings(split_room=None):
         if not art and _one(q, "identity"):
             # a peer page's picker asks by identity (never by path): this
             # machine's own copy, from its own model stores only
-            from knurlogic.machine.artifact import AmbiguousIdentity, resolve_identity
-            try:
-                art = resolve_identity(_one(q, "identity"),
-                                       name=str(_one(q, "name") or ""))
-            except AmbiguousIdentity as e:
-                return {"knobs": [], "error": str(e)}
+            from knurlogic.machine.artifact import resolve_identity
+            art = resolve_identity(_one(q, "identity"),
+                                   name=str(_one(q, "name") or ""))
             if not art:
                 return {"knobs": [], "error": "this machine does not have "
                                               "that model"}
@@ -721,12 +718,12 @@ def knob_limit(artifact, name: str) -> dict:
     return {"max": w, "max_why": f"This model's maximum is {w:,} tokens."}
 
 
-def compaction_document(env=None, running: bool = True) -> dict:
+def compaction_document(env=None) -> dict:
     """Compaction's operator defaults (tuning/groups.COMPACT_KNOBS), each
     value and what it does. Knurlogic-wide (tuning/preferences): one set
     for every model, read per request by every running server, so each is
     `live`. `env`: an environment to read instead of this process's under
-    the saved values; `running` is kept for callers and changes nothing."""
+    the saved values."""
     from knurlogic.tuning import groups, knobs, preferences
     env = preferences.compaction_env(env)
     rows = []

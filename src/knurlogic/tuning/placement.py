@@ -1,18 +1,41 @@
 """Where a split model's ranks go: the rank order, each rank's share of
 the weights against its machine's budget, and the prompt chunk a rank's
 own room allows. Pure over the machines' cluster blocks and the
-artifact's shape (cluster/launch.shape_of), so every page that places the
-same job places it the same way.
+artifact's shape (`shape_of`, read off its headers), so every page that
+places the same job places it the same way.
 """
 
 from __future__ import annotations
 
 import logging
 
+from knurlogic.machine.artifact import Artifact
 from knurlogic.machine.memory.wired import budget_of
 from knurlogic.machine.units import gib
 
 logger = logging.getLogger(__name__)
+
+
+def shape_of(path: str, world: int, split: str,
+             vision: bool = True, mtp: bool = True) -> dict:
+    """What placement needs of an artifact, read off its headers.
+    `vision`: KNURLOGIC_VISION; off, rank 0 holds no tower. `mtp`:
+    KNURLOGIC_MTP; off, rank 0 holds no head."""
+    from knurlogic.tuning import fit, pipeline_split, tensor_split
+    a = Artifact.load(path)
+    if split == "pipeline":
+        per, other = pipeline_split.pipeline_layer_bytes(a)
+        refusals = pipeline_split.pipeline_refusals(a.raw_config, world)
+        return {"layer_bytes": per, "other_bytes": other,
+                "leader_bytes": pipeline_split.leader_bytes(a, vision=vision, mtp=mtp),
+                "reserve": fit.fit_reserve(a.raw_config),
+                "tensor_per_rank_bytes": 0, "refusals": refusals}
+    return {"layer_bytes": [], "other_bytes": 0,
+            "leader_bytes": pipeline_split.leader_bytes(a, vision=vision, mtp=mtp),
+            "reserve": fit.fit_reserve(a.raw_config),
+            "tensor_per_rank_bytes":
+                tensor_split.tensor_placement(a, world)["per_rank_bytes"],
+            "refusals": tensor_split.tensor_split_refusals(a.path, world, a.raw_config)}
 
 
 def placement(machines: list, shape: dict, split: str,

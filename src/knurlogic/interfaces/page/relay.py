@@ -25,17 +25,19 @@ def peer_relay(handler, method: str, path: str, body: bytes,
         # serves: resolved here by name, sent on to it from loopback
         if not (method == "GET" and path == prompt_cache.PROMPT_CACHE_PATH or
                 method == "POST" and path in prompt_cache.PROMPT_CACHE_POSTS):
-            send_json(handler, 404, {"error": "not a relayed path"})
+            send_json(handler, 404, router.api_error(
+                "not_found_error", "not a relayed path"))
             return
         q = parse_qs(urlparse(getattr(handler, "path", "")).query)
         model = router.requested_model(q, body)
         table = router.local_models(fetch)
         base = router.resolve(table, model)
         if base is None:
-            send_json(handler, 404, {"error": {
-                "message": f"no running model {model!r} on "
-                           f"{identity.identity().get('name') or 'this machine'}",
-                "type": "not_found"}, "models": sorted(table)})
+            send_json(handler, 404, router.api_error(
+                "not_found_error",
+                f"no running model {model!r} on "
+                f"{identity.identity().get('name') or 'this machine'}",
+                models=sorted(table)))
             return
         code, doc = router.send_up(base + path, method,
                              body if method == "POST" else None)
@@ -45,7 +47,8 @@ def peer_relay(handler, method: str, path: str, body: bytes,
     table = router.local_models(fetch, docs)
     if method == "GET":
         if path != "/v1/models":
-            send_json(handler, 404, {"error": "not a relayed path"})
+            send_json(handler, 404, router.api_error(
+                "not_found_error", "not a relayed path"))
             return
         # each server's own entry, so a peer page's chat sees the model's
         # sampling_defaults and context_length, not just its name
@@ -55,14 +58,16 @@ def peer_relay(handler, method: str, path: str, body: bytes,
             for m in sorted(table)]})
         return
     if path not in router.ROUTE_PATHS:
-        send_json(handler, 404, {"error": "not a relayed path"})
+        send_json(handler, 404, router.api_error(
+                "not_found_error", "not a relayed path"))
         return
     try:
         doc = json.loads(body or b"{}")
     except ValueError:
         doc = None
     if not isinstance(doc, dict):
-        send_json(handler, 400, {"error": "the body must be a JSON object"})
+        send_json(handler, 400, router.api_error(
+            "invalid_request_error", "the body must be a JSON object"))
         return
     model = doc.get("model")
     base = router.resolve(table, model)

@@ -14,11 +14,17 @@ import time
 from pathlib import Path
 
 from knurlogic.machine.artifact import bytes_on_disk
-from knurlogic.interfaces.ports import MODEL_PORT, PAGE_PORT
 from knurlogic.machine.http_client import NET_ERRORS, request
 from knurlogic.machine.memory import footprint
 from knurlogic.machine.processes import PROC_ERRORS
-from knurlogic.machine.servers import is_our_server, registry, save_registry, serve_log
+from knurlogic.machine.servers import (
+    MODEL_PORT,
+    PAGE_PORT,
+    is_our_server,
+    registry,
+    save_registry,
+    serve_log,
+)
 
 #: Children started from the page: {port: (Popen, artifact path)}.
 CHILDREN: dict = {}

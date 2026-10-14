@@ -1,9 +1,9 @@
-"""The prompt cache's size (tuning/prompt_cache.prompt_cache_policy): four
+"""The prompt cache's size (tuning/fit.prompt_cache_policy): four
 agents on a hybrid model lose their entries to a server-wide cap of 10.
 One machine: sized by bytes against its memory. A ring:
 count-based, scaled with the concurrent agents, and said."""
 from knurlogic.machine.units import GIB
-from knurlogic.tuning.prompt_cache import (
+from knurlogic.tuning.fit import (
     PROMPT_CACHE_AGENTS_MAX,
     PROMPT_CACHE_PER_AGENT,
     prompt_cache_policy,

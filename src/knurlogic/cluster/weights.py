@@ -106,12 +106,9 @@ def reader(page: str, identity: str, name: str = "", fetch=None):
     local = threading.local()
 
     def read(file, offset, length, into):
-        import http.client
         c = getattr(local, "conn", None)
         if c is None:
-            host, _, port = page.rpartition(":")
-            c = local.conn = http.client.HTTPConnection(
-                host, int(port), timeout=transport.timeout_for("Weights"))
+            c = local.conn = transport.connect(page, "Weights")
         try:
             fetch(page, "Weights", {"identity": identity, "name": name,
                                     "file": file, "offset": offset,

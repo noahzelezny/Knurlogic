@@ -22,7 +22,6 @@ call to another page can raise, serve's refusal exit status, and `every`,
 the one background loop.
 """
 
-import http.client  # noqa: E402
 import logging  # noqa: E402
 import threading  # noqa: E402
 import time  # noqa: E402
@@ -33,9 +32,7 @@ import time  # noqa: E402
 #: EX_CONFIG, distinct from a crash (1) and from argparse's usage error (2).
 REFUSED_EXIT = 78
 
-# What a call to another machine's page can raise.
-# Callers catch these (plus whatever their own parsing adds), not Exception.
-NET_ERRORS = (OSError, ValueError, http.client.HTTPException)
+from knurlogic.machine.http_client import NET_ERRORS  # noqa: E402,F401
 
 
 def every(seconds: float, fn, name: str, *, first: bool = False,

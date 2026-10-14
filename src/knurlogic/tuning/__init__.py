@@ -16,7 +16,8 @@ be, and why.
                      an artifact, a whole launch (and its fit)
   live.py            which knobs a running server can change
   fit.py             the memory arithmetic: KV per token, margins, room,
-                     vision and MTP bytes, the single-Mac fit check
+                     vision and MTP bytes, the single-Mac fit check, the
+                     prompt cache's size
   resolve.py         an artifact + a memory budget -> the environment and
                      argv to run it with, and a note for every decision
   tensor_split.py    the tensor split's arithmetic and refusals

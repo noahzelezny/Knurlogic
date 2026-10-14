@@ -42,9 +42,9 @@ Outside it:
   `pipeline_refusals`, `pipeline_layer_bytes`, `pipeline_shares`,
   `leader_bytes`; `tuning/rank_order.py`: `rank_order`;
   `tuning/resolve.py`: `resolve_cluster`.
-- `tuning/placement.py`: `placement`, `rank_room_chunk`;
+- `tuning/placement.py`: `shape_of`, `placement`, `rank_room_chunk`;
   `tuning/fit.py`: `rank_share_bytes`, `share_refusal`.
-- `cluster/launch.py`: `shape_of`, `viability_refusals`, `rank_argv`,
+- `cluster/launch.py`: `viability_refusals`, `rank_argv`,
   `rank_env`.
 
 ## Rules that keep it correct

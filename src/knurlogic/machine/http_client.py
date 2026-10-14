@@ -5,15 +5,18 @@ server for a document.
                            slow, or answers something that is not JSON --
                            for surveys, where absent is an answer
   send_json(url, payload)  a request with a JSON body (or none); the reply's
-                           document, {} for an empty one; errors raise
+                           document, {} for an empty one; an HTTP error
+                           status raises urllib.error.HTTPError
   request(url, data)       (status, raw body) of one request; an HTTP error
                            status is an answer, not an exception
   open_url(url, data)      the open response, for a caller that streams it;
                            an HTTP error status is returned as its response
 
-`request` and `open_url` raise only when no answer came: one of NET_ERRORS
-(refused, timed out, a broken reply). Their `data` is sent as
-application/json.
+Every call raises only one of NET_ERRORS: no answer came (refused, timed
+out, a broken reply), or the answer did not parse (ValueError; HTTPError is
+an OSError). `get_json` catches them all; `request` and `open_url` turn an
+HTTP error status into an answer; `send_json` lets it raise. Their `data`
+is sent as application/json.
 """
 from __future__ import annotations
 
@@ -22,20 +25,24 @@ import json
 import urllib.error
 import urllib.request
 
-#: what a request that got no answer raises
-NET_ERRORS = (OSError, http.client.HTTPException)
+#: what a call to a local or peer server can raise: no answer, or one
+#: that does not parse
+NET_ERRORS = (OSError, ValueError, http.client.HTTPException)
 
 
 def get_json(url: str, timeout: float = 1.5):
+    """The JSON document at `url`, or None on any of NET_ERRORS."""
     try:
         with urllib.request.urlopen(url, timeout=timeout) as r:
             return json.loads(r.read().decode() or "null")
-    except (*NET_ERRORS, ValueError):
+    except NET_ERRORS:
         return None
 
 
 def send_json(url: str, payload=None, method: str = "POST",
               timeout: float = 30.0, headers: dict | None = None):
+    """The reply document to `payload` sent as JSON ({} for an empty
+    reply). Raises NET_ERRORS, including HTTPError for a 4xx/5xx status."""
     data = None if payload is None else json.dumps(payload).encode()
     hdr = dict(headers or {})
     if data:

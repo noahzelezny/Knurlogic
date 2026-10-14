@@ -12,6 +12,13 @@ from pathlib import Path
 
 from knurlogic.machine import files, paths, processes
 
+#: a model server's default port (`knurlogic serve --port`); the first one
+#: a page starts
+MODEL_PORT = 8080
+#: the page's default port (`knurlogic ui --port`), where every machine's
+#: page is asked
+PAGE_PORT = 8899
+
 
 def serve_argv(path: str, *args: str) -> list:
     """The `knurlogic serve` command line for a model at `path`: the one
@@ -115,7 +122,7 @@ def port_free(port: int) -> bool:
     return True
 
 
-def free_port(start: int = 8080, taken=()) -> int:
+def free_port(start: int = MODEL_PORT, taken=()) -> int:
     """The first port from `start` up that this machine can serve on."""
     for p in range(max(1024, int(start)), 65536):
         if p not in taken and port_free(p):

@@ -12,9 +12,9 @@ import argparse
 import sys
 
 from knurlogic.engine import arch
-from knurlogic.interfaces.ports import PAGE_PORT
 from knurlogic.machine.artifact import Artifact
 from knurlogic.machine.memory import wired
+from knurlogic.machine.servers import PAGE_PORT
 from knurlogic.machine.units import GIB
 from knurlogic.tuning import presets
 from knurlogic.tuning.resolve import resolve

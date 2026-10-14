@@ -7,7 +7,8 @@
                 one number every fit / settings / load answer is computed
                 against), the allowance, where memory went, pressure
   status.py     the snapshot /status.json serves
-  servers.py    the record of knurlogic servers running on this box
+  servers.py    the record of knurlogic servers running on this box,
+                and the default ports (MODEL_PORT, PAGE_PORT)
   loadlock.py   the model-load lock: one real load at a time
   identity.py   which machine this is (an id that survives renames) and its
                 hardware: chip(), machine(), kind_from()

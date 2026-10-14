@@ -32,8 +32,8 @@ from knurlogic.interfaces.page import (
     router,
     running,
 )
-from knurlogic.interfaces.ports import MODEL_PORT, PAGE_PORT
 from knurlogic.machine import identity
+from knurlogic.machine.servers import MODEL_PORT, PAGE_PORT
 
 logger = logging.getLogger(__name__)
 

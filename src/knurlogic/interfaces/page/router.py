@@ -119,7 +119,7 @@ def stream(handler, url: str, body: bytes, timeout: float = 3600,
                        **_client_headers(handler)})
         code = up.status
         ctype = up.headers.get("Content-Type", "application/json")
-    except (*NET_ERRORS, ValueError) as e:
+    except NET_ERRORS as e:
         why = cluster_failure(base) if base else ""
         if why:
             send_json(handler, 503, cluster_failed(why))
@@ -186,18 +186,18 @@ def _client_headers(handler) -> dict:
 
 
 def send_up(url: str, method: str, body: bytes | None):
-    """(status, JSON doc) of one request to a model server; the errors
-    are the model server's own shape ({"error": {"message"}})."""
+    """(status, JSON doc) of one request to a model server; an error of
+    its own is in the API's shape (`api_error`)."""
     try:
         code, raw = request(url, body, method, timeout=600)
-    except (*NET_ERRORS, ValueError) as e:
-        return 502, {"error": {"message": f"{type(e).__name__}: {e}"}}
+    except NET_ERRORS as e:
+        return 502, api_error("api_error", f"{type(e).__name__}: {e}")
     try:
         return code, json.loads(raw or b"{}")
     except ValueError as e:
         if code >= 400:
-            return code, {"error": {"message": f"HTTP Error {code}"}}
-        return 502, {"error": {"message": f"{type(e).__name__}: {e}"}}
+            return code, api_error("api_error", f"HTTP Error {code}")
+        return 502, api_error("api_error", f"{type(e).__name__}: {e}")
 
 
 def proxy_chat(handler, where: str, body: bytes) -> None:

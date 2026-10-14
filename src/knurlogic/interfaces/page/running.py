@@ -19,7 +19,10 @@ RUNNING_PATH = "/running.json"
 def route(loaded_fn):
     """The page's RUNNING_PATH route over its /loaded.json handler."""
     from knurlogic.interfaces.documents import json_reply
-    return lambda _q, _n=0: json_reply(document(loaded_fn({"peers": ["1"]})))
+
+    def running(_query: dict, _n: int = 0) -> tuple:
+        return json_reply(document(loaded_fn({"peers": ["1"]})))
+    return running
 
 
 def document(loaded: dict) -> dict:

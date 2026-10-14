@@ -47,7 +47,7 @@ def peer_settings(method: str, port, data, call=None) -> tuple:
     try:
         code, raw = (call or _send)(url, data, APPLY_S)
         return code, json.loads(raw)
-    except (*NET_ERRORS, ValueError) as e:
+    except NET_ERRORS as e:
         return 502, {"error": f"{type(e).__name__}: {e}"}
 
 
@@ -88,7 +88,7 @@ def apply_settings(where: str, body: bytes, post=None) -> tuple:
             out = (post or transport.send)(
                 target["relay"].removeprefix("http://"), "Settings",
                 {"port": urlparse(base).port, "values": want})
-        except (*NET_ERRORS, ValueError) as e:
+        except NET_ERRORS as e:
             return 502, {"error": f"{type(e).__name__}: {e}"}
         return (502 if out.get("error") and "applied" not in out
                 else 200), out
@@ -96,7 +96,7 @@ def apply_settings(where: str, body: bytes, post=None) -> tuple:
         code, raw = (post or _send)(base + PEER_SETTINGS,
                                     json.dumps(want).encode(), APPLY_S)
         return code, json.loads(raw)      # JSON only, never an HTML page
-    except (*NET_ERRORS, ValueError) as e:
+    except NET_ERRORS as e:
         return 502, {"error": f"{type(e).__name__}: {e}"}
 
 
@@ -155,7 +155,7 @@ def _peek_peer(where: str, path: str, fwd: dict):
         out = transport.send(page, "Read", {"path": path, "query": fwd,
                                             **({"port": port} if port
                                                else {})})
-    except (*NET_ERRORS, ValueError) as e:
+    except NET_ERRORS as e:
         return 502, json.dumps({"error": f"{type(e).__name__}: {e}"})
     return 200, json.dumps(out)
 
@@ -200,5 +200,5 @@ def peek(q: dict, fetch=None) -> tuple:
         body = (fetch or _get)(url, PEEK_S)
         json.loads(body)          # pass on JSON only, never an HTML page
         return 200, body.decode() if isinstance(body, bytes) else body
-    except (*NET_ERRORS, ValueError) as e:
+    except NET_ERRORS as e:
         return 502, json.dumps({"error": f"{type(e).__name__}: {e}"})

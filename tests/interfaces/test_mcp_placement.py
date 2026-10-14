@@ -79,15 +79,15 @@ def test_fit_smallest_set(monkeypatch, page):
     monkeypatch.setattr(inspection, "fit",
                         lambda **k: {"fits": False, "verdict": "will not fit"})
     monkeypatch.setattr(placement, "_local_path", lambda a: "/m/x")
-    from knurlogic.cluster import launch
-    monkeypatch.setattr(launch, "shape_of",
+    from knurlogic.tuning import placement as tuning_placement
+    monkeypatch.setattr(tuning_placement, "shape_of",
                         lambda *a, **k: {"need": 150 * GIB})
 
     def place(infos, shape, split):
         if sum(m["working_set_bytes"] for m in infos) < shape["need"]:
             raise ValueError("does not fit")
         return {}
-    monkeypatch.setattr(launch, "placement", place)
+    monkeypatch.setattr(tuning_placement, "placement", place)
     ids, split, no = placement.resolve_machines(["fit"], "x")
     assert no is None and ids == ["id-me", "id-m5"] and split == "pipeline"
 
@@ -98,12 +98,12 @@ def test_fit_nothing_fits(monkeypatch, page):
                         lambda **k: {"fits": False, "verdict": "will not fit",
                                      "budget_gib": 100.0})
     monkeypatch.setattr(placement, "_local_path", lambda a: "/m/x")
-    from knurlogic.cluster import launch
-    monkeypatch.setattr(launch, "shape_of", lambda *a, **k: {})
+    from knurlogic.tuning import placement as tuning_placement
+    monkeypatch.setattr(tuning_placement, "shape_of", lambda *a, **k: {})
 
     def place(*a):
         raise ValueError("m4: share does not fit")
-    monkeypatch.setattr(launch, "placement", place)
+    monkeypatch.setattr(tuning_placement, "placement", place)
     _, _, no = placement.resolve_machines(["fit"], "x", split="tensor")
     assert no["loaded"] is False and "fits on no set" in no["refused"]
     assert "tensor" in no["refused"] and "m4: share" in no["refused"]
