@@ -19,7 +19,7 @@ serve path: re-run all the gates.
 | `engine/vision/images.py` | stdlib + PIL (lazy) | decode, clamp, `pixel_sha` |
 | `engine/vision/registry.py` | stdlib | model_type -> family `build` |
 | `engine/vision/scatter.py` | mlx | `masked_scatter`, `merge` (features into embeddings by sentinel) |
-| `engine/vision/_base.py` | mlx | `BaseModelConfig`, `check_array_shape`, `ensure_fused_sdpa`, vendored from mlx-vlm 0.6.17 |
+| `engine/vision/_base.py` | mlx | `BaseModelConfig`, `ensure_fused_sdpa`, vendored from mlx-vlm 0.6.17 |
 | `machine/loadlock.py` | stdlib | the model-load lock |
 | `tests/fixtures_vision.py` | stdlib + numpy (mlx/PIL lazy) | tiny config scaler, `StubFamily`, goldens |
 
@@ -130,7 +130,6 @@ registry.FAMILIES = {
   "deepseek_v4": "knurlogic.engine.families.deepseek.vision:build",
 }
 registry.build(model_type, model_path, text_model, config=None) -> Family | None
-registry.has_family(model_type) -> bool
 ```
 
 `None` when: model_type unregistered, config matches no family's vision
@@ -155,7 +154,6 @@ ImageStore(max_bytes=DEFAULT_MAX_BYTES)        # 256 MiB
   .nbytes, .max_bytes (settable; shrinking evicts), .budget_bytes()
   .stats() -> {entries, nbytes, max_bytes, over_bound_by_pins, pinned,
                refs, hits, misses, evictions}
-estimate_nbytes(n_tokens, text_hidden, dtype_bytes=2) -> int
 ```
 
 * Keyed `(model_key, sha, proc_hash)` per image; `model_key` is mlx-lm's

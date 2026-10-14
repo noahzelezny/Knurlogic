@@ -34,14 +34,6 @@ DEFAULT_MAX_BYTES = 256 * MIB
 Key = tuple[Hashable, str, str]
 
 
-def estimate_nbytes(n_tokens: int, text_hidden: int,
-                    dtype_bytes: int = 2) -> int:
-    """Features for one image, before it exists: n_tokens x hidden x
-    itemsize. For the page and `fit` to say what an image will cost; the
-    store itself only ever counts real arrays (EncodedImage.nbytes)."""
-    return int(n_tokens) * int(text_hidden) * int(dtype_bytes)
-
-
 class ImageStore:
     def __init__(self, max_bytes: int = DEFAULT_MAX_BYTES):
         self._lock = threading.RLock()

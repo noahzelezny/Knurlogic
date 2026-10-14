@@ -72,13 +72,6 @@ def registered(model_type: str, path=None) -> bool:
         return False
 
 
-def has_family(model_type: str) -> bool:
-    """Is there a registered family for this model_type whose package is
-    present? (Imports the family module; engine-side callers only.)"""
-    t = FAMILIES.get(family_of(model_type))
-    return t is not None and resolve(t) is not None
-
-
 def _signatures() -> list[dict]:
     return families.build_maps()["vision_signatures"]
 

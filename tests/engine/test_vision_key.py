@@ -164,7 +164,6 @@ def test_missing_family_module_means_no_vision(monkeypatch):
     cfg = {"vision_config": {"x": 1}}
     assert registry.build("fake", "/nonexistent", None, cfg) is None
     assert registry.build("llama", "/nonexistent", None, cfg) is None
-    assert not registry.has_family("fake")
 
 
 def test_a_broken_family_module_is_not_silenced(tmp_path, monkeypatch):
@@ -282,4 +281,3 @@ def test_the_released_rungs_text_spelling_finds_its_vision_family(
     raw, /models.json said none of them had vision."""
     from knurlogic.engine.vision import registry
     assert registry.family_of(model_type) == family
-    assert registry.has_family(model_type)
