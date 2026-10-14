@@ -15,6 +15,7 @@ import sys
 import time
 
 from knurlogic.machine.processes import PROC_ERRORS
+from knurlogic.machine.servers import PAGE_PORT
 
 FW = "/usr/libexec/ApplicationFirewall/socketfilterfw"
 
@@ -109,7 +110,7 @@ def browse(seconds: float = 4.0, me_id: str = "") -> list[dict]:
         d.stop()
 
 
-def report(port: int = 8899) -> tuple[str, int]:
+def report(port: int = PAGE_PORT) -> tuple[str, int]:
     """(text, problems found)."""
     from knurlogic.cluster.peers import Peers
     from knurlogic.machine.identity import identity

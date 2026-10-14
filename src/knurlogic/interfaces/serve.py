@@ -24,13 +24,13 @@ from knurlogic.engine import arch, mtp
 from knurlogic.engine import model as engine
 from knurlogic.engine.mtp import binding
 from knurlogic.interfaces import documents
-from knurlogic.interfaces.ports import MODEL_PORT
 from knurlogic.machine import identity, status
 from knurlogic.machine.artifact import Artifact
 from knurlogic.machine.memory import wired
 from knurlogic.machine.processes import PROC_ERRORS
+from knurlogic.machine.servers import MODEL_PORT
 from knurlogic.machine.units import GIB, MIB, gib
-from knurlogic.tuning import prompt_cache
+from knurlogic.tuning import fit
 from knurlogic.tuning.checks import refuse_sets, ring_refusals, settings_refusal
 from knurlogic.tuning.live import LIVE_KNOBS
 from knurlogic.tuning.resolve import resolve
@@ -150,7 +150,7 @@ def _ring_share(a: Artifact, ring: dict, world: int, working_set_gib: float,
                                  f"{a.path.name}:",
                                  *(f"  - {w}" for w in ring_why)]))
     if ring.get("split") == "pipeline":
-        from knurlogic.tuning import fit, pipeline_split
+        from knurlogic.tuning import pipeline_split
         per, other = pipeline_split.pipeline_layer_bytes(a)
         # rank 0 holds the tower only with vision on and the head only
         # with MTP on -- the ring-wide sets, never this rank's --no-draft,
@@ -480,7 +480,7 @@ def serve_launch(L: Launch, host: str, port: int,
         return snap, text
 
     serving = dict(serving or {})
-    pc_size, pc_bytes, pc_why = prompt_cache.prompt_cache_policy(
+    pc_size, pc_bytes, pc_why = fit.prompt_cache_policy(
         serving, world, ws, share if share is not None else a.bytes_on_disk)
     serving["prompt_cache_size"] = pc_size
     serving.pop("prompt_cache_bytes", None)

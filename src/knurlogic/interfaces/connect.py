@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 
-from knurlogic.interfaces.ports import MODEL_PORT
+from knurlogic.machine.servers import MODEL_PORT
 
 #: Clients and what they need. Adding one is a row.
 CLIENTS = ("claude", "openai", "settings")

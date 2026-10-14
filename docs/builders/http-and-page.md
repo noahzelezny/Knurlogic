@@ -47,7 +47,7 @@ server, or a follower rank. A refusal is `Refused`, printed as the
 `machine_settings`, `settings_document`, `knob_limit`,
 `compaction_document` (page JSON over `tuning/`); what only the page
 knows (update flags, the room across peers) is handed in, so `serve`
-imports nothing of the page's. `interfaces/ports.py` names the default
+imports nothing of the page's. `machine/servers.py` names the default
 ports (`MODEL_PORT`, `PAGE_PORT`).
 `interfaces/load_checks.py` (`prepare`, `NotLoadable`) is the check every load
 passes, at startup and on every switch. `interfaces/spawn.py` starts,

@@ -21,6 +21,7 @@ from pathlib import Path
 
 from knurlogic.machine.http_client import get_json, send_json
 from knurlogic.machine.memory import footprint
+from knurlogic.machine.servers import MODEL_PORT
 from knurlogic.machine.units import GIB, gib
 
 #: Ports worth asking. exo and ollama have fixed defaults; the rest is where
@@ -28,7 +29,7 @@ from knurlogic.machine.units import GIB, gib
 DEFAULT_PORTS = {
     "exo": [52415],
     "ollama": [11434],
-    "openai": [8080, 8081, 8000, 1234, 11435],
+    "openai": [MODEL_PORT, 8081, 8000, 1234, 11435],
 }
 
 #: exo runner states that mean the weights are actually in memory. Taken from
