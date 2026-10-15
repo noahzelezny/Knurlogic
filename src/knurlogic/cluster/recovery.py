@@ -75,9 +75,8 @@ MEMORY_LINE_RX = re.compile(
     r"Resource limit|Unable to allocate|Failed to allocate|MemoryError)"
     r"[^\n]*", re.IGNORECASE)
 #: a rank that had work in flight and stopped taking steps (the page's
-#: watchdog, jobs.Watch): its GPU may be hung, and a relaunch onto it wedged
-#: that Mac until a reboot -- never relaunched
-STALL_RX = re.compile(r"stalled mid-step|the ring is stalled", re.IGNORECASE)
+#: watchdog, jobs.Watch): never relaunched, as its GPU may be hung
+STALL_RX = re.compile(r"stalled mid-step", re.IGNORECASE)
 #: kinds the same launch would meet again (or that would hurt the machine):
 #: failed at once, the reason shown, never relaunched
 NOT_RETRIED = ("memory", "refusal", "stall")

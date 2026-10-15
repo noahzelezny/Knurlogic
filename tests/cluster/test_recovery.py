@@ -299,8 +299,6 @@ def test_reasons_are_sorted_into_kinds():
     assert R.kind("the page that started it closed") == "requested"
     assert R.kind("B stopped the job: unloaded") == "requested"
     assert R.kind("rank 1 on B (pid 3) exited") == "failure"
-    assert R.kind("rank 0 on A has had work in flight and not taken a "
-                  "step in 130 s (step 4); the ring is stalled") == "stall"
     assert R.kind("B stopped the job: stopped: the ring stalled mid-step "
                   "(rank 1 on B took no step in 130 s, step 4)") == "stall"
     assert R.kind("anything", known="stall") == "stall"
