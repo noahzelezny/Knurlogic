@@ -1360,8 +1360,8 @@ def jobs_document() -> list:
         phase = J.phase_of(job, recs)
         # a rank stayed inside a step rather than leave (a stop spares it):
         # neither stopping forever nor loaded
-        stuck = ({"stuck": servers.stuck_reason()} if phase == "stuck"
-                 else {})
+        stuck = ({"stuck": servers.stuck_reason(r0.get("machines") or [])}
+                 if phase == "stuck" else {})
         if all(r.get("stopping") for r in recs):
             out.append({"job": job, "phase": "stuck" if stuck else "stopping",
                         **stuck,

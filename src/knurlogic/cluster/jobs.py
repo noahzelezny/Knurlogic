@@ -312,7 +312,7 @@ def terminate(pids: list, grace: float = GRACE_S, alive=None,
             _STUCK.add(pid)
             logging.getLogger(__name__).error(
                 "pid %d did not stop in %.0f s: %s", pid, grace,
-                servers.stuck_reason())
+                servers.stuck_reason([]))
         elif alive(pid):
             try:
                 os.kill(pid, signal.SIGKILL)

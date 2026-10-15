@@ -170,7 +170,7 @@ def watch_ring(sched, mh, exit_after: float = 1.5,
             stuck.append(1)
             marker.progress(phase="stuck", busy=True)
             log.error("the scheduler is still inside a step; not leaving: "
-                      "%s", servers.stuck_reason())
+                      "%s", servers.stuck_reason([]))
             while in_step():
                 time.sleep(stuck_poll)
             log.info("the scheduler left its step; leaving")

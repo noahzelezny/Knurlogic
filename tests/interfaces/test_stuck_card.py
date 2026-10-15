@@ -1,12 +1,15 @@
 """A rank that stayed inside a step rather than leave (its GPU may be hung)
 shows on the page's card, and in the JSON agents read, as stuck with the
-machine to restart -- not loaded, not stopping forever."""
+machines it may be on -- not loaded, not stopping forever. A rank waiting
+on a hung peer is stuck too, so the reason names every machine of the job,
+never only the page's own."""
 from knurlogic.cluster import jobs as J
 from knurlogic.cluster import launch
 from knurlogic.interfaces.page import loads, running
 from knurlogic.machine import identity
 
-REASON = "box-a's GPU may be hung -- restart box-a if it does not leave"
+REASON = ("a GPU on box-a or box-b may be hung -- restart the machine whose "
+          "GPU is busy if it does not leave")
 
 
 def _jobs(monkeypatch, stopping):

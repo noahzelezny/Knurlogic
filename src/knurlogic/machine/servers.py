@@ -8,6 +8,7 @@ would never have guessed. Before it did, two models holding 33 GiB on ports
 from __future__ import annotations
 
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 from knurlogic.machine import files, paths, processes
@@ -27,13 +28,22 @@ def serve_argv(path: str, *args: str) -> list:
     return [sys.executable, "-m", "knurlogic", "serve", path, *args]
 
 
-def stuck_reason() -> str:
-    """Why a server or rank on this machine is shown stuck (left running
-    inside GPU work, where killing it can hang the GPU): the one wording
-    the page, the MCP and the logs use."""
-    from knurlogic.machine import identity
-    me = identity.identity().get("name") or "this machine"
-    return f"{me}'s GPU may be hung -- restart {me} if it does not leave"
+def stuck_reason(machines: Sequence[str] | None = None) -> str:
+    """Why a server or rank is shown stuck (left running inside GPU work,
+    where killing it can hang the GPU): the one wording the page, the MCP
+    and the logs use.
+
+    `machines`: None for a server on this machine alone, whose own GPU is
+    the one; a cluster job's machine names otherwise (empty when not known
+    where this is asked). A rank waiting inside a step on a hung peer is
+    stuck too, so a job's reason names every machine, never the one asked."""
+    if machines is None:
+        from knurlogic.machine import identity
+        me = identity.identity().get("name") or "this machine"
+        return f"{me}'s GPU may be hung -- restart {me} if it does not leave"
+    where = " or ".join(machines) or "a machine of the job"
+    return (f"a GPU on {where} may be hung -- restart the machine whose GPU "
+            f"is busy if it does not leave")
 
 
 def new_instance() -> str:
