@@ -301,8 +301,8 @@ def test_reasons_are_sorted_into_kinds():
     assert R.kind("rank 1 on B (pid 3) exited") == "failure"
     assert R.kind("rank 0 on A has had work in flight and not taken a "
                   "step in 130 s (step 4); the ring is stalled") == "stall"
-    assert R.kind("B stopped the job: stopped: B stalled mid-step; its GPU "
-                  "may be hung -- check it, then load again") == "stall"
+    assert R.kind("B stopped the job: stopped: the ring stalled mid-step "
+                  "(rank 1 on B took no step in 130 s, step 4)") == "stall"
     assert R.kind("anything", known="stall") == "stall"
     assert R.kind("will not fit") == "memory"
     assert R.kind("x exited: out of memory: [metal::malloc] Unable to "
@@ -471,13 +471,14 @@ def test_a_stall_is_failed_naming_the_machine_and_never_relaunched(faked):
             now=0, read=busy)
     why, k = w.check("j", [{"rank": 1, "pid": 1, "machine": "B"}],
                      lambda p: True, now=J.STALL_S + 1, read=busy)
-    assert k == "stall" and why.startswith("stopped: B stalled mid-step")
+    assert k == "stall"
+    assert why.startswith("stopped: the ring stalled mid-step (rank 1 on B")
     faked["ended"] = why
     what = R.tick(0)[0][1]
-    assert what.startswith("failed") and "B stalled mid-step" in what
+    assert what.startswith("failed") and "rank 1 on B" in what
     assert R.tick(100) == [] and faked["launches"] == []
     v = R.for_job("a" * 16)
-    assert v["state"] == "failed" and "check it, then load again" \
+    assert v["state"] == "failed" and "then load again" \
         in v["last_reason"]
 
 

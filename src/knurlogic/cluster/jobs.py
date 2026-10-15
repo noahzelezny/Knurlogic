@@ -197,10 +197,13 @@ class Watch:
                 self.seen[key] = (work, now)
                 continue
             if m.get("busy") and now - was[1] > STALL_S:
-                return (f"stopped: {who} stalled mid-step; its GPU may be "
-                        f"hung -- check it, then load again (rank {rank} had "
-                        f"work in flight and took no step in "
-                        f"{now - was[1]:.0f} s, step {step})"), "stall"
+                # a rank waiting on a hung peer stalls too: name the
+                # machine seen, not the culprit
+                return (f"stopped: the ring stalled mid-step (rank {rank} on "
+                        f"{who} took no step in {now - was[1]:.0f} s, step "
+                        f"{step}); a machine's GPU may be hung -- check "
+                        f"every machine of the job, then load again"), \
+                    "stall"
         return "", None
 
     def forget(self, job: str) -> None:
