@@ -48,7 +48,7 @@ REQUESTED = ("unloaded", "the page that started it closed", "refused",
 MEMORY_RX = re.compile(
     r"out of memory|outofmemory|insufficient memory|does not fit|"
     r"will not fit|resource limit|unable to allocate|failed to allocate|"
-    r"memoryerror|\boom\b|held now by", re.I)
+    r"memoryerror|\boom\b|held now by|still holds", re.I)
 #: a process that REFUSED to start (`knurlogic serve` printed "REFUSING"
 #: and exited REFUSED_EXIT): bad settings, a context past the model's
 #: maximum, a model it cannot load as asked. A missing Python module (a

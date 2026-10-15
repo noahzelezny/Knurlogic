@@ -68,3 +68,35 @@ def test_placement_still_refuses_when_fresh_memory_is_short(cache,
     out, surveys = _stale_launch(monkeypatch, [2])
     assert out["refused"].startswith("cannot place it")
     assert surveys
+
+
+def _kept():
+    return {"order": ["A", "B"], "leader": "A", "split": "pipeline",
+            "layers": [30, 30], "reason": "",
+            "shares": [{"rank": 0, "machine": "A", "bytes": 40 * GIB},
+                       {"rank": 1, "machine": "B", "bytes": 60 * GIB}]}
+
+
+def test_a_relaunch_keeps_its_split_while_it_still_fits(monkeypatch):
+    monkeypatch.setattr(C, "refresh_memory", lambda infos, post: False)
+    infos = [{"name": "A", "working_set_bytes": 84 * GIB},
+             {"name": "B", "working_set_bytes": 120 * GIB,
+              "available_bytes": 110 * GIB}]
+    assert C._kept_split(_kept(), infos, post=None) == _kept()
+
+
+def test_a_relaunch_onto_a_machine_still_holding_memory_is_refused(
+        monkeypatch):
+    """B's hung GPU still holds the old job's memory: the relaunch is
+    refused saying how much, never re-placed with a smaller share on B."""
+    monkeypatch.setattr(C, "refresh_memory", lambda infos, post: False)
+    infos = [{"name": "A", "working_set_bytes": 84 * GIB},
+             {"name": "B", "working_set_bytes": 120 * GIB,
+              "available_bytes": 30 * GIB}]
+    with pytest.raises(C._Refused) as e:
+        C._kept_split(_kept(), infos, post=None)
+    why = e.value.doc["refused"]
+    assert why.startswith("B still holds 90") and "check B" in why
+    assert e.value.doc["placement"] == _kept()
+    from knurlogic.cluster import recovery as R
+    assert R.kind(f"relaunch 1 refused: {why}") == "memory"   # not retried

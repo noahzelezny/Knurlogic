@@ -1634,6 +1634,36 @@ def _place(infos: list, shape: dict, split: str, order, post) -> dict:
         raise _Refused({"refused": f"cannot place it: {e}"}) from e
 
 
+def _kept_split(kept: dict, infos: list, post) -> dict:
+    """A relaunch keeps the placement its first launch made (`kept`):
+    re-placed on the memory read now, a machine whose hung GPU still held
+    the old job's memory got a smaller share, the job went back onto it,
+    and that Mac wedged. A machine whose budget no longer covers its share
+    (read once more after any rank still exiting) refuses the relaunch,
+    saying how much it still holds."""
+    from knurlogic.tuning import fit
+
+    def short() -> list:
+        by = {m["name"]: m for m in infos}
+        return [(s, by[s["machine"]]) for s in kept["shares"]
+                if s.get("machine") in by and fit.share_refusal(
+                    int(s["bytes"]), budget_of(by[s["machine"]]))]
+    bad = short()
+    if bad and refresh_memory(infos, post):
+        bad = short()
+    if bad:
+        s, m = bad[0]
+        ws, budget = int(m.get("working_set_bytes") or 0), budget_of(m)
+        raise _Refused({
+            "refused": f"{m['name']} still holds {gib(max(ws - budget, 0))} "
+                       f"of its {gib(ws)} working set: its share of the "
+                       f"split this job started with needs "
+                       f"{gib(int(s['bytes']))} and it has {gib(budget)} "
+                       f"now -- check {m['name']}, then load again",
+            "placement": kept})
+    return kept
+
+
 def _auto_cable_note(order: list, net: str, nets: list, link) -> str:
     """Why a launch that named no cable runs on `net`."""
     a, b = order[0], order[1]
@@ -1886,7 +1916,10 @@ def _launch(req: dict, *, me: dict, peers: list, local_info: dict,
     world = len(infos)
     req, ident, alert, sets, shape = _launch_model(req, infos, split, ident,
                                                    aname, post)
-    plan = _place(infos, shape, split, req.get("order"), post)
+    kept = req.get("placement") if recovering is not None else None
+    plan = _kept_split(kept, infos, post) \
+        if isinstance(kept, dict) and kept.get("shares") \
+        else _place(infos, shape, split, req.get("order"), post)
     order = [next(m for m in infos if m["name"] == nm) for nm in plan["order"]]
     job = secrets.token_hex(8)
     cable = req.get("cable")
@@ -1970,10 +2003,11 @@ def _launch(req: dict, *, me: dict, peers: list, local_info: dict,
     if note:
         logger.warning("cluster job %s: %s", job, note)
     if recovering is None:
-        # a relaunch is the same launch: this machine order (so the same
-        # split), this port, link, tune and settings
+        # a relaunch is the same launch: this machine order and placement
+        # (so the same split), this port, link, tune and settings
         recovery.track_cluster(
-            job, req=dict(req, order=list(plan["order"]), port=port),
+            job, req=dict(req, order=list(plan["order"]), port=port,
+                          placement=plan),
             args=dict(args), order=order, port=port,
             leader_here=order[0]["page"] is None,
             previous=(moved or {}).get("job"))
