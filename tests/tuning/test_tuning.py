@@ -608,7 +608,7 @@ def test_env_readers_resolve_aliases_and_spellings():
     assert knobs.env_value("KNURLOGIC_CACHE_LIMIT_GB", env) == "2"
     assert knobs.logical_of("VQ_CACHE_LIMIT_GB") == "cache_limit_gb"
     assert knobs.env_on("KNURLOGIC_TIMING_SPANS", True, env) is False
-    assert knobs.env_on("KNURLOGIC_PIPELINE_OVERLAP", True, env) is True
+    assert knobs.env_on("KNURLOGIC_MTP_PROFILE", True, env) is True
     assert knobs.env_int("KNURLOGIC_CONTEXT_LENGTH", 0, env) == 4096
     assert knobs.env_int("KNURLOGIC_MTP_VERIFY", None, env) is None
     with pytest.raises(ValueError):

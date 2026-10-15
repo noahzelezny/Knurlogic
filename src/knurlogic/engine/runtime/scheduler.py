@@ -978,9 +978,8 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
         client (a stream writes a keepalive, so a client that hung up is
         noticed), a line goes to the log every PREFILL_LOG_CHUNKS chunks or
         PREFILL_LOG_S seconds, and True asks the engine to stop the prefill
-        (the client is gone). The engine honours a stop on a single machine
-        only: on a ring every rank must run the same forwards, so there a
-        cancelled row is dropped at the next step boundary (_step)."""
+        (the client is gone). On a ring rank 0's word reaches every rank
+        after each chunk (Coord.stop), so all leave at the same boundary."""
         st = {"n": 0, "t0": time.perf_counter()}
         st["logged"] = st["t0"]
 

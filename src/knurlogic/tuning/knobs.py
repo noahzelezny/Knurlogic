@@ -37,7 +37,6 @@ KNOB_TITLES: dict = {
 }
 KNOB_TITLES.update({
     "KNURLOGIC_JACCL_TIMEOUT_MS": "Jaccl timeout",
-    "KNURLOGIC_PIPELINE_OVERLAP": "Pipeline overlap",
     "KNURLOGIC_TIMING_SPANS": "Timing spans",
     "KNURLOGIC_MTP_BATCH_MAX_ROWS": "MTP batch max rows",
     "KNURLOGIC_MTP_PROFILE": "MTP profile",
@@ -338,9 +337,6 @@ KNOB_ALIASES = {
     # the jaccl collective deadline (ms) for the ring join and after load
     # (engine/split/link.join, marker.after_load); cluster/launch sets it
     "jaccl_timeout_ms": ("KNURLOGIC_JACCL_TIMEOUT_MS",),
-    # off: each prefill chunk is sent before the next computes
-    # (engine/split/pipeline.overlap_on)
-    "pipeline_overlap": ("KNURLOGIC_PIPELINE_OVERLAP",),
     # off: no per-request wall-time buckets (engine/runtime/timing)
     "timing_spans": ("KNURLOGIC_TIMING_SPANS",),
     # a fixed row ceiling for MTP drafting, 0 = never (engine/mtp/batch_loop)
@@ -356,7 +352,7 @@ KNOB_ALIASES = {
 
 #: the developer knobs above: read only by env_value / env_on / env_int
 DEVELOPER_KNOBS = tuple(KNOB_ALIASES[k][0] for k in (
-    "jaccl_timeout_ms", "pipeline_overlap", "timing_spans",
+    "jaccl_timeout_ms", "timing_spans",
     "mtp_batch_max_rows", "mtp_profile", "mtp_verify", "disconnect_poll"))
 
 #: launch settings of the model itself, read when it loads: the same on

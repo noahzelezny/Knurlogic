@@ -260,11 +260,11 @@ the step plan is the tensor split's).
   receiver's stage dtype (gathered when the model is split). Every send is
   evaluated inside the forward that makes it and every receive is waited
   for inside the forward that uses it, so point-to-point messages and the
-  CPU collectives stay in program order on every rank. The exception is a
-  prompt's prefill chunks (`pipeline.overlapped`): a follower's chunk is
-  sent while its next chunk computes, at most two sends in flight, all
-  complete before the prefill's last forward. `KNURLOGIC_PIPELINE_OVERLAP=off`
-  sends synchronously.
+  CPU collectives stay in program order on every rank. No send is left in
+  flight: a prefill chunk's send once overlapped the next chunk, and the
+  per-chunk stop word (a collective) run with it still in flight wedged a
+  ring, rank 1 in the all_gather and rank 0 in the chunk's recv. The stop
+  word waits for rank 0's chunk anyway, so the overlap had no gain left.
 - **Logits are born on rank 0.** mlx-lm's pipeline all_gathers the last
   stage's hidden state so every rank computes logits; knurlogic does not,
   because no follower needs them -- the plan carries rank 0's tokens. A
@@ -562,9 +562,7 @@ Hidden states cross ranks with send / recv, each evaluated where it is
 built (a follower's step finishes its send inside the forward; rank 0's
 receive is waited for inside the forward), so the order of point-to-point
 messages and of the CPU collectives (the plan exchange, B0-B2 below) is the
-program order on every rank. A prompt's prefill chunks are the one
-exception (`overlapped`): a chunk's send runs while the next chunk
-computes, and every send has completed before the prefill's last forward.
+program order on every rank, prefill chunks included.
 A receive is made in the RECEIVING rank's own activation dtype and a send
 is cast to its receiver's (the dtypes are agreed when the model is split),
 never the dtype of a placeholder: an unloaded embedding is float32, and a

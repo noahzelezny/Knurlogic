@@ -190,7 +190,6 @@ def admit(
     uid: int,
     make_draft_cache: Callable[[], Any],
     prefill_step_size: int = 2048,
-    prefill_ctx=None,
     on_progress: Callable[[int, int], None] | None = None,
     cache: list | None = None,
     hcache: Any = None,
@@ -217,13 +216,6 @@ def admit(
     wrong history); the caller falls back to a fresh prefill. `on_chunk`
     is called with (cache, hcache) after every prefill chunk so the caller
     can snapshot recurrent state for the pool.
-
-    `prefill_ctx` (a zero-arg context-manager factory) wraps the chunked
-    prompt forwards only — a vision request's embedding patch goes there,
-    and the final single-token forward that produces the first logits runs
-    outside it, as it does on the stock path. It yields a callable, called
-    before each `on_progress` (pipeline.overlapped: the sends in
-    flight complete before the ring's stop word).
 
     The head is seeded from position 0 (see loop.py on alignment), which is
     why an admitted row always starts from a FRESH trunk cache: a reused
@@ -264,7 +256,6 @@ def admit(
     one-step lag), so a checkpoint's head cache is at c and `h` is None.
     The row enters decoding with no draft; the first step drafts.
     """
-    import contextlib
 
     if ids.ndim == 1:
         ids = ids[None]
@@ -297,46 +288,42 @@ def admit(
     seeded = start_pos          # the head is seeded over [start_pos, seeded)
     cps = ([] if on_checkpoint is None else
            _checkpoints(checkpoints, start_pos, last, spans, row_drafts))
-    ctx = (prefill_ctx() if prefill_ctx is not None
-           else contextlib.nullcontext(lambda: None))
-    with ctx as settle:
-        i = start_pos
-        while i < last:
-            end = _snap_chunk_end(i, min(i + prefill_step_size, last), spans,
-                                  last)
-            if cps and i < cps[0] < end:
-                end = cps[0]
-            chunk = ids[:, i:end]
-            if not chunk.shape[1]:
-                break
-            chunk_start(i, end, n)
-            h = _prefill_chunk(model, head, get_h, chunk, cache, dcache,
-                               _kw(i, end), block, drafts, row_drafts)
-            if h is not None:
-                h_chunks.append(h)
-            i = end
-            mx.clear_cache()
-            chunk_done()
-            if on_chunk is not None:
-                on_chunk(cache, dcache)
-            if cps and end == cps[0]:
-                c = cps.pop(0)
-                h_c = None
-                if drafts and not block:
-                    # Seed [seeded, c-1), keep h from c-1 on for the rest.
-                    h_all = (mx.concatenate(h_chunks, axis=1)
-                             if len(h_chunks) > 1 else h_chunks[0])
-                    seed_head(head, [h_all], ids, c, dcache,
-                              prefill_step_size, start=seeded)
-                    h_chunks = [h_all[:, c - 1 - seeded:]]
-                    h_c = h_all[:, c - 1 - seeded:c - seeded]
-                    seeded = c - 1
-                    mx.eval(h_chunks[0], h_c)
-                assert on_checkpoint is not None    # cps is empty without one
-                on_checkpoint(c, cache, dcache if drafts else None, h_c)
-            if on_progress is not None:
-                settle()
-                on_progress(end, n)
+    i = start_pos
+    while i < last:
+        end = _snap_chunk_end(i, min(i + prefill_step_size, last), spans,
+                              last)
+        if cps and i < cps[0] < end:
+            end = cps[0]
+        chunk = ids[:, i:end]
+        if not chunk.shape[1]:
+            break
+        chunk_start(i, end, n)
+        h = _prefill_chunk(model, head, get_h, chunk, cache, dcache,
+                           _kw(i, end), block, drafts, row_drafts)
+        if h is not None:
+            h_chunks.append(h)
+        i = end
+        mx.clear_cache()
+        chunk_done()
+        if on_chunk is not None:
+            on_chunk(cache, dcache)
+        if cps and end == cps[0]:
+            c = cps.pop(0)
+            h_c = None
+            if drafts and not block:
+                # Seed [seeded, c-1), keep h from c-1 on for the rest.
+                h_all = (mx.concatenate(h_chunks, axis=1)
+                         if len(h_chunks) > 1 else h_chunks[0])
+                seed_head(head, [h_all], ids, c, dcache,
+                          prefill_step_size, start=seeded)
+                h_chunks = [h_all[:, c - 1 - seeded:]]
+                h_c = h_all[:, c - 1 - seeded:c - seeded]
+                seeded = c - 1
+                mx.eval(h_chunks[0], h_c)
+            assert on_checkpoint is not None    # cps is empty without one
+            on_checkpoint(c, cache, dcache if drafts else None, h_c)
+        if on_progress is not None:
+            on_progress(end, n)
 
     logits = model(ids[:, max(last, 0):], cache=cache, **_kw(max(last, 0), n))
     row_t1 = logits[:, -1]

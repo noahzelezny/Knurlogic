@@ -88,7 +88,6 @@ with `env_on` / `env_int`. Those registered now:
 | env name | what | default |
 |---|---|---|
 | `KNURLOGIC_JACCL_TIMEOUT_MS` | the jaccl collective deadline for the ring join and after load (cluster/launch sets it) | unset: none |
-| `KNURLOGIC_PIPELINE_OVERLAP` | off: each prefill chunk is sent before the next computes | on |
 | `KNURLOGIC_TIMING_SPANS` | off: no per-request timing buckets | on |
 | `KNURLOGIC_MTP_BATCH_MAX_ROWS` | a fixed row ceiling for drafting (0: never) | unset: adaptive |
 | `KNURLOGIC_MTP_PROFILE` | on: time each phase of a block step | off |

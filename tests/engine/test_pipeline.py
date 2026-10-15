@@ -311,9 +311,6 @@ def test_mtp_drafting_on_a_pipeline_is_the_unsplit_engine(tmp_path, always):
     (b0, b1, b2, steps, ba), follower = d["calls"]
     assert follower == [b0, b1, b2, steps, ba]
     assert b0 == ba == 3                            # three admissions
-    # the follower's prefill chunks (16 tokens; prompts of 37, 9, 70) were
-    # sent while the next one computed; rank 0 sends nothing
-    assert d["overlapped"][0] == 0 and d["overlapped"][1] > 0
     assert 0 < b2 <= b1 <= steps
     assert d["drafted"] > 0
     if always:
@@ -616,50 +613,22 @@ def test_unwrap_sees_through_both_ends_of_a_one_layer_stage():
     assert type(both) is not nn.Linear and both.weight is lin.weight
 
 
-def test_overlap_finds_a_stages_send_and_is_undone_on_the_way_out(
-        monkeypatch):
-    """`overlapped` turns on the stage's Send (found through a one-layer
-    stage's Recv) for the prefill chunks only, and KNURLOGIC_PIPELINE_
-    OVERLAP=off leaves every send synchronous (the A/B)."""
-    import types
-
+def test_a_send_has_completed_when_the_forward_returns(monkeypatch):
+    """Send evaluates its send inside the forward, never leaving one in
+    flight: a prefill send left in flight while the per-chunk stop word (a
+    collective) ran wedged a ring, rank 1 in its all_gather and rank 0 in
+    the chunk's recv."""
     from mlx import nn
 
     from knurlogic.engine.split import pipeline as PL
-    send = PL.Send(PL.Recv(nn.Linear(2, 2), 1, None, mx.float32), 0, None,
-                   mx.float32)
-    model = types.SimpleNamespace(model=types.SimpleNamespace(
-        layers=[nn.Linear(2, 2), send]))
-    assert PL.sends_of(model) == [send]
-    with PL.overlapped(model):
-        assert send.overlap
-    assert not send.overlap
-    monkeypatch.setenv("KNURLOGIC_PIPELINE_OVERLAP", "off")
-    with PL.overlapped(model):
-        assert not send.overlap
-
-
-def test_a_prefills_sends_settle_before_the_stop_word(monkeypatch):
-    """admit settles the sends in flight before each chunk's on_progress:
-    on a ring that is Coord.stop, a collective, and run with a send still
-    in flight it wedged both ranks (rank 1 in its all_gather, rank 0 in
-    the chunk's recv)."""
-    import contextlib
-
-    from test_image_cache import tiny_model
-
-    from knurlogic.engine.mtp.batch_loop import RowParams, admit
-    seen: list = []
-
-    @contextlib.contextmanager
-    def ctx():
-        yield lambda: seen.append("settle")
-    params = RowParams(max_tokens=4, dist=None, processors=[], eos=set(),
-                       drafts=False)
-    admit(tiny_model(), None, lambda: None, mx.array(list(range(40, 53))),
-          params, uid=0, make_draft_cache=lambda: None, prefill_step_size=4,
-          prefill_ctx=ctx, on_progress=lambda done, n: seen.append(done))
-    assert seen == ["settle", 4, "settle", 8, "settle", 12]
+    sent, evaluated = [], []
+    monkeypatch.setattr(mx.distributed, "send",
+                        lambda x, dst, group=None: sent.append(x) or x)
+    real_eval = mx.eval
+    monkeypatch.setattr(mx, "eval",
+                        lambda *a: evaluated.extend(a) or real_eval(*a))
+    PL.Send(nn.Linear(2, 2), 0, None, mx.float32)(mx.ones((1, 2)))
+    assert len(sent) == 1 and sent[0] is evaluated[0]
 
 
 @pytest.mark.parametrize("start,end,recv,send", [(0, 3, False, True),

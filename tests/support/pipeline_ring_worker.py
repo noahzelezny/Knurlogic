@@ -338,13 +338,10 @@ def mtp(link, out_path, always, split_kind="pipeline", family="qwen3_5"):
         mx.array([coord.calls["b0"], coord.calls["b1"], coord.calls["b2"],
                   steps, coord.calls["ba"]]), group=link.group,
         stream=mx.cpu).tolist()
-    sent = mx.distributed.all_gather(
-        mx.array([sum(sd.overlapped for sd in PL.sends_of(model))]),
-        group=link.group, stream=mx.cpu).tolist()
     link.barrier()
     if link.rank == 0:
         json.dump({"whole": whole, "split": split, "baseline": baseline,
-                   "calls": [counts[:5], counts[5:]], "overlapped": sent,
+                   "calls": [counts[:5], counts[5:]],
                    "accepted": stats.get("accepted", 0),
                    "drafted": stats.get("steps", 0)}, open(out_path, "w"))
 

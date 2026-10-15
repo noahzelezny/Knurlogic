@@ -90,7 +90,7 @@ scheduler does the rest on its thread.
   environment only through `tuning/knobs` (`env_value`, `env_on`,
   `env_int`), and a legacy name only through `KNOB_ALIASES`
   (`logical_of`, `aliases`): a developer switch (`KNURLOGIC_TIMING_SPANS`,
-  `KNURLOGIC_PIPELINE_OVERLAP`, ...) is registered there too, tier
+  `KNURLOGIC_MTP_PROFILE`, ...) is registered there too, tier
   "developer" ([settings](settings.md)).
 - **A live knob reaches every rank.** `tuning/live.LIVE_KNOBS` can change
   on a running server (`apply_live`); on a split, `Scheduler.share_live` journals them

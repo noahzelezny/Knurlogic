@@ -23,7 +23,6 @@ import logging
 from collections.abc import Sequence
 
 import mlx.core as mx
-from mlx import nn
 from mlx.utils import tree_flatten
 
 from knurlogic.engine.model.trunk import _Wrap, core_of
@@ -115,17 +114,13 @@ class Recv(_Wrap):
 class Send(_Wrap):
     """The last layer of a stage that is not the last: its output goes to
     the next stage in that stage's dtype, sent before the forward returns
-    -- or, inside `overlapped` (a prompt's prefill chunks), sent while the
-    next chunk computes: at most two sends are in flight, and `overlapped`
-    settles them before any collective."""
+    -- never left in flight, so point-to-point messages and the collectives
+    stay in program order on every rank (a send left in flight while the
+    per-chunk stop word ran wedged a ring: docs/design/server.md)."""
 
     def __init__(self, inner, dst: int, group, dtype):
         super().__init__(inner)
         self._dst, self._group, self._dtype = dst, group, dtype
-        self.overlap = False
-        self._pending: list = []
-        #: sends made asynchronously (the tests read it)
-        self.overlapped = 0
         #: () -> the layer outputs sent after the stream, in one message
         #: (`carry`), or None
         self.carry = None
@@ -134,71 +129,9 @@ class Send(_Wrap):
         y = self.inner(x, *a, **kw)
         extra = self.carry() if self.carry is not None else []
         out = mx.stack([y] + extra) if extra else y
-        s = mx.distributed.send(out.astype(self._dtype), self._dst,
-                                group=self._group)
-        if not self.overlap:
-            mx.eval(s)
-            return y
-        # this chunk's layers and send go to the device now; the previous
-        # chunk's send is waited for only after, while this one computes
-        mx.async_eval(s)
-        self._pending.append(s)
-        self.overlapped += 1
-        if len(self._pending) > 1:
-            mx.eval(self._pending[:-1])
-            del self._pending[:-1]
+        mx.eval(mx.distributed.send(out.astype(self._dtype), self._dst,
+                                    group=self._group))
         return y
-
-    def flush(self) -> None:
-        """Wait for every send in flight."""
-        if self._pending:
-            mx.eval(self._pending)
-            self._pending.clear()
-
-
-def sends_of(model) -> list[Send]:
-    """This stage's Send (none on rank 0), seen through its wrappers."""
-    out = []
-    for layer in core_of(model).layers:
-        # through a capture's spy too (carry: a stage's last layer's input)
-        while isinstance(layer, nn.Module) and "inner" in layer:
-            if isinstance(layer, Send):
-                out.append(layer)
-            layer = layer["inner"]
-    return out
-
-
-def overlap_on() -> bool:
-    """KNURLOGIC_PIPELINE_OVERLAP=off sends each prefill chunk before the
-    next one computes (the A/B for the overlap's gain)."""
-    from knurlogic.tuning import knobs
-    return knobs.env_on("KNURLOGIC_PIPELINE_OVERLAP")
-
-
-@contextlib.contextmanager
-def overlapped(model):
-    """Around a prompt's prefill chunks (batch_loop.admit's prefill_ctx):
-    each chunk's hidden state is sent while the next chunk computes. It
-    yields `settle`, which waits for every send in flight: admit calls it
-    before anything between chunks that is not a send or receive (the
-    ring's per-chunk stop word, Coord.stop, is a collective), and every
-    send has completed on the way out. A collective run with a send still
-    in flight can reach the next rank before the send does and wedge both:
-    a ring did, rank 1 in the stop word's all_gather and rank 0 in the
-    chunk's recv."""
-    sends = sends_of(model) if overlap_on() else []
-    for sd in sends:
-        sd.overlap = True
-
-    def settle() -> None:
-        for sd in sends:
-            sd.flush()
-    try:
-        yield settle
-    finally:
-        for sd in sends:
-            sd.overlap = False
-        settle()
 
 
 def bounds_of(counts: Sequence[int]) -> list[tuple[int, int]]:
@@ -379,13 +312,10 @@ class Silent:
 
 
 def silence(gen) -> None:
-    """Make a follower's batch engine call its trunk through `Silent`, and
-    overlap its prefill sends with the next chunk (`overlapped`)."""
+    """Make a follower's batch engine call its trunk through `Silent`."""
     s = Silent(gen._trunk)
     gen._trunk = s
     gen._batch.model = s
-    model = gen.model
-    gen._prefill_ctx = lambda: overlapped(model)
 
 
 # ------------------------------------------------------------ coordinator
