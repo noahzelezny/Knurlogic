@@ -1253,7 +1253,8 @@ def test_watch_keeps_a_job_whose_peer_page_is_slow(monkeypatch):
 
 def test_peer_verdict_reads_the_peer_lists_clock_and_boot_id(monkeypatch):
     """One clock: a page the peer list heard lately is not gone however the
-    JobState ask fails; a new boot_id is a restart, at once."""
+    JobState ask fails; a new boot_id holding no rank is a restart, at once,
+    and one still holding its rank is a restarted page whose rank lived on."""
     from knurlogic.cluster.peers import Peer
     monkeypatch.setattr(C, "_PEER_OK", {})
     monkeypatch.setattr(C, "_PEER_BOOT", {})
@@ -1280,7 +1281,10 @@ def test_peer_verdict_reads_the_peer_lists_clock_and_boot_id(monkeypatch):
     monkeypatch.setattr(C, "_PEER_OK", {})
     assert C.peer_verdict(job, recs, now=200, ask=up, **kw) == ""
     rec.boot_id = "two"
-    why = C.peer_verdict(job, recs, now=201, ask=(
+    # the page restarted, its rank (its own session) did not: kept
+    assert C.peer_verdict(job, recs, now=201, ask=up, **kw) == ""
+    rec.boot_id = "three"
+    why = C.peer_verdict(job, recs, now=202, ask=(
         lambda page, j: {"ranks_here": [], "prepared": False}), **kw)
     assert "M3 restarted" in why
 

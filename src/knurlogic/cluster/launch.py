@@ -1259,8 +1259,8 @@ def peer_verdict(job: str, recs: list, now: float | None = None,
                  ask=None, pages=None, me=None, reach=None) -> str:
     """"" while every other machine of the job still runs its rank, else
     why not: its page says the job ended there, it restarted (a new
-    boot_id), or it has been unreachable -- or answering without the rank --
-    for PEER_GONE_S. Unreachable is the peer list's own clock
+    boot_id) without its rank, or it has been unreachable -- or answering
+    without the rank -- for PEER_GONE_S. Unreachable is the peer list's own clock
     (cluster/peers.py: the status GET every peer answers), not a second
     one. A rank blocked in a collective on a peer that vanished never exits
     and never counts as stalled (it is idle), so this is how its page
@@ -1300,17 +1300,20 @@ def peer_verdict(job: str, recs: list, now: float | None = None,
             if doc.get("ended"):
                 return f"{name} stopped the job: {doc['ended']}"[:300]
             held = bool(doc.get("ranks_here") or doc.get("prepared"))
-            if boot and _PEER_BOOT.get(key, boot) != boot:
-                # the process that held the rank is not the one answering:
-                # it restarted, and its ranks went with it
-                return (f"{name} restarted (a new knurlogic process); "
-                        f"its rank of the job is gone")
             if held:
+                # ranks run in their own session and outlive a restarted
+                # page: one still holding its rank is believed, new process
+                # or not (a page redeploy used to stop a healthy job here)
                 _PEER_SLOW.discard(key)
                 _PEER_OK[key] = now
                 if boot:
-                    _PEER_BOOT.setdefault(key, boot)
+                    _PEER_BOOT[key] = boot
                 continue
+            if boot and _PEER_BOOT.get(key, boot) != boot:
+                # a new process answering, holding no rank: it restarted,
+                # and its rank went with the old one
+                return (f"{name} restarted (a new knurlogic process); "
+                        f"its rank of the job is gone")
             why = f"{name} no longer runs its rank of the job"
         except (*NET_ERRORS, AttributeError) as e:
             why = (f"{name}'s page has not answered "

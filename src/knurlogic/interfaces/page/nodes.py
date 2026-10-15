@@ -87,7 +87,7 @@ def status_fn(_n=0):
     snap = status.aggregate(snaps)
     snap["wired"] = wired.advise(0)
     # liveness rides this GET: which process answered, and the control-plane
-    # protocol it speaks (a peer that changed boot_id lost its ranks)
+    # protocol it speaks (a new boot_id is a restarted page, not lost ranks)
     from knurlogic.cluster import protocol
     snap["boot_id"] = _BOOT_ID
     snap["v"] = list(protocol.VERSION)

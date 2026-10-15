@@ -8,7 +8,8 @@ is not behind the Thunderbolt/--peer gate): `answering` (heard within 6 s),
 jobs.PEER_GONE_S: a job with a rank there stops) and, apart from those,
 `version_mismatch` (its protocol major differs, or it speaks none), with the
 text that says which machine to update. The same status doc carries its
-`boot_id`: a new one is a restarted process. A peer that stops answering is
+`boot_id`: a new one is a restarted page process (its ranks, in their own
+session, may live on). A peer that stops answering is
 kept and shown with how long it has been gone, never dropped silently. One
 probe is in flight per peer. Every status request carries
 `X-Knurlogic-Peer: <id> <port>`, so the receiving page records the
@@ -390,7 +391,7 @@ class Peers:
         boot = doc.get("boot_id")
         boot = boot if isinstance(boot, str) else ""
         if p.boot_id and boot and boot != p.boot_id:
-            p.restarts += 1     # same machine, a new process: its ranks are gone
+            p.restarts += 1     # same machine, a new page process
         p.boot_id = boot or p.boot_id
         v = doc.get("v")
         p.proto = v if isinstance(v, list) else None
