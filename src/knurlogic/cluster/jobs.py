@@ -212,11 +212,15 @@ class Watch:
 
 
 def phase_of(job: str, ranks: list, read=read_marker) -> str:
-    """The job's phase from its markers: the least advanced rank's."""
+    """The job's phase from its markers: the least advanced rank's, or
+    "stuck" when any rank says it stayed inside a step rather than leave
+    (its GPU may be hung)."""
     order = ("joining", "loading", "ready")
     got = []
     for r in ranks:
         p = (read(job, int(r["rank"])) or {}).get("phase") or "joining"
+        if p == "stuck":
+            return p
         got.append(order.index(p) if p in order else 0)
     return order[min(got)] if got else "joining"
 

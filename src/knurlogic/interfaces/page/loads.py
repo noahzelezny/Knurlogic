@@ -326,6 +326,9 @@ def with_jobs(doc: dict) -> dict:
         if j and j.get("recovery"):
             rec = j["recovery"]
         r = dict(r, recovery=rec)
+        if j and j.get("stuck"):
+            # a rank stayed inside a step rather than leave: not loaded
+            r.update(state="stuck", detail=j["stuck"])
         rows.append(dict(r, cluster={**{k: j.get(k) for k in (
             "job", "split", "link", "machines", "leader", "phase")},
             **({"url": j["url"]} if j.get("url") else {})})

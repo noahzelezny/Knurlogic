@@ -187,10 +187,11 @@ async function loadResident(){
         r.cluster&&r.cluster.split?`${r.cluster.split} over ${
           (r.cluster.link==='rdma'||r.cluster.link==='jaccl')?'RDMA':'TCP/IP'}${
           r.cluster.phase&&r.cluster.phase!=='ready'?' · '+r.cluster.phase:''}`:'',
-        r.detail, r.state==='loaded'?'':r.state]
+        r.state==='stuck'?'':r.detail, r.state==='loaded'?'':r.state]
         .filter(Boolean).filter((v,i,x)=>x.indexOf(v)===i)
         .map(esc).join(' · ')}</div>
       <div class="s">on ${esc(on(r))}</div>
+      ${r.state==='stuck'&&r.detail?`<div class="why">${esc(r.detail)}</div>`:''}
       ${r.requests&&r.requests.memory_short&&r.state==='loaded'
         ?`<div class="why">${esc(r.requests.memory_short.replace(/^loaded, no memory for requests: /,''))}</div>`:''}
       ${r.requests&&r.requests.memory_pressure&&r.state==='loaded'

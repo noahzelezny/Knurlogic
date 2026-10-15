@@ -27,6 +27,15 @@ def serve_argv(path: str, *args: str) -> list:
     return [sys.executable, "-m", "knurlogic", "serve", path, *args]
 
 
+def stuck_reason() -> str:
+    """Why a server or rank on this machine is shown stuck: it would not
+    leave while inside GPU work, and was not killed there (that hung the
+    GPU until a reboot) -- the page and the MCP say it in these words."""
+    from knurlogic.machine import identity
+    me = identity.identity().get("name") or "this machine"
+    return f"{me}'s GPU may be hung -- restart {me} if it does not leave"
+
+
 def new_instance() -> str:
     """A 16-hex id for a server this box starts -- what exo calls an
     instance id, so two servers, even one on this Mac and one on a peer

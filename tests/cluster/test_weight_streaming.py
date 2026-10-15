@@ -231,3 +231,10 @@ def test_a_turn_change_is_written_at_once(tmp_path, monkeypatch):
     m.set(turn="reading")
     import json
     assert json.loads((tmp_path / "m.json").read_text())["turn"] == "reading"
+
+
+def test_a_stuck_rank_makes_its_job_stuck():
+    from knurlogic.cluster import jobs as J
+    marks = {0: {"phase": "ready"}, 1: {"phase": "stuck", "busy": True}}
+    assert J.phase_of("j", [{"rank": 0}, {"rank": 1}],
+                      read=lambda j, r: marks[r]) == "stuck"

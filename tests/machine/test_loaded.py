@@ -456,3 +456,19 @@ def test_our_server_busy_generating_keeps_its_card(monkeypatch):
     listen.clear()
     r = ours()
     assert r["state"] == "stopping" and r["can_unload"] is False
+
+
+def test_a_server_an_unload_left_stuck_is_shown_stuck(monkeypatch):
+    """interfaces/spawn.stop marks a server that did not leave and was not
+    killed: shown stuck with the machine to restart, not stopping forever."""
+    from knurlogic.machine import identity, servers
+    monkeypatch.setattr(loaded, "get_json", lambda *a, **k: None)
+    monkeypatch.setattr(footprint, "memory_map", lambda *a, **k: {})
+    monkeypatch.setattr(identity, "identity", lambda: {"name": "box-a"})
+    monkeypatch.setattr(servers, "registry", lambda: {
+        8092: {"pid": 1, "artifact": "/m/A", "stuck": "pid 1 did not stop"}})
+    monkeypatch.setattr(servers, "is_our_server", lambda pid: True)
+    (r,) = loaded.survey()["resident"]
+    assert r["state"] == "stuck" and not r["can_unload"]
+    assert r["detail"] == ("box-a's GPU may be hung -- restart box-a if it "
+                           "does not leave")

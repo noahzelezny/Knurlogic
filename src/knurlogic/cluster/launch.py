@@ -39,7 +39,7 @@ from knurlogic.cluster.protocol import (
     link_name,
     typed,
 )
-from knurlogic.machine import identity, processes
+from knurlogic.machine import identity, processes, servers
 from knurlogic.machine.artifact import bytes_on_disk
 from knurlogic.machine.memory.wired import available_now, budget_of, gpu_working_set
 from knurlogic.machine.processes import PROC_ERRORS
@@ -433,7 +433,6 @@ def held_here(job: str = "", reg=None, sreg=None, rss=None) -> list:
             continue
         seen.add(pid)
         out.append((f"job {j} rank {rec.get('rank')}", pid, rss(pid)))
-    from knurlogic.machine import servers
     for port, rec in sorted((servers.registry() if sreg is None
                              else sreg).items()):
         pid = int(rec["pid"])
@@ -990,7 +989,6 @@ def _start(prep: dict, spawn, wait_s: float) -> tuple:
         reg[f"{spec['job']}/{spec['rank']}"] = rec
         J.save_registry(reg)
         if "port" in rec:
-            from knurlogic.machine import servers
             sreg = servers.registry()
             sreg[rec["port"]] = {"pid": proc.pid, "artifact": path,
                                  "log": str(log), "job": spec["job"],
@@ -1075,7 +1073,6 @@ def stop(job: str, reason: str = "unloaded", propagate: bool = True,
             if int(v["pid"]) not in left:
                 reg.pop(k, None)
         J.save_registry(reg)
-        from knurlogic.machine import servers
         sreg = servers.registry()
         for port in [p for p, v in sreg.items() if v.get("job") == job
                      and int(v["pid"]) not in left]:
@@ -1356,8 +1353,14 @@ def jobs_document() -> list:
     out = []
     for job, recs in J.by_job().items():
         r0 = min(recs, key=lambda r: r["rank"])
+        phase = J.phase_of(job, recs)
+        # a rank stayed inside a step rather than leave (a stop spares it):
+        # neither stopping forever nor loaded
+        stuck = ({"stuck": servers.stuck_reason()} if phase == "stuck"
+                 else {})
         if all(r.get("stopping") for r in recs):
-            out.append({"job": job, "phase": "stopping",
+            out.append({"job": job, "phase": "stuck" if stuck else "stopping",
+                        **stuck,
                         "split": r0.get("split"),
                         "link": link_name(r0.get("link")),
                         "reason": r0.get("stop_reason"),
@@ -1376,7 +1379,7 @@ def jobs_document() -> list:
                                   if r.get("port")), None),
                     "artifact": Path(r0.get("artifact") or "").name,
                     "identity": r0.get("identity") or "",
-                    "phase": J.phase_of(job, recs),
+                    "phase": phase, **stuck,
                     **{k: (SPECS.get(job) or {}).get(k) for k in
                        ("cable", "cable_note")
                        if (SPECS.get(job) or {}).get(k)},

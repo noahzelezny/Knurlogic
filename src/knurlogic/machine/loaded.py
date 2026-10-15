@@ -46,7 +46,8 @@ class Resident:
     runtime: str
     name: str
     where: str                      # the URL it was read from
-    state: str = "loaded"           # loaded | loading | warming | failed | offered
+    #: loaded | loading | warming | failed | offered | stuck
+    state: str = "loaded"
     bytes_resident: int = 0         # 0 when the runtime does not say
     detail: str = ""
     can_unload: bool = False
@@ -345,6 +346,11 @@ def survey(ports: dict | None = None, self_url: str = "") -> dict:
                              instance=str(ours[port].get("job")
                                          or ours[port].get("instance")
                                          or ""))]
+        if ours.get(port, {}).get("stuck"):
+            # an unload's SIGTERM did not end it and it was not killed
+            # (interfaces/spawn.stop): neither loaded nor stopping forever
+            rows = [replace(r, state="stuck", detail=servers.stuck_reason(),
+                            can_unload=False) for r in rows]
         out += rows
 
     doc = {

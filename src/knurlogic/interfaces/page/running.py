@@ -104,6 +104,7 @@ def models_across(page: dict, here: str) -> list:
             "machine": machine, "where": r.get("where"),
             "port": _port_of(r.get("where")),
             "state": r.get("state"),
+            **({"stuck": r["detail"]} if r.get("state") == "stuck" else {}),
             "requests": r.get("requests"),
             "machines": list(c.get("machines") or j.get("machines")
                              or [machine]),
@@ -132,6 +133,8 @@ def models_across(page: dict, here: str) -> list:
             "job": job, "instance": job, "leader": j.get("leader"),
             **({"url": j["url"]} if j.get("url") else {}),
             "phase": j.get("phase"),
+            **({"state": "stuck", "stuck": j["stuck"]} if j.get("stuck")
+               else {}),
             **({k: j[k] for k in ("cable", "cable_note") if j.get(k)}),
             "recovery": recs.get(job)})
     # tracked by a page and not serving now: waiting to be relaunched, or

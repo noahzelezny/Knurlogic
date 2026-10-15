@@ -149,10 +149,10 @@ nav a.relnote[hidden]{display:none}
 .card .dot.gearmark{width:14px;height:14px;border-radius:0;background:none;color:var(--ok);
   display:block;transform-origin:50% 50%;will-change:transform;animation:gear 3s linear infinite}
 .card .gearmark svg{width:14px;height:14px;display:block}
-.card.failed{border-color:color-mix(in srgb,var(--bad) 45%,transparent)}
-.card.failed .dot{background:var(--bad)}
-.card.failed .rt{color:var(--bad);letter-spacing:.08em}
-.card.failed .why{color:var(--bad);margin-top:4px;overflow-wrap:anywhere;font-size:12.5px}
+.card.failed,.card.stuck{border-color:color-mix(in srgb,var(--bad) 45%,transparent)}
+.card.failed .dot,.card.stuck .dot{background:var(--bad)}
+.card.failed .rt,.card.stuck .rt{color:var(--bad);letter-spacing:.08em}
+.card.failed .why,.card.stuck .why{color:var(--bad);margin-top:4px;overflow-wrap:anywhere;font-size:12.5px}
 .card .why{color:var(--warn);margin-top:4px;overflow-wrap:anywhere;font-size:12.5px}
 .cardhd .rt{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .card.failed .x{margin-left:auto;padding:0 6px}
