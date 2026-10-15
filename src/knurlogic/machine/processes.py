@@ -29,16 +29,6 @@ def command(pid: int) -> str:
         return ""
 
 
-def exists(pid: int) -> bool:
-    """`pid` is in the process table -- a zombie, or one whose command line
-    this user may not read, included. A process exiting with GPU state the
-    kernel has not yet given back is one of those."""
-    try:
-        return psutil.pid_exists(int(pid))
-    except (OSError, ValueError):
-        return False
-
-
 def running(pid: int, reap: bool = False) -> bool:
     """`pid` exists and has not exited (a zombie, exited and not yet
     reaped, has). A process this user may not inspect is running.

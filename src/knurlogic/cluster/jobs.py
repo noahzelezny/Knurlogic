@@ -259,7 +259,7 @@ def is_rank(pid: int, job: str) -> bool:
     relaunch never starts beside it."""
     out = processes.command(pid)
     if not out:
-        return processes.exists(pid)
+        return processes.running(pid)
     return f"--job {job}" in out or f"--job={job}" in out
 
 
