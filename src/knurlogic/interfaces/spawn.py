@@ -24,6 +24,7 @@ from knurlogic.machine.servers import (
     registry,
     save_registry,
     serve_log,
+    stuck_reason,
 )
 
 #: Children started from the page: {port: (Popen, artifact path)}.
@@ -265,14 +266,12 @@ def stop(port: int) -> dict:
     within = STOP_SAVE_S + STOP_MARGIN_S
     mine = CHILDREN.get(port)
     if not _wait_exit(pid, mine[0] if mine else None, within):
-        # Not gone by its own ceiling: almost surely inside a GPU step.
-        # Killed there, the GPU's command queue was left waiting and the
-        # Mac hung until a reboot -- so it is left running, and listed.
-        note = (f"pid {pid} did not stop in {within:.0f} s: not killed "
-                f"(killing it mid-step can hang the GPU until a reboot) -- "
-                f"it is stuck; restart this Mac if it does not leave")
+        # not gone by its own ceiling: likely mid-step, where a SIGKILL can
+        # hang the GPU, so it is left running and listed stuck
+        note = f"pid {pid} did not stop in {within:.0f} s: " \
+            f"{stuck_reason()}"
         if port in reg:
-            reg[port]["stuck"] = note
+            reg[port]["stuck"] = True
             save_registry(reg)
         return {"stopped": rec.get("artifact"), "port": port, "pid": pid,
                 "stuck": [pid], "note": note}

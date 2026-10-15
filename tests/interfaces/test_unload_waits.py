@@ -5,6 +5,7 @@ import signal
 
 from knurlogic.interfaces import spawn
 from knurlogic.interfaces.http import lifecycle
+from knurlogic.machine import servers
 
 
 class FakeProc:
@@ -48,6 +49,7 @@ def test_a_server_that_does_not_leave_is_stuck_not_killed(monkeypatch):
     reg = _setup(monkeypatch, proc, sent)
     out = spawn.stop(8080)
     assert sent == [signal.SIGTERM]
-    assert out["stuck"] == [4242] and "not killed" in out["note"]
-    assert reg[8080]["stuck"] == out["note"]      # still listed, as stuck
+    assert out["stuck"] == [4242]
+    assert out["note"].endswith(servers.stuck_reason())
+    assert reg[8080]["stuck"] is True             # still listed, as stuck
     spawn.CHILDREN.pop(8080, None)

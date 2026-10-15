@@ -466,7 +466,7 @@ def test_a_server_an_unload_left_stuck_is_shown_stuck(monkeypatch):
     monkeypatch.setattr(footprint, "memory_map", lambda *a, **k: {})
     monkeypatch.setattr(identity, "identity", lambda: {"name": "box-a"})
     monkeypatch.setattr(servers, "registry", lambda: {
-        8092: {"pid": 1, "artifact": "/m/A", "stuck": "pid 1 did not stop"}})
+        8092: {"pid": 1, "artifact": "/m/A", "stuck": True}})
     monkeypatch.setattr(servers, "is_our_server", lambda pid: True)
     (r,) = loaded.survey()["resident"]
     assert r["state"] == "stuck" and not r["can_unload"]
