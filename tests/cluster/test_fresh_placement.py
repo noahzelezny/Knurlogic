@@ -107,5 +107,5 @@ def test_a_relaunch_whose_machine_is_absent_is_refused(monkeypatch):
     infos = [{"name": "A", "working_set_bytes": 84 * GIB}]
     with pytest.raises(C._Refused) as e:
         C._kept_split(_kept(), infos, post=None)
-    assert e.value.doc["refused"] == ("B is not answering; the split this "
+    assert e.value.doc["refused"] == ("B has not answered; the split this "
                                       "job started with needs it")

@@ -1652,7 +1652,7 @@ def _kept_split(kept: dict, infos: list, post) -> dict:
                  if s.get("machine") not in names), None)
     if gone:
         raise _Refused({
-            "refused": f"{gone} is not answering; the split this job "
+            "refused": f"{gone} has not answered; the split this job "
                        f"started with needs it",
             "placement": kept})
 

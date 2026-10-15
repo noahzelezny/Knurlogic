@@ -268,8 +268,7 @@ def stop(port: int) -> dict:
     if not _wait_exit(pid, mine[0] if mine else None, within):
         # not gone by its own ceiling: likely mid-step, where a SIGKILL can
         # hang the GPU, so it is left running and listed stuck
-        note = f"pid {pid} did not stop in {within:.0f} s: " \
-            f"{stuck_reason()}"
+        note = f"pid {pid} did not stop in {within:.0f} s: {stuck_reason()}"
         if port in reg:
             reg[port]["stuck"] = True
             save_registry(reg)
