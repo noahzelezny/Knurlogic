@@ -16,16 +16,15 @@ from knurlogic.tuning import measured
 # Pure arithmetic over the config and the safetensors headers, so a refusal is
 # said -- with its numbers -- before anything loads.
 
-def _tensor_maps() -> tuple:
+def _tensor_map() -> dict:
     from knurlogic.engine import families
-    m = families.build_maps()
-    return m["tensor"], m["tensor_archs"]
+    return families.build_maps()["tensor"]
 
 
 #: model type -> its family's `tensor` entry (engine/families/<family>):
 #: the model types engine/split/tensor.py knows how to split, and the
-#: config keys each needs divisible by the ranks; and those architectures
-_TENSOR, _TENSOR_ARCHS = _tensor_maps()
+#: config keys each needs divisible by the ranks
+_TENSOR = _tensor_map()
 TENSOR_TYPES = tuple(_TENSOR)
 
 
@@ -90,8 +89,7 @@ def tensor_refusals(cfg: dict, n: int) -> list:
     tc = cfg.get("text_config", cfg)
     types = {cfg.get("model_type"), tc.get("model_type")}
     if not types & set(TENSOR_TYPES):
-        out.append(f"tensor split knows {', '.join(_TENSOR_ARCHS)}; this "
-                   f"is {cfg.get('model_type')!r}")
+        out.append(f"{cfg.get('model_type')} is unknown to the tensor split")
         return out
 
     def div(what, v, why=""):

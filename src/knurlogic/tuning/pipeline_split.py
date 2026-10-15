@@ -38,8 +38,7 @@ def pipeline_refusals(cfg: dict, n: int) -> list:
         mt = cfg.get("model_type")
         why = next((w for k, w in _PIPELINE_WHY_NOT.items()
                     if any(str(t or "").startswith(k) for t in types)), None)
-        return [f"pipeline split knows {', '.join(PIPELINE_TYPES[:2])}, "
-                f"glm5_next, qwen4_exp and deepseek_v4; this is {mt!r}"
+        return [f"{mt} is unknown to the pipeline split"
                 + (f": {why}" if why else "")]
     L = tc.get("num_hidden_layers") or cfg.get("num_hidden_layers")
     if L is not None and int(L) < n:

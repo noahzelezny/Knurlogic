@@ -171,7 +171,7 @@ def test_pipeline_families():
         "model_type": "gemma4_text"}}, 2)
     assert "gemma4" in why[0] and "shares KV across layers" in why[0]
     why = pipeline_split.pipeline_refusals({"model_type": "llama"}, 2)
-    assert "'llama'" in why[0]
+    assert why == ["llama is unknown to the pipeline split"]
     assert "fewer than 3 ranks" in pipeline_split.pipeline_refusals(
         {"model_type": "qwen3_5", "num_hidden_layers": 2}, 3)[0]
     assert pipeline_split.pipeline_refusals({"model_type": "llama"}, 1) == []

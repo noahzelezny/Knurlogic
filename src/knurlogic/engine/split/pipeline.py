@@ -47,9 +47,7 @@ def _stage(model) -> dict:
     name = type(core_of(model)).__name__
     st = _stages()
     if name not in st:
-        raise ValueError(f"a pipeline split knows "
-                         f"{', '.join(s['name'] for s in st.values())}; "
-                         f"this trunk is {name}")
+        raise ValueError(f"{name} is unknown to the pipeline split")
     return st[name]
 
 
