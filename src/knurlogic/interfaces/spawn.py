@@ -257,39 +257,40 @@ def stop(port: int) -> dict:
         return {"error": f"the server on port {port} (pid {pid}) is already "
                          f"gone; record cleared", "log": rec.get("log")}
     os.kill(pid, signal.SIGTERM)
-    # it finishes the step it is in and its scheduler's cleanup on the way
-    # out: the same ceiling as its own (http.STOP_SAVE_S)
+    # It finishes the step it is in and its scheduler's cleanup on the way
+    # out: the same ceiling as its own (http.STOP_SAVE_S). Answer when the
+    # process is gone and its memory is back, not when the signal was sent:
+    # a caller that loads next must see the memory free.
     from knurlogic.interfaces.http.lifecycle import STOP_SAVE_S
-    end = time.monotonic() + STOP_SAVE_S + 5.0
-    while time.monotonic() < end:
-        time.sleep(0.25)
-        if not is_our_server(pid):
-            break
-    else:
-        os.kill(pid, signal.SIGKILL)
+    within = STOP_SAVE_S + STOP_MARGIN_S
     mine = CHILDREN.get(port)
-    # answer when the process is gone and its memory is back, not when the
-    # signal was sent: a caller that loads next must see the memory free
-    gone = _wait_exit(pid, mine[0] if mine else None)
-    if not gone:
+    if not _wait_exit(pid, mine[0] if mine else None, within):
+        # Not gone by its own ceiling: almost surely inside a GPU step.
+        # Killed there, the GPU's command queue was left waiting and the
+        # Mac hung until a reboot -- so it is left running, and listed.
+        note = (f"pid {pid} did not stop in {within:.0f} s: not killed "
+                f"(killing it mid-step can hang the GPU until a reboot) -- "
+                f"it is stuck; restart this Mac if it does not leave")
+        if port in reg:
+            reg[port]["stuck"] = note
+            save_registry(reg)
         return {"stopped": rec.get("artifact"), "port": port, "pid": pid,
-                "exiting": [pid],
-                "note": f"pid {pid} is still exiting after "
-                        f"{EXIT_WAIT_S:.0f} s; its memory is not free yet"}
+                "stuck": [pid], "note": note}
     CHILDREN.pop(port, None)
     reg.pop(port, None)
     save_registry(reg)
     return {"stopped": rec.get("artifact"), "port": port, "pid": pid}
 
 
-#: how long an unload waits for the server process to be gone
-EXIT_WAIT_S = 60.0
+#: how long past the server's own stop ceiling (http.STOP_SAVE_S) an
+#: unload waits for its process to be gone before calling it stuck
+STOP_MARGIN_S = 5.0
 
 
-def _wait_exit(pid: int, proc=None, wait_s: float | None = None) -> bool:
+def _wait_exit(pid: int, proc, wait_s: float) -> bool:
     """True once `pid` has exited (reaped when `proc` is ours), polling up
-    to `wait_s` (EXIT_WAIT_S)."""
-    end = time.time() + (EXIT_WAIT_S if wait_s is None else wait_s)
+    to `wait_s`."""
+    end = time.time() + wait_s
     while True:
         if proc is not None:
             if proc.poll() is not None:

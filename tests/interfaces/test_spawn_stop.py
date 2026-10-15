@@ -17,7 +17,7 @@ def test_a_server_started_by_hand_is_found_by_its_port(monkeypatch):
         killed.append((pid, sig))
         alive[pid] = False
     monkeypatch.setattr("os.kill", kill)
-    monkeypatch.setattr(spawn, "_wait_exit", lambda pid, child: True)
+    monkeypatch.setattr(spawn, "_wait_exit", lambda pid, child, wait_s: True)
     out = spawn.stop(8095)
     assert killed and killed[0][0] == 4242
     assert out["pid"] == 4242 and out["port"] == 8095
