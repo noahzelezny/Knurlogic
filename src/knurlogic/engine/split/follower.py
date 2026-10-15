@@ -134,8 +134,11 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
     from knurlogic.engine.prompt_cache.memory import PromptCache
     from knurlogic.engine.runtime.control_tokens import control_machine
 
+    from . import marker
     stream = mx.default_stream(mx.default_device())
     _defer_sigterm(link.rank)
+    marker.CURRENT["trace_chunks"] = split == "pipeline"
+    watch = marker.CURRENT["watch"] = marker.StepWatch().start()
     cache = PromptCache(prompt_cache_size)
     from knurlogic.engine.prompt_cache import disk as prompt_disk
     disk_key, restored, store = (list(disk) + [None])[:3] \
@@ -292,8 +295,10 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
         nxt = e.next_admission()
         if nxt is not None:
             e.set_chunk(chunks.pop(nxt, prefill_step_size))
+        watch.begin()
         events = mark.around(e.step, prefill=nxt is not None)
         steps += 1
+        watch.end(steps)
         for ev in events:
             if isinstance(ev, Checkpoint):
                 last[("checkpoint", ev.uid)] = (ev.tokens, ev.cache)

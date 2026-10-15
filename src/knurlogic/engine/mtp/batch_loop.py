@@ -28,7 +28,7 @@ import mlx.core as mx
 from mlx_lm.generate import _extend_cache, _merge_caches
 
 from knurlogic.engine.arrays import arrays_of
-from knurlogic.engine.split.marker import chunk_done
+from knurlogic.engine.split.marker import chunk_done, chunk_start
 from knurlogic.tuning import knobs
 
 from .caches import position, release, restore, rollback, snapshot
@@ -306,6 +306,7 @@ def admit(
             chunk = ids[:, i:end]
             if not chunk.shape[1]:
                 break
+            chunk_start(i, end, n)
             h = _prefill_chunk(model, head, get_h, chunk, cache, dcache,
                                _kw(i, end), block, drafts, row_drafts)
             if h is not None:

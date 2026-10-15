@@ -5,7 +5,7 @@ page never imports mlx.
 Each rank writes ~/.cache/knurlogic/jobs/<job>/rank<r>.json (phase, step
 counter, work in flight, time) every MARK_S seconds and at every phase
 change; the page that started it tears the whole job down on a gone pid, a
-rank that never joined, or rank 0 busy with a step counter unmoved for
+rank that never joined, or a rank busy with a step counter unmoved for
 STALL_S. Idle is not stalled.
 
 Design: docs/design/cluster.md (jobs).
@@ -20,12 +20,11 @@ import time
 from pathlib import Path
 
 from knurlogic.cluster import every
+from knurlogic.engine.split.marker import STALL_S
 from knurlogic.machine import files, paths, processes
 
 #: how often a rank rewrites its marker
 MARK_S = 2.0
-#: rank 0 busy and its step counter still for this long: stalled
-STALL_S = 120.0
 #: a rank still joining the ring after this long never will
 JOIN_S = 300.0
 #: SIGTERM, then this long, then SIGKILL: past rank 0's own 15 s to stop
