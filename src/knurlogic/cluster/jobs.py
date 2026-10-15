@@ -21,7 +21,7 @@ from pathlib import Path
 
 from knurlogic.cluster import every
 from knurlogic.engine.split.marker import STALL_S
-from knurlogic.machine import files, paths, processes
+from knurlogic.machine import files, paths, processes, servers
 
 #: how often a rank rewrites its marker
 MARK_S = 2.0
@@ -188,6 +188,8 @@ class Watch:
             work = (step, int(m.get("chunk") or 0))
             key = (job, rank)
             was = self.seen.get(key)
+            # a "stuck" rank is not ready so never judged stalled here: it
+            # already says why it stays (phase_of reports it)
             # the clock runs only while work is in flight: a ring idle for
             # an hour and then given a request has not been stalled an hour
             # and only on a loaded ring: a request that arrives while the
@@ -252,10 +254,9 @@ def by_job(reg: dict | None = None) -> dict:
 
 
 def is_rank(pid: int, job: str) -> bool:
-    """Alive, and still this job's process (a pid is reused once free). A
-    recorded pid whose command line cannot be read (AccessDenied, a zombie)
-    is alive while it exists: taking it for gone let a relaunch start
-    beside a rank still holding its GPU."""
+    """Alive, and still this job's process (a pid is reused once free); one
+    whose command line cannot be read counts as alive while it runs, so a
+    relaunch never starts beside it."""
     out = processes.command(pid)
     if not out:
         return processes.exists(pid)
@@ -272,12 +273,15 @@ def pids_of_job(job: str) -> list:
 
 def mid_step(job: str, rank: int, pid: int, read=read_marker) -> bool:
     """Rank `rank` of `job`, process `pid`, says by its marker that it is
-    inside a step (work in flight) or stuck in one. Killed there, a rank
-    left its GPU's command queue waiting on a collective that never
-    completed: the Mac held the job's memory at 100% GPU until a reboot."""
+    inside a step (work in flight) or stuck in one, where killing it can
+    hang its GPU."""
     m = read(job, int(rank)) or {}
     return m.get("pid") == int(pid) and (
         bool(m.get("busy")) or m.get("phase") == "stuck")
+
+
+#: pids terminate() has spared as stuck: not signalled or waited on again
+_STUCK: set = set()
 
 
 def terminate(pids: list, grace: float = GRACE_S, alive=None,
@@ -287,12 +291,15 @@ def terminate(pids: list, grace: float = GRACE_S, alive=None,
     -> the pids that needed the SIGKILL. A pid this user may not signal
     is not waited on: `alive` counts one it may not inspect as running
     (machine/processes.running), so it would hold the whole grace.
-    `spare(pid)` true (a rank mid-step, `mid_step`): never SIGKILLed; it
-    is left running and logged as stuck."""
+    `spare(pid)` true (a rank mid-step, `mid_step`): never SIGKILLed but
+    logged stuck once, and later calls neither signal nor wait for it."""
     import signal
     alive = alive or _reaped_alive
     ours = []
     for pid in pids:
+        if pid in _STUCK and alive(pid) and spare is not None and spare(pid):
+            continue
+        _STUCK.discard(pid)
         try:
             os.kill(pid, signal.SIGTERM)
         except PermissionError:
@@ -307,10 +314,10 @@ def terminate(pids: list, grace: float = GRACE_S, alive=None,
     killed = []
     for pid in pids:
         if alive(pid) and spare is not None and spare(pid):
+            _STUCK.add(pid)
             logging.getLogger(__name__).error(
-                "pid %d is mid-step and did not stop in %.0f s: not killed "
-                "(killing it there can hang its GPU until a reboot); it is "
-                "stuck -- check this machine", pid, grace)
+                "pid %d did not stop in %.0f s: %s", pid, grace,
+                servers.stuck_reason())
         elif alive(pid):
             try:
                 os.kill(pid, signal.SIGKILL)

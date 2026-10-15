@@ -1806,6 +1806,34 @@ def test_terminate_never_sigkills_a_busy_rank(monkeypatch):
     assert (12, signal.SIGKILL) in sent
 
 
+def test_terminate_spares_a_stuck_pid_once(monkeypatch, caplog):
+    import signal
+    sent = []
+    monkeypatch.setattr(os, "kill", lambda pid, sig: sent.append((pid, sig)))
+    monkeypatch.setattr(J, "_STUCK", set())
+    for _ in range(3):
+        assert J.terminate([11], grace=0, alive=lambda p: True,
+                           spare=lambda p: True) == []
+    assert sent == [(11, signal.SIGTERM)]
+    assert sum("did not stop" in r.message for r in caplog.records) == 1
+
+
+def test_the_watcher_leaves_a_job_whose_live_ranks_are_mid_step(
+        cache, monkeypatch):
+    job = "41648583878fcdfc"
+    J.save_registry({f"{job}/1": {"job": job, "rank": 1, "pid": 4321,
+                                  "stopping": 1.0}})
+    monkeypatch.setattr(C, "_alive", lambda j, p: True)
+    monkeypatch.setattr(J, "mid_step", lambda j, r, p: True)
+    stops = []
+    monkeypatch.setattr(C, "stop", lambda *a, **k: stops.append(a))
+    assert C.watch_once() == [] and stops == []
+    monkeypatch.setattr(J, "mid_step", lambda j, r, p: False)
+    C.watch_once()
+    assert stops == [(job,)]
+    J.save_registry({})
+
+
 def test_a_recorded_rank_whose_command_line_is_unreadable_is_alive(
         monkeypatch):
     from knurlogic.machine import processes

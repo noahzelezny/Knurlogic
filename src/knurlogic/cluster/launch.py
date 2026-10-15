@@ -1168,6 +1168,10 @@ def watch_once(now: float | None = None) -> list:
         if job in _STOPPING:
             continue
         if all(r.get("stopping") for r in recs):
+            live = [r for r in recs if _alive(job, int(r["pid"]))]
+            if live and all(J.mid_step(job, int(r["rank"]), int(r["pid"]))
+                            for r in live):
+                continue                  # spared mid-step: nothing to do
             # stopped, and a rank was still exiting: finish it
             stop(job, reason=recs[0].get("stop_reason") or "stopped",
                  propagate=False)
