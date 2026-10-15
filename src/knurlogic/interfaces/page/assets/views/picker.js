@@ -19,8 +19,6 @@ import {act, loadResident, mtpOffConfirm} from './memory.js';
 // model is a catalogue, not a control: the answer to fifty rungs is a
 // picker.
 let MODELS=[], GROUPS=[], FAM='All', SEL=null, QUERY='';
-// a launch that went ahead clears the pick; loadModels must not re-pick
-let SELCLEARED=false;
 // Favorites/recents: a set of starred paths and a 20-entry most-recent list,
 // both in localStorage (the picker's own bookkeeping).
 function loadFav(){ try{ return new Set(JSON.parse(localStorage.getItem('kn.fav')||'[]')) }
@@ -31,14 +29,6 @@ function toggleFav(p){ const s=loadFav();
   try{ localStorage.setItem('kn.fav', JSON.stringify([...s])) }catch(e){} }
 function loadRecents(){ try{ return JSON.parse(localStorage.getItem('kn.recent')||'[]') }
   catch(e){ return [] } }
-// The model the last Launch was for: what the Load Model panel pre-selects.
-// Written when Launch is pressed, read when the page loads; never whatever
-// the picker's ordering would put first (the largest model that "fits" is
-// often a 178 GiB one nobody is about to launch).
-function lastLaunched(){ try{ return localStorage.getItem('kn.lastLaunched')||'' }
-  catch(e){ return '' } }
-function saveLastLaunched(path){
-  try{ localStorage.setItem('kn.lastLaunched', path) }catch(e){} }
 function pushRecent(path){
   let r=loadRecents().filter(x=>x.path!==path);
   r.unshift({path, at:Date.now()});
@@ -215,7 +205,7 @@ function renderPicker(){
     e.stopPropagation(); FAM=HUB; renderPicker(); hubOpen(t.dataset.upd);
   });
   $('prows').querySelectorAll('.var').forEach(v=>v.onclick=()=>{
-    SEL=MODELS.find(m=>m.path===v.dataset.p); SELCLEARED=false;
+    SEL=MODELS.find(m=>m.path===v.dataset.p);
     OVL.close();
     pickInfo();
   });
@@ -237,12 +227,8 @@ async function loadModels(rescan){
   BASEKEY=baseKeys((d.models||[]).filter(m=>m.servable));
   migrateLaunchSets();
   regroup();
-  const ws=fitWS();
-  if(!SEL && !SELCLEARED){
-    const last=lastLaunched();
-    SEL=(last && MODELS.find(m=>m.path===last))
-      || MODELS.find(m=>!ws||m.size_bytes<=ws)||null;
-  }
+  // nothing is pre-selected: the model last launched is usually the one
+  // running, and picked again it only says it does not fit
   pickInfo();
 }
 // What this artifact WOULD resolve to, fetched when the selection changes.
@@ -281,7 +267,9 @@ async function loadPreview(){
   if(SEL!==m) return;
   // the preview's room is asked against the tune picked, and fresher
   const pr=$('pickroom');
-  if(pr && PREVIEW && selNodes().length>1) pr.innerHTML=splitRoomHTML(PREVIEW.split_room);
+  // a model that cannot be split says so once, in launchBlock's note
+  const unsplit=Array.isArray(m.splits) && !m.splits.length;
+  if(pr && PREVIEW && selNodes().length>1) pr.innerHTML=unsplit?'':splitRoomHTML(PREVIEW.split_room);
   else if(pr && PREVIEW && PREVIEW.room) pr.innerHTML=roomHTML(PREVIEW.room);
   mtpState(); splitState(); launchGate();
 }
@@ -561,7 +549,6 @@ $('launch').onclick=async()=>{
   const tune=window.LOADTUNE||'default';
   const sets=launchMTP(m);
   const t0=Date.now();
-  saveLastLaunched(m.path);
   const body=ns.length>1
     ? {action:'load', identity:m.identity, name:pickedName(m), nodes:ns.map(n=>n.id),
        split:MULTI.shard, link:MULTI.link, tune, sets}
@@ -581,7 +568,7 @@ $('launch').onclick=async()=>{
   settleLaunch(L, j);
   if(L.phase!=='failed' && !L.cancelled){
     // done with this pick: back to "choose a model"
-    SEL=null; SELCLEARED=true; pickInfo();
+    SEL=null; pickInfo();
     tick(); loadModels(); pushRecent(m.path);
     const st=(j.settings||{}).needs_restart||{};
     const n=Object.keys(st).length;
