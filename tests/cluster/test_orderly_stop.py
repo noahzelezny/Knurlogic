@@ -1,7 +1,5 @@
-"""A cluster job's SIGTERM stops the ring between steps: killed mid-step, a
-rank left its peer's GPU waiting on a collective forever (100%, the job's
-memory pinned past every exit until a reboot; M3 + M4, tensor over TCP and
-RDMA, 4 requests in flight)."""
+"""A cluster job's SIGTERM stops the ring between steps: a rank killed
+mid-step leaves its peer's GPU waiting on a collective."""
 import os
 import signal
 import threading
@@ -78,9 +76,8 @@ def test_a_step_that_never_ends_fails_the_requests_then_leaves(monkeypatch):
 
 
 def test_a_scheduler_still_inside_a_step_is_not_exited(monkeypatch):
-    """Rank 0 whose step never ends (its peer's GPU hung): leaving
-    mid-step wedged the Mac until a reboot, so it stays, says stuck and
-    keeps answering 503."""
+    """Rank 0 whose step never ends stays, says stuck and keeps answering
+    503: leaving mid-step can hang the GPU."""
     from knurlogic.engine.split import marker
     exited = []
     monkeypatch.setattr(os, "_exit", exited.append)
@@ -122,6 +119,50 @@ def test_a_ring_failure_whose_cleanup_never_ends_is_not_exited(monkeypatch):
             and time.monotonic() < end:
         time.sleep(0.01)
     assert {"phase": "stuck", "busy": True} in said and exited == []
+
+
+def _stuck_ring(monkeypatch, s):
+    from knurlogic.engine.split import marker
+    exited = threading.Event()
+    codes, said = [], []
+    monkeypatch.setattr(os, "_exit", lambda c: (codes.append(c), exited.set()))
+    monkeypatch.setattr(marker, "progress", lambda **f: said.append(f))
+    H.watch_ring(s, SimpleNamespace(state="ready"), exit_after=0.01,
+                 stop_within=0.01, stuck_poll=0.01)
+    return exited, codes, said
+
+
+def test_a_stuck_rank_leaves_with_its_code_once_the_step_ends(monkeypatch):
+    s = Sched()
+    done = threading.Event()
+    s.wait_stopped = lambda timeout: done.is_set()
+    exited, codes, said = _stuck_ring(monkeypatch, s)
+    s.on_ring_failed(RuntimeError("collective failed"))
+    end = time.monotonic() + 2
+    while {"phase": "stuck", "busy": True} not in said \
+            and time.monotonic() < end:
+        time.sleep(0.01)
+    assert {"phase": "stuck", "busy": True} in said and not exited.is_set()
+    done.set()
+    assert exited.wait(2) and codes == [1]
+
+
+def test_a_sigterm_to_a_stuck_rank_keeps_it_stuck(monkeypatch):
+    s = Sched()
+    s.wait_stopped = lambda timeout: False
+    old = signal.getsignal(signal.SIGTERM)
+    try:
+        _, _, said = _stuck_ring(monkeypatch, s)
+        s.on_ring_failed(RuntimeError("collective failed"))
+        end = time.monotonic() + 2
+        while {"phase": "stuck", "busy": True} not in said \
+                and time.monotonic() < end:
+            time.sleep(0.01)
+        said.clear()
+        signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)
+    finally:
+        signal.signal(signal.SIGTERM, old)
+    assert said == [] and s.calls == []
 
 
 def test_a_ring_failure_whose_cleanup_ends_leaves_non_zero(monkeypatch):

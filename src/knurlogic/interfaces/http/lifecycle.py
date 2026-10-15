@@ -131,7 +131,7 @@ def ring_stopped(sched, within: float) -> bool:
 
 
 def watch_ring(sched, mh, exit_after: float = 1.5,
-               stop_within: float = 15.0) -> None:
+               stop_within: float = 15.0, stuck_poll: float = 1.0) -> None:
     """Rank 0 of a split model: its progress marker says whether work is
     in flight (the page tells idle from stalled by it), and a SIGTERM --
     the page tearing the job down because another rank died or stalled --
@@ -144,6 +144,7 @@ def watch_ring(sched, mh, exit_after: float = 1.5,
 
     from knurlogic.engine.runtime.scheduler import RingFailed
     from knurlogic.engine.split import marker
+    from knurlogic.machine import servers
 
     log = logging.getLogger(__name__)
     armed: list = []
@@ -159,21 +160,20 @@ def watch_ring(sched, mh, exit_after: float = 1.5,
         m.probe = probe
 
     def leave_unless_in_step(code: int, in_step) -> None:
-        """After the 503s go out, leave with `code` -- unless the
-        scheduler is still inside GPU work (`in_step()`): leaving there
-        left the GPU's command queue waiting on a collective that never
-        completed (the Mac wedged until a reboot). Then stay, answering
-        503, and say stuck; the page does not SIGKILL a rank whose marker
-        says so."""
+        """After the 503s go out, leave with `code` once the scheduler is
+        out of GPU work (`in_step()`, re-checked every `stuck_poll` s):
+        leaving mid-step can hang the GPU, so until then the rank stays,
+        answering 503, marked stuck."""
         import time
         time.sleep(exit_after)          # the 503s go out first
         if in_step():
             stuck.append(1)
             marker.progress(phase="stuck", busy=True)
-            log.error("the scheduler is still inside a step; not leaving "
-                      "(its GPU may be hung) -- this rank stays, answering "
-                      "503, until it is checked")
-            return
+            log.error("the scheduler is still inside a step; not leaving: "
+                      "%s", servers.stuck_reason())
+            while in_step():
+                time.sleep(stuck_poll)
+            log.info("the scheduler left its step; leaving")
         logging.shutdown()
         os._exit(code)
 
@@ -189,12 +189,8 @@ def watch_ring(sched, mh, exit_after: float = 1.5,
             lambda: not sched.wait_stopped(0) and sched.busy)
 
     def leave_after_ring_failure(_exc):
-        # The scheduler stopped at a step boundary on a failed collective
-        # and answered everything with RingFailed: let it finish its
-        # cleanup (the executor, the model, mx.synchronize) so nothing is
-        # left on the GPU, then leave non-zero so the page's recovery
-        # relaunches the job. A cleanup still running after stop_within
-        # is GPU work stuck behind a collective: the rank stays, stuck.
+        # Let the scheduler finish its cleanup so nothing is left on the
+        # GPU, then leave non-zero so the page's recovery relaunches.
         marker.progress(phase="stopping")
 
         def go():
@@ -202,24 +198,20 @@ def watch_ring(sched, mh, exit_after: float = 1.5,
             if not done:
                 log.error("the scheduler did not finish its cleanup within "
                           "%.0f s after the ring failed", stop_within)
-            leave_unless_in_step(1, lambda: not done)
+            leave_unless_in_step(
+                1, lambda: not (done or sched.wait_stopped(0)))
         threading.Thread(target=go, daemon=True).start()
     sched.on_ring_failed = leave_after_ring_failure
 
     def on_term(_sig, _frame):
+        if stuck:
+            return                      # already stopping; stays "stuck"
         marker.progress(phase="stopping")
         if getattr(mh, "state", "") in ("warming", "ready"):
-            # An unload with the ring alive: stop at a step boundary (while
-            # warming, once the warm-up's forwards are done). The
-            # scheduler finishes the step it is in, fails what is in
-            # flight, and sends the other ranks `stop`, so every rank
-            # leaves between steps. Killed mid-step, a rank left its
-            # peer's GPU waiting on a collective that never completed: the
-            # stuck queue held that GPU at 100% and pinned the job's memory
-            # past every process's exit, until a reboot (measured on M3 +
-            # M4, tensor over TCP and RDMA, 4 requests in flight).
-            # A step that never ends means a peer is gone: fail what is in
-            # flight as before and leave.
+            # An unload with the ring alive: every rank stops at a step
+            # boundary, since one killed mid-step leaves its peer's GPU
+            # waiting on a collective. A step that never ends means a peer
+            # is gone: fail what is in flight and leave.
             def stop_then_leave():
                 log.info("SIGTERM: stopping the ring at the next step "
                          "boundary (waiting up to %.0f s)", stop_within)
@@ -231,9 +223,9 @@ def watch_ring(sched, mh, exit_after: float = 1.5,
                     fail_and_leave()
             threading.Thread(target=stop_then_leave, daemon=True).start()
             return
-        # Loading: the read stops at its next batch boundary (host.LOAD_STOP)
-        # rather than dying inside one, which left the GPU's utilization
-        # counter stuck at 100% until a reboot.
+        # Loading: the read stops at its next batch boundary
+        # (host.LOAD_STOP) rather than dying inside one, which can hang
+        # the GPU.
         from knurlogic.engine.runtime import model_host as H
         H.LOAD_STOP.set()
 
