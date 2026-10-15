@@ -28,9 +28,9 @@ def serve_argv(path: str, *args: str) -> list:
 
 
 def stuck_reason() -> str:
-    """Why a server or rank on this machine is shown stuck: it would not
-    leave while inside GPU work, and was not killed there (that hung the
-    GPU until a reboot) -- the page and the MCP say it in these words."""
+    """Why a server or rank on this machine is shown stuck (left running
+    inside GPU work, where killing it can hang the GPU): the one wording
+    the page, the MCP and the logs use."""
     from knurlogic.machine import identity
     me = identity.identity().get("name") or "this machine"
     return f"{me}'s GPU may be hung -- restart {me} if it does not leave"

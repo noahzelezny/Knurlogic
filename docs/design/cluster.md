@@ -85,9 +85,8 @@ The one peer route, `/peer/v1/msg`, is gated by `ui.peer_refusal`.
   memory -- relaunching into the same memory can reboot the machine --
   which is `failed` at once, with the reason; a refused launch; and a
   stall (`kind` "stall", set by the watchdog): a rank busy with no step
-  for `STALL_S` may have a hung GPU, and a relaunch onto that Mac wedged it
-  until a reboot, so the job ends naming the stalled machine ("check it,
-  then load again").
+  for `STALL_S` may have a hung GPU, so the job ends rather than relaunch
+  onto it, naming the stalled machine ("check it, then load again").
 - **Waits** -- a machine that went away or stopped answering: the relaunch
   waits until every machine of the job answers its page again, within the
   window; else `failed`.
