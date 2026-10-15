@@ -54,7 +54,9 @@ def capture_input(core, path: str):
     owner, attr = _resolve(core, path)
     # a list member (`layers.41`: DSpark's target layers) is an item
     if attr.isdigit():
-        def put(v, i=int(attr)):
+        i = int(attr)
+
+        def put(v):
             owner[i] = v
         inner = owner[int(attr)]
     else:

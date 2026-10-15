@@ -203,6 +203,7 @@ class BlockBatch(MTPBatch):
         sec = self._clock() - t0
         self._record_cost(B, drafting, sec, n)
         if drafting:
+            assert pre is not None      # a drafting step has its block
             self._record_width(B, int(pre[0].shape[1]), sec)
         self._prof_end(drafting, n)
         return out
@@ -592,9 +593,11 @@ class BlockBatch(MTPBatch):
         self.row_t1 = row_next[idx]
         return out
 
-    def _plain_step(self) -> list[RowStep]:
+    def _plain_step(self, then: mx.array | None = None) -> list[RowStep]:
         """One stock decode step; the head's cache still takes the
-        committed position, so the next drafting step can draft."""
+        committed position, so the next drafting step can draft. `then`
+        is MTPBatch._draft_step's, which this class never takes."""
+        assert then is None
         B = len(self.uids)
         lg = self.model(self.t1[:, None], cache=self.cache,
                         **self._pos_kw(1))

@@ -23,7 +23,7 @@ LO, HI = 9, 32
 VALUES = ("on", "off")
 #: the prompt cache key's own words for a setting (the `setting` of
 #: resolve's dict): they say whether to pad, so rounding off is "on"
-KEY_SETTING = {"on": "off", "off": "on"}
+KEY_SETTING: dict[object, str] = {"on": "off", "off": "on"}
 
 _STATE = {"installed": False}
 

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import time
+from typing import TYPE_CHECKING
 
 from knurlogic.machine import ledger as L
 
@@ -134,6 +135,13 @@ def progress(request_id, phase: str, done: int = 0, total: int = 0,
 
 class TelemetryHandlers:
     """Handler's GET /v1/usage (interfaces/http/server)."""
+
+    # what Handler (interfaces/http/server) gives these methods
+    client_address: tuple
+
+    if TYPE_CHECKING:
+        def _json(self, code: int, obj, headers=None) -> None: ...
+        def _error(self, e: O.ApiError) -> None: ...
 
     def _usage(self, q: dict) -> None:
         """GET /v1/usage?since=&until=&group=&key=: this machine's ledger

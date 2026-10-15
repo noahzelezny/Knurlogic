@@ -33,7 +33,7 @@ from knurlogic.machine.units import GIB, MIB, gib
 from knurlogic.tuning import fit
 from knurlogic.tuning.checks import refuse_sets, ring_refusals, settings_refusal
 from knurlogic.tuning.live import LIVE_KNOBS
-from knurlogic.tuning.resolve import resolve
+from knurlogic.tuning.resolve import Resolution, resolve
 
 #: the serve flag that sets a knob, where one exists (else --set K=V)
 _FLAG_FOR = {"KNURLOGIC_KV_BITS": "--kv-bits",
@@ -93,10 +93,10 @@ class Launch:
     long_context: str
     draft: bool
     vision: bool
-    rounding: object
+    rounding: dict
     ws: int
     adv: dict
-    r: object
+    r: Resolution
     forced: dict = field(default_factory=dict)
 
 

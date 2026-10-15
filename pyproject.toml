@@ -84,6 +84,7 @@ extend-exclude = [
     "src/knurlogic/engine/families/*/architecture",
     "src/knurlogic/engine/families/qwen/vision",
     "src/knurlogic/engine/families/gemma4/vision",
+    "src/knurlogic/engine/model/load_model.py",
     "tests/support/fixtures_deepseek_v4",
     "tests/support/fixtures_deepseek_v4_vision/encoding_dsv4.py",
 ]
@@ -225,6 +226,7 @@ exclude = [
     "src/knurlogic/engine/families/[^/]+/architecture",
     "src/knurlogic/engine/families/qwen/vision",
     "src/knurlogic/engine/families/gemma4/vision",
+    "src/knurlogic/engine/model/load_model.py",
 ]
 
 # Excluded files are still checked when something imports them; silence them.
@@ -236,6 +238,7 @@ module = [
     "knurlogic.engine.families.qwen.vision.*",
     "knurlogic.engine.families.gemma4.vision",
     "knurlogic.engine.families.gemma4.vision.*",
+    "knurlogic.engine.model.load_model",
 ]
 ignore_errors = true
 

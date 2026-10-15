@@ -73,8 +73,8 @@ def serve(body: dict, resolve=None) -> tuple:
     ident = body.get("identity")
     f, off, n = body.get("file"), body.get("offset"), body.get("length")
     if not isinstance(ident, str) or not isinstance(f, str) or \
-            not all(isinstance(x, int) and not isinstance(x, bool) and x >= 0
-                    for x in (off, n)):
+            not isinstance(off, int) or not isinstance(n, int) or \
+            any(isinstance(x, bool) or x < 0 for x in (off, n)):
         return 400, {"error": "Weights is {identity, file, offset, length}"}
     if "/" in f or "\\" in f or f.startswith(".") or \
             not f.endswith(".safetensors"):

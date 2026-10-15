@@ -27,6 +27,7 @@ import json
 import re
 import struct
 import sys
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
 import numpy as np
@@ -112,11 +113,11 @@ def plan(src: _Source) -> list:
     """[(sidecar name, safetensors dtype, shape, producer)] in file order;
     producer() -> the tensor's bytes (an iterable of chunks)."""
     stages = sorted({int(k.split(".")[1]) for k in src.files})
-    out = []
+    out: list[tuple[str, str, list, Callable[..., Iterable[bytes]]]] = []
     for s in stages:
         pre = f"mtp.{s}."
         names = sorted(k for k in src.files if k.startswith(pre))
-        experts = {}
+        experts: dict[str, list[int]] = {}
         for k in names:
             rest = k[len(pre):]
             if rest.endswith(".scale"):

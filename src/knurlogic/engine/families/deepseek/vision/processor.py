@@ -105,8 +105,8 @@ def to_bf16(x: np.ndarray) -> np.ndarray:
     """float32 rounded to bfloat16 (round to nearest even), kept float32:
     the reference casts the normalized pixels to bf16 before the tower."""
     u = np.ascontiguousarray(x, dtype=np.float32).view(np.uint32)
-    u = (u + (0x7FFF + ((u >> 16) & 1))) & 0xFFFF0000
-    return u.astype(np.uint32).view(np.float32)
+    r = (u + (0x7FFF + ((u >> 16) & 1))) & 0xFFFF0000
+    return r.astype(np.uint32).view(np.float32)
 
 
 def load_image(image, args: VisionArgs):

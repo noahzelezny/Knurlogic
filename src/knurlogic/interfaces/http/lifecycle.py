@@ -106,8 +106,8 @@ def ring_stopped(sched, within: float) -> bool:
     that one is still young. Leaving inside a moving exchange tears it: on
     a 2-Mac pipeline unload the follower got rank 0's control row and lost
     rank 0 before the plan bytes, 2 s later (its marker's timing fits rank
-    0 leaving 1.5 s after a stop that ran out its 15 s). A gone peer's exchange never ends;
-    one that has waited EXCHANGE_S is taken as that. Logs where the
+    0 leaving 1.5 s after a stop that ran out its 15 s). A gone peer's
+    exchange never ends; one that has waited EXCHANGE_S is taken as that. Logs where the
     scheduler is when it gives up."""
     import sys
     import time
@@ -122,7 +122,8 @@ def ring_stopped(sched, within: float) -> bool:
         if sched.wait_stopped(0.05):
             return True
     thread = getattr(sched, "_thread", None)
-    frame = sys._current_frames().get(getattr(thread, "ident", None))
+    ident = getattr(thread, "ident", None)
+    frame = sys._current_frames().get(ident) if ident is not None else None
     where = "".join(traceback.format_stack(frame)) if frame else "(gone)"
     logging.getLogger(__name__).error(
         "the scheduler did not reach a step boundary within %.0f s; failing "

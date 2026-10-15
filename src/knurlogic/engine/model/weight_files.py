@@ -238,8 +238,9 @@ def remake(stop: Callable | None = None) -> tuple:
     """The recorded sanitize run again on the tensors it consumed, fetched
     from the peer. -> ({name: array} it makes, bytes fetched). Raises when
     the inputs pass REMAKE_LIMIT, or the fetch or the sanitize fails."""
-    got, n = fetch(_SANITIZED["inputs"], peer(), stop=stop,
-                   limit=REMAKE_LIMIT)
+    p = peer()
+    assert p is not None                # asked only with one (split/weights)
+    got, n = fetch(_SANITIZED["inputs"], p, stop=stop, limit=REMAKE_LIMIT)
     return _SANITIZED["fn"](got), n
 
 

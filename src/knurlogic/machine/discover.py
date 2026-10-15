@@ -352,6 +352,7 @@ def find_named(name: str, extra=(), include_defaults: bool = True) -> list:
             if 0 < len(parts) <= 4:
                 add(abs_path.resolve(), store)
             continue
+        assert rel is not None          # abs_path is None only for a relative name
         add(root / rel, store)
         if len(rel.parts) == 2:                  # org/name as org--name
             add(root / "--".join(rel.parts), store)

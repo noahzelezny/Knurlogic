@@ -281,7 +281,7 @@ def sampling_defaults(path, non_thinking: dict | None = None) -> dict:
         return {}
     if not isinstance(g, dict) or g.get("do_sample") is False:
         return {}
-    out = {}
+    out: dict[str, object] = {}
     for key, name in _SAMPLING_KEYS:
         v = g.get(key)
         if isinstance(v, (int, float)) and not isinstance(v, bool):
@@ -292,7 +292,7 @@ def sampling_defaults(path, non_thinking: dict | None = None) -> dict:
             "model_type")
     except (OSError, ValueError, AttributeError):
         mt = None
-    if out and mt in (non_thinking or {}):
+    if out and non_thinking and mt in non_thinking:
         out["non_thinking"] = dict(non_thinking[mt])
     return out
 

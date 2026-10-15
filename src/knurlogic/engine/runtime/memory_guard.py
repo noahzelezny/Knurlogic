@@ -18,9 +18,15 @@ from __future__ import annotations
 import logging
 import math
 import time
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 from knurlogic.machine.units import GIB, gib
 from knurlogic.tuning import fit
+
+if TYPE_CHECKING:
+    from knurlogic.engine.runtime.executor import LocalExecutor
+    from knurlogic.engine.runtime.scheduler import Job, _Row
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +116,35 @@ def _fixed_nbytes(cache) -> int:
 
 class MemoryGuard:
     """Scheduler's memory methods (engine/runtime/scheduler)."""
+
+    # the Scheduler state these methods read (set in Scheduler.__init__)
+    tensor: Any
+    host: Any
+    cache: Any
+    prefill_step_size: int
+    working_set: int | None
+    _tx: dict
+    _chunk_pick: int | None
+    _chunk_of: dict[int, int]
+    _gpu_in_use: Callable[[], int] | None
+    _others: list[int]
+    _others_at: float
+    _kv: tuple | None
+    _samples: dict
+    _rows: dict[int, _Row]
+    _compressed: Callable[[], int | None] | None
+    _system_pressure: Callable[[], int] | None
+    _pressure: int
+    _pressure_level: int
+    _pressure_at: float
+    _ring_trimmed: bool
+    _ex: LocalExecutor | None
+
+    if TYPE_CHECKING:
+        def _queued(self) -> set: ...
+        def _next_admission(self) -> int | None: ...
+        def _requeue(self, uid: int, why: str) -> None: ...
+        def _error(self, job: Job, err: BaseException) -> None: ...
 
     def _memory(self, n_tokens: int = 0, need: int | None = None,
                 room: int | None = None, chunk: int | None = None) -> dict:
@@ -672,7 +707,7 @@ class MemoryGuard:
         step."""
         uid = self._next_admission()
         row = self._rows.get(uid) if uid is not None else None
-        if row is None or not self._kv or not self._limit():
+        if uid is None or row is None or not self._kv or not self._limit():
             return
         n = row.job.prompt_tokens
         need = self._cost(n, 2 if len(self._rows) > 1 else 1)

@@ -272,9 +272,9 @@ def refusals(shapes: dict, n: int, key_dim: int, kv_heads: int,
         rule = RULES[path]
         where = f"layers.{layer}.{path}"
         if rule.kind == PARTS:
-            parts = len({k.split(".")[0] for k in leaves})
-            if parts % n:
-                say((path, "parts"), f"{where}: {parts} parts do not "
+            n_parts = len({k.split(".")[0] for k in leaves})
+            if n_parts % n:
+                say((path, "parts"), f"{where}: {n_parts} parts do not "
                     f"divide by {n}")
             continue
         why = module_refusal(where, rule, {k for k in leaves if k})
@@ -387,7 +387,7 @@ def cache_cuts(model) -> list | None:
     spec = CACHE_LAYERS.get(model_type_of(model) or "")
     if spec is None:
         return None
-    out = []
+    out: list[tuple | None] = []
     try:
         for layer in model.layers:
             mod = next((k for k in spec if k in layer), None)
@@ -398,6 +398,7 @@ def cache_cuts(model) -> list | None:
                 out.append(None)
                 continue
             m = layer[mod]
+            w: dict[str, tuple[int, ...]]
             if kind == KV:
                 units, w = _attr(m, _KV_HEADS), {"1": (1,)}
             else:

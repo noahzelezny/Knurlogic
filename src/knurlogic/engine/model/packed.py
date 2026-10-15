@@ -46,7 +46,7 @@ def recipe(weights: dict, path: str, mod, quant: dict | None = None,
     bits = int(weights[f"{path}.weight"].shape[-1]) * 32 // in_dims
     gs = in_dims // int(s.shape[-1])
     if f"{path}.biases" in weights:
-        kind = "affine"
+        kind: str | None = "affine"
     else:
         quant = quant or {}
         layer = quant.get(prefix + path)

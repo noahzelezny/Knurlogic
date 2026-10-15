@@ -184,6 +184,7 @@ def listing(key_id, roots=None) -> dict:
             for f in files:
                 if f.is_symlink():
                     continue
+                piece: int | str
                 if f.name == layers.ENTRY:
                     piece = ENTRY_PIECE
                 elif f.name == layers.DRAFT:
@@ -321,7 +322,7 @@ def _missing(store, d: Path, meta: dict | None, info_draft: bool,
     its head ranges, the ones here preferred), or None when not even
     `offered` (the peers' layer pieces) makes every slot."""
     p = store.part
-    out = [] if meta is not None else [ENTRY_PIECE]
+    out: list[int | str] = [] if meta is not None else [ENTRY_PIECE]
     lack = store.lacking(d, offered)
     if lack is None:
         return None
@@ -337,7 +338,7 @@ def _complete(f, store, name: str, local: dict | None, lists: dict,
     d = store.dir / name
     has = {peer: got[name] for peer, got in lists.items()
            if isinstance(got.get(name), dict)}
-    first = next(iter(has.values()), {})
+    first: dict = next(iter(has.values()), {})
     if local is not None and (local.get("layers") !=
                               list(range(store.part.total))):
         return                          # not this model's layers

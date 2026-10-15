@@ -262,7 +262,8 @@ def candidates(store, n: int, max_bytes=None, skip=()) -> list:
         return []
     to = store.key.get("kv_bits")
     seen = set(skip)
-    same, other = [], []
+    same: list = []
+    other: list = []
     for b, s in lenders(store):
         for d in s.candidates(n + len(seen), max_bytes):
             if d.name in seen or not _same(store, convert.disk_meta(d)):
@@ -305,7 +306,7 @@ def read(store, dirs) -> list:
         b = k.get("kv_bits")
         s = Store(store.base, k, store.part, store.draft)
         for d0, toks, cache, kind, ms, meta in s.read([d], drop_bad=False):
-            extra = {"borrowed_from": _name_of(m)}
+            extra: dict[str, object] = {"borrowed_from": _name_of(m)}
             if b != to:
                 try:
                     if store.template is None:

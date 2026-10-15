@@ -9,6 +9,8 @@ Headroom is an input: a byte count from machine/, never measured here.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from knurlogic.machine.artifact import MTP_HEAD_GLOB, Artifact, safetensors_header
 from knurlogic.machine.units import GIB, gib
 from knurlogic.tuning import measured
@@ -271,7 +273,8 @@ def rank_share_bytes(shape: dict, rank: int, layers: list | None = None) -> int:
             + int(shape.get("other_bytes") or 0) + lead)
 
 
-def share_refusal(share_bytes: int, budget_bytes: int, held: list = ()) -> str:
+def share_refusal(share_bytes: int, budget_bytes: int,
+                  held: Sequence[tuple] = ()) -> str:
     """"" when a rank's share fits its budget less what `held` holds there
     now ([(what, pid, bytes)]) and the step margin (`step_margin`, the fit
     line single_fit_check draws); else the arithmetic, as a clause that
@@ -492,23 +495,20 @@ def split_room(ranks: list, cfg: dict, split: str, kv_bits=None) -> dict:
                <= x["budget_bytes"] for x in rows)
     small = (min((x["left_bytes"] for x in rows), default=0) < 2 * GIB
              or bool(per and window and tokens < window / 5))
-    t = (f"{tokens / 1e6:.1f}M" if tokens >= 1e6 else
-         f"{tokens / 1e3:.0f}k" if tokens >= 1e3 else str(tokens))
-    text = (f"leaves {gib(left, 0)} across {n} machines"
-            + (f", about {t} tokens of context across all conversations"
-               if per else " (its KV size per token is not known)"))
+    text = room_text(left, tokens, per, where=f" across {n} machines")
     return {"fits": fits, "split": split, "ranks": rows,
             "left_bytes": left, "kv_bytes_per_token": per, "kv_why": why,
             "tokens": tokens, "window": window, "small": small,
             "text": text}
 
 
-def room_text(left: int, tokens: int, per: int) -> str:
+def room_text(left: int, tokens: int, per: int, where: str = "") -> str:
     """'leaves 6 GiB, about 400k tokens of context across all
-    conversations' -- one sentence, shared by the page and doctor."""
+    conversations' -- one sentence, shared by the page, doctor and
+    split_room (`where`: " across 2 machines", after the bytes)."""
     t = (f"{tokens / 1e6:.1f}M" if tokens >= 1e6 else
          f"{tokens / 1e3:.0f}k" if tokens >= 1e3 else str(tokens))
-    return (f"leaves {gib(left, 0)}"
+    return (f"leaves {gib(left, 0)}{where}"
             + (f", about {t} tokens of context across all conversations"
                if per else " (its KV size per token is not known)"))
 

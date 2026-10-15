@@ -244,6 +244,7 @@ class DSparkCache:
     def mask(self, K: int):
         """[B, 1, 1, W + K] (True = attend) or None when every slot is a
         row's own. The block's K keys are visible to every block query."""
+        assert self.keys is not None    # the prompt is appended first
         W = int(self.keys[0].shape[1])
         valid = [min(n, self.window) for n in self.lengths]
         if all(v >= W for v in valid):
@@ -405,6 +406,7 @@ class DeepseekV4DSparkHead(PackedSidecar):
             e[:, :, None, :], (B, K, self.args.hc_mult, e.shape[-1])))
         mask = cache.mask(K)
         pos = cache.positions()
+        assert cache.keys is not None   # mask() holds the same
         for st, win in zip(self.m.stages, cache.keys):
             h = st(h, win, mask, pos, ids)
         last = self.m.stages[-1]

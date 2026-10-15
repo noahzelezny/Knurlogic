@@ -167,7 +167,7 @@ def cut(obj, spec, x: int, y: int):
 def _join_arrays(arrs, axis: int, widths):
     import mlx.core as mx
     ax = axis % arrs[0].ndim
-    segs = [[] for _ in widths]
+    segs: list[list] = [[] for _ in widths]
     for a in arrs:
         for j, (start, w) in enumerate(_segs(a.shape[ax], widths)):
             k = a.shape[ax] // sum(widths)

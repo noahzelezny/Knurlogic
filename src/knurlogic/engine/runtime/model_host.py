@@ -20,6 +20,7 @@ import gc
 import logging
 import threading
 import time
+from collections.abc import Callable
 
 from knurlogic.engine.arrays import arrays_of
 from knurlogic.engine.model import state
@@ -109,13 +110,13 @@ class ModelHost:
         #: loading and `ready`: one tiny generation through the real
         #: request path (Scheduler._warm_up), so the first user request
         #: does not pay for compiling kernels and filling buffers
-        self.warm = None
+        self.warm: Callable[[], None] | None = None
         #: () -> None, run on the loading thread once the weights, vision
         #: and head are bound and before the warm-up: the scheduler's
         #: prompt-cache restore from disk (engine/prompt_cache/disk). On
         #: a ring every rank runs its own here, at the same point (the
         #: restore agrees across ranks: a collective)
-        self.after_bind = None
+        self.after_bind: Callable[[], None] | None = None
         #: this rank's part of a split, for the disk prompt cache's key
         #: (prompt_disk.identity); None for a whole model
         self.cache_layout: dict | None = None
@@ -158,7 +159,7 @@ class ModelHost:
 
     # ------------------------------------------- scheduler thread only below
 
-    def load(self, path: str, *, executes_artifact_code: bool = None) -> None:
+    def load(self, path: str, *, executes_artifact_code: bool | None = None) -> None:
         """`executes_artifact_code`: this artifact ships a runtime that WILL
         run (its own `model_file`) -- stated per load, since each artifact
         answers for itself."""

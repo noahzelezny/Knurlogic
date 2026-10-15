@@ -254,6 +254,7 @@ def _rules_stamp() -> str:
         import knurlogic.tuning.tensor_split as ts
         h = hashlib.sha256()
         for m in (ts, ps, tr):
+            assert m.__file__ is not None       # a module read from a file
             h.update(Path(m.__file__).read_bytes())
         _RULES.append(h.hexdigest()[:16])
     return _RULES[0]

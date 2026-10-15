@@ -102,9 +102,9 @@ class App(CompactingChat):
     def __init__(self, scheduler, *, served: Callable[[], dict],
                  routes: dict | None = None,
                  gate=None,
-                 concurrency: Callable[[], str] = None,
-                 residency: Callable[[], dict] = None,
-                 ensure: Callable[[dict], dict] = None,
+                 concurrency: Callable[[], str] | None = None,
+                 residency: Callable[[], dict] | None = None,
+                 ensure: Callable[[dict], dict] | None = None,
                  max_body: int = DEFAULT_MAX_BODY,
                  allow_origins: tuple = (), allow_hosts: tuple = ()):
         from knurlogic.engine.model import thinking
@@ -147,7 +147,7 @@ class App(CompactingChat):
         with self._count_lock:
             self.requests += 1
 
-    def submit(self, body: dict, chat: bool, extra: dict = None):
+    def submit(self, body: dict, chat: bool, extra: dict | None = None):
         from knurlogic.engine.families import sampling_defaults
         received = time.perf_counter()
         path = self.scheduler.host.path
@@ -169,10 +169,10 @@ class App(CompactingChat):
         labs = rec.labels if rec is not None else L.labels(hdrs)
         job.session, job.role, job.run = (labs.get("session"),
                                            labs.get("role"), labs.get("run"))
-        job.pin = bool(hdrs) and (hdrs.get("X-Cache-Retain") or ""
-                                  ).strip().lower() == "pin"
-        job.keep_latest = bool(hdrs) and (hdrs.get("X-Cache-Keep") or ""
-                                          ).strip().lower() == "latest"
+        job.pin = bool(hdrs and (hdrs.get("X-Cache-Retain") or ""
+                                 ).strip().lower() == "pin")
+        job.keep_latest = bool(hdrs and (hdrs.get("X-Cache-Keep") or ""
+                                         ).strip().lower() == "latest")
         if rec is not None:
             job.request_id = rec.id    # X-Request-Id: the client's, or a ULID
             rec.model = self.served().get("id") or None

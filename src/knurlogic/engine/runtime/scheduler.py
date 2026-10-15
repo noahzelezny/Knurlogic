@@ -946,6 +946,7 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
                 sampling = assign_seed(sampling)
                 wire = {"penalties": dict(job.penalties or {}),
                         "initial": initial}
+            assert job.max_tokens is not None   # set from the window above
             uid = ex.insert(Admission(
                 segments=segs, max_tokens=job.max_tokens, cache=cache,
                 prefix=prompt[:len(prompt) - len(rest)],
@@ -1034,8 +1035,8 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
             if not r.began:
                 r.began = now
             r.prefilling = not r.first
-            if getattr(r.job, "spans", None) is not None:
-                r.job.spans.to(step_bucket(r.prefilling, "gap"), now)
+            if (spans := getattr(r.job, "spans", None)) is not None:
+                spans.to(step_bucket(r.prefilling, "gap"), now)
         try:
             events = ex.step()          # on the executor's own stream
         # a failed step fails its rows; the scheduler thread lives on (logged)
@@ -1049,12 +1050,13 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
             return
         stepped = time.perf_counter()
         for uid, r in self._rows.items():
-            if getattr(r.job, "spans", None) is not None:
-                r.job.spans.to(step_bucket(
+            if (spans := getattr(r.job, "spans", None)) is not None:
+                spans.to(step_bucket(
                     r.prefilling, "forward",
                     shared=nxt is not None and uid != nxt), stepped)
         self._measure(before, ctx, chunk)
-        self._chunk_of.pop(nxt, None)
+        if nxt is not None:
+            self._chunk_of.pop(nxt, None)
         drop = []
         for e in events:
             row = self._rows.get(e.uid)
@@ -1105,8 +1107,8 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
             del self._chunk_of[uid]
         now = time.perf_counter()
         for r in self._rows.values():
-            if getattr(r.job, "spans", None) is not None:
-                r.job.spans.to(step_bucket(r.prefilling, "host"), now)
+            if (spans := getattr(r.job, "spans", None)) is not None:
+                spans.to(step_bucket(r.prefilling, "host"), now)
 
     def _done(self, uid: int) -> None:
         row = self._rows.pop(uid, None)

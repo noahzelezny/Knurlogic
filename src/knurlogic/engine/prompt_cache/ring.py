@@ -179,9 +179,9 @@ def apply_cache_op(op: dict, cache, model_key, last: dict,
     elif kind == "save_cache" and op.get("session"):
         # rank 0's choice, made the same way on the same side map: the
         # session's longest entry
-        mine = [tuple(t) for _, t in cache.of_session(op["session"])]
-        if mine:
-            save_disk(only_new=True, select={max(mine, key=len)})
+        entries = [tuple(t) for _, t in cache.of_session(op["session"])]
+        if entries:
+            save_disk(only_new=True, select={max(entries, key=len)})
     elif kind == "save_cache":
         save_disk()
     else:

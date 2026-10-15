@@ -203,7 +203,7 @@ class Family(Protocol):
     #: the token id each image token takes in the trunk's input
     image_token_id: int
     #: attention sees forward inside an image block (gemma, DeepSeek-V4)
-    IMAGES_BIDIRECTIONAL = False
+    IMAGES_BIDIRECTIONAL: bool = False
 
     def load_weights(self, model_path: str) -> int:
         """Read the vision tensors (sidecar or main shards, filtered by the

@@ -21,9 +21,10 @@ from knurlogic.engine.runtime.scheduler import Job
 
 
 class ApiError(Exception):
-    def __init__(self, status: int, message: str, *, type_: str = None,
-                 param: str = None, code: str = None,
-                 retry_after: int = None, memory: dict = None):
+    def __init__(self, status: int, message: str, *,
+                 type_: str | None = None, param: str | None = None,
+                 code: str | None = None, retry_after: int | None = None,
+                 memory: dict | None = None):
         super().__init__(message)
         #: the scheduler's memory terms behind a 503 (Scheduler._memory)
         self.memory = memory
@@ -36,7 +37,7 @@ class ApiError(Exception):
         self.param, self.code = param, code
 
     def body(self) -> dict:
-        err = {"message": str(self), "type": self.type,
+        err: dict[str, object] = {"message": str(self), "type": self.type,
                "param": self.param, "code": self.code}
         if self.memory is not None:
             err["memory"] = self.memory
@@ -94,7 +95,7 @@ def _tool_choice(tc):
                    param="tool_choice")
 
 
-def build_job(body: dict, *, chat: bool, translate: Callable = None,
+def build_job(body: dict, *, chat: bool, translate: Callable | None = None,
               has_vision: Callable[[], bool] = lambda: False,
               sampling_defaults: dict | None = None) -> tuple:
     """(Job, context) from a request body; ApiError to refuse.
@@ -168,7 +169,7 @@ def build_job(body: dict, *, chat: bool, translate: Callable = None,
     logprobs = bool(body.get("logprobs", False))
     top = _num(body, "top_logprobs", int, 0, 20) or 0
 
-    ctx = {"stream": bool(body.get("stream", False)),
+    ctx: dict[str, Any] = {"stream": bool(body.get("stream", False)),
            "include_usage": bool((body.get("stream_options") or {}).get(
                "include_usage")),
            "model": body.get("model") or "default",
@@ -255,7 +256,7 @@ def status_of(err: BaseException) -> ApiError:
 class Reply:
     """Turns one Job's outbox into the wire format."""
 
-    def __init__(self, job: Job, ctx: dict, *, decode: Callable = None,
+    def __init__(self, job: Job, ctx: dict, *, decode: Callable | None = None,
                  served: str = ""):
         self.job, self.ctx = job, ctx
         self.decode = decode or (lambda t: "")
@@ -265,7 +266,8 @@ class Reply:
         self.model = served or ctx["model"]
         #: the ledger's open Request (telemetry.py), or None
         self.record = ctx.get("record")
-        self._pace = None      # (perf_counter, done) at the first progress
+        #: (perf_counter, done) at the first progress
+        self._pace: tuple[float, int] | None = None
 
     def _closed(self, usage, finish) -> None:
         if self.record is not None:

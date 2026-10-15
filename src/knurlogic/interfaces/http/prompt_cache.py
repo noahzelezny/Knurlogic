@@ -5,12 +5,24 @@ from __future__ import annotations
 
 import json
 import os
+from typing import TYPE_CHECKING
 
 from . import openai as O
+
+if TYPE_CHECKING:
+    from .server import App
 
 
 class PromptCacheHandlers:
     """Handler's /v1/prompt-cache routes (interfaces/http/server)."""
+
+    # what Handler (interfaces/http/server) gives these methods
+    app: App
+
+    if TYPE_CHECKING:
+        def _json(self, code: int, obj, headers=None) -> None: ...
+        def _error(self, e: O.ApiError) -> None: ...
+        def _loopback(self) -> bool: ...
 
     def _save_prompt_cache(self, raw: bytes = b"") -> None:
         """POST /v1/prompt-cache/save [{"session"}]: the prompt cache to
@@ -168,13 +180,13 @@ class PromptCacheHandlers:
                 at[(kid, e["hash"])] = row
             rows.append(row)
         for d in prompt_disk.list_disk():
-            row = at.get((d["key_id"], d["hash"]))
-            if row is not None:
-                row["on_disk"] = True
-                row["saved_at"] = row.get("saved_at") or d["saved_at"]
-                row["pinned"] = bool(row["pinned"] or d["pinned"])
+            known = at.get((d["key_id"], d["hash"]))
+            if known is not None:
+                known["on_disk"] = True
+                known["saved_at"] = known.get("saved_at") or d["saved_at"]
+                known["pinned"] = bool(known["pinned"] or d["pinned"])
                 if d.get("kv_bits") is not None:
-                    row["kv_bits"] = d["kv_bits"]
+                    known["kv_bits"] = d["kv_bits"]
                 continue
             rows.append({"session": d["session"], "role": d["role"],
                          "run": d["run"], "tokens": d["tokens"],

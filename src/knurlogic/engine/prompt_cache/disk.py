@@ -68,6 +68,7 @@ import shutil
 import struct
 import time
 from pathlib import Path
+from typing import Any
 
 from knurlogic.engine.arrays import arrays_of
 from knurlogic.machine.artifact import safetensors_header, safetensors_layout
@@ -420,7 +421,7 @@ def load_entry(f: Path, key: dict):
 
 def _all_files(base: Path):
     """(path, size, mtime) of every entry file under `base`."""
-    out = []
+    out: list[tuple[Path, int, float]] = []
     try:
         dirs = [p for p in base.iterdir() if p.is_dir()]
     except OSError:
@@ -769,8 +770,9 @@ def save(lru, key: dict, base: Path | None = None, *, owners=None,
     shared system-prompt checkpoints (nobody's), saved with `owners` too:
     marked "shared" in their header, restored as shared."""
     t0 = time.monotonic()
-    stats = {"saved": 0, "kept": 0, "skipped": 0, "bytes": 0, "why": [],
-             "entries": 0, "not_worth": 0}
+    stats: dict[str, Any] = {"saved": 0, "kept": 0, "skipped": 0,
+                             "bytes": 0, "why": [], "entries": 0,
+                             "not_worth": 0}
     if lru is None or not enabled() or key is None:
         return stats
     base = base or location.fallback()

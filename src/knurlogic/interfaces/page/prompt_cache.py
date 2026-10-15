@@ -100,7 +100,9 @@ PAGE_PORT_ENV = "KNURLOGIC_PAGE_PORT"
 
 def _loopback(handler) -> bool:
     address = getattr(handler, "client_address", None)
-    return bool(address) and is_loopback(address[0])
+    if not address:
+        return False
+    return is_loopback(address[0])
 
 
 def piece_route(handler, path: str, query: dict, gate=None, roots=None,

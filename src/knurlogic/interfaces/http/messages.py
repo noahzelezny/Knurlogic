@@ -23,6 +23,9 @@ STOP_REASON = {
     "compaction": "compaction",
     None: "end_turn",
 }
+#: an Anthropic tool_choice type -> OpenAI's (any other is passed on)
+_TOOL_CHOICE: dict[object, str] = {
+    "auto": "auto", "any": "required", "none": "none"}
 
 
 def anthropic_images_to_openai(content) -> list:
@@ -201,7 +204,7 @@ def to_openai(req: dict) -> dict:
         body["tool_choice"] = (
             {"type": "function", "function": {"name": tc.get("name")}}
             if kind == "tool" else
-            {"auto": "auto", "any": "required", "none": "none"}.get(kind, tc))
+            _TOOL_CHOICE.get(kind, tc))
     elif tc is not None:
         body["tool_choice"] = tc      # build_job refuses what it is not
     return body

@@ -53,8 +53,10 @@ import os
 import re
 import shutil
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from knurlogic.engine.arrays import arrays_of
 from knurlogic.machine.files import atomic, read_json, write_json
@@ -146,7 +148,8 @@ def _tensor_part(host, layout: dict, n: int) -> Part | None:
         logger.info("prompt cache: no tensor cache spec for this model; "
                     "saved per split")
         return None
-    heads, writes = [], []
+    heads: list[tuple | None] = []
+    writes: list[str] = []
     for c in cuts:
         if c is None:
             heads.append(None)
@@ -337,7 +340,7 @@ def discard(p) -> None:
 def units(base: Path):
     """(dir, size, mtime) of every complete entry directory under `base`,
     any model's: mtime is entry.json's (touched on use)."""
-    out = []
+    out: list[tuple[Path, int, float]] = []
     try:
         keys = [p for p in Path(base).iterdir() if p.is_dir()]
     except OSError:
@@ -438,14 +441,14 @@ class Store:
         self.outbox: list = []
         #: the measured prefill rate (tokens/s), when known: a fetch from a
         #: peer slower than recomputing is skipped (transfer.fill)
-        self.prefill_tps = None
+        self.prefill_tps: float | None = None
         #: a fresh cache list of the loaded model's slots (make_cache), for
         #: converting another KV width's entries (convert.py); None: none
-        self.template = None
+        self.template: Callable[[], list] | None = None
         #: what makes another quant's entries this model's (quants.py:
         #: architecture and tokenizer), recorded in each entry it saves;
         #: None: never borrows
-        self.fingerprint = None
+        self.fingerprint: str | None = None
 
     @classmethod
     def for_host(cls, host) -> Store | None:
@@ -459,7 +462,9 @@ class Store:
             return None
         from mlx_lm.models.cache import make_prompt_cache
         base, _ = location.root_for(host.path)
-        st = cls(base, host_shard_key(host), part,
+        key = host_shard_key(host)
+        assert key is not None      # model and path checked above
+        st = cls(base, key, part,
                  disk.draft_of() if part.extras else None)
         st.template = lambda: make_prompt_cache(host.model)
         from . import quants
@@ -654,7 +659,7 @@ class Store:
     def entries(self) -> list:
         """(gen, seq, hash, dir, meta) of this model's complete entries,
         oldest save first."""
-        out = []
+        out: list[tuple[int, int, str, Path, dict]] = []
         try:
             subs = [p for p in self.dir.iterdir()
                     if p.is_dir() and is_entry_name(p.name)]
@@ -762,9 +767,10 @@ class Store:
         record of each entry for the commit op (and every rank keeps the
         tokens in `self.pending`)."""
         t0 = time.monotonic()
-        stats = {"saved": 0, "kept": 0, "skipped": 0, "bytes": 0, "why": [],
-                 "entries": 0, "not_worth": 0, "pending": [],
-                 "location": self.location}
+        stats: dict[str, Any] = {
+            "saved": 0, "kept": 0, "skipped": 0, "bytes": 0, "why": [],
+            "entries": 0, "not_worth": 0, "pending": [],
+            "location": self.location}
         if lru is None or not disk.enabled():
             return stats
         have = {e[2]: e for e in self.entries()}

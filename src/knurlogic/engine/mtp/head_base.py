@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
 
 import mlx.core as mx
 from mlx import nn
@@ -102,6 +103,10 @@ class GraftHead(DraftHead):
     KEEP_FP: tuple = ()
     #: path -> whether it is the expert stack's (None: `EXPERT_SUBSTR`)
     expert_match = None
+
+    if TYPE_CHECKING:
+        # every head is built from the trunk and its arch (`_from_recipe`)
+        def __init__(self, model, arch) -> None: ...
 
     def _modules(self) -> dict:
         """{sidecar prefix: module} for the sidecar-held modules."""
@@ -206,6 +211,8 @@ class PackedSidecar(ABC):
     the sidecar and `m` (`to_module`, `to_sidecar`)."""
 
     LABEL = "head"
+    #: the module the sidecar fills (set by the subclass)
+    m: nn.Module
 
     @staticmethod
     def own_names(own: dict, k: str, *, back: bool = False) -> str:

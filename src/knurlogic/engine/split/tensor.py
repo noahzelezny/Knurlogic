@@ -240,6 +240,7 @@ def shard(model, group) -> None:
         else:
             at = layer.self_attn
             h, kv = _name(at, _HEADS), _name(at, _KV_HEADS)
+            assert h is not None and kv is not None     # attention names both
             setattr(at, h, getattr(at, h) // n)
             setattr(at, kv, max(1, getattr(at, kv) // n))
             layer.self_attn = Reduce(at, group)

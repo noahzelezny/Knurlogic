@@ -464,8 +464,9 @@ def ring_chunk(sets: dict, got: list) -> tuple:
     if chunk is not None:
         return int(chunk), "set"
     rooms = [(g or {}).get("prefill_chunk") for g in got]
-    if rooms and all(isinstance(x, int) and x > 0 for x in rooms):
-        return min(rooms), RING_CHUNK_WHY
+    sized = [x for x in rooms if isinstance(x, int) and x > 0]
+    if rooms and len(sized) == len(rooms):
+        return min(sized), RING_CHUNK_WHY
     return PREFILL_CHUNK, "ring: a rank could not work out its room"
 
 
@@ -880,7 +881,8 @@ def start(job: str | None, *, spawn=None, wait_s: float | None = None,
             and c > 0:
         # the ring's chunk, known only once every rank answered Prepare
         prep["spec"] = dict(prep["spec"], prefill_chunk=c,
-                            prefill_why=str(ring.get("prefill_why") or "")[:120])
+                            prefill_why=str((ring or {}).get("prefill_why")
+                                            or "")[:120])
     reads = (ring or {}).get("reads")
     if prep is not None and isinstance(reads, list) and \
             len(reads) == prep["spec"]["world"]:
@@ -1111,7 +1113,7 @@ def stop(job: str, reason: str = "unloaded", propagate: bool = True,
     told = []
     # the job's machines: its spec, or -- after a page restart, SPECS being
     # in memory -- the ids its rank records here keep
-    nodes = (spec or {}).get("nodes") or next(
+    nodes: list = (spec or {}).get("nodes") or next(
         (v["nodes"] for v in mine.values() if v.get("nodes")), [])
     if propagate and not nodes and not mine and not spec:
         # nothing of it here (a failed job, its ranks gone and recovery's
@@ -1960,6 +1962,7 @@ def _launch(req: dict, *, me: dict, peers: list, local_info: dict,
         # other machines answer for theirs at prepare, below)
         from knurlogic.machine.servers import free_port
         port = free_port(serve_port)
+    assert isinstance(port, int)        # the one named, or a free one
     base = {"job": job, "world": world, "split": split, "link": link,
             "identity": ident, "name": aname, "hosts": hosts, "ibv_devices": ibv,
             # the bell's nonce: random, in the spec the pages share, never

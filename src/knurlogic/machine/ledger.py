@@ -182,7 +182,8 @@ class Ledger:
         if group not in GROUPS:
             raise ValueError(f"group is one of {', '.join(GROUPS)}")
         col = _GROUP_COL.get(group, group)
-        where, args = "ts_start >= ? AND ts_start < ?", [since, until or 1e12]
+        where = "ts_start >= ? AND ts_start < ?"
+        args: list[float | str] = [since, until or 1e12]
         if key:
             where += " AND key_id = ?"
             args.append(key)

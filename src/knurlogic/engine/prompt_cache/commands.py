@@ -9,7 +9,7 @@ import logging
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from knurlogic.engine.prompt_cache import location as prompt_location
 
@@ -40,6 +40,20 @@ class Command:
 
 class PromptCacheCommands:
     """Scheduler's prompt-cache methods (engine/runtime/scheduler)."""
+
+    # the Scheduler state these methods read (set in Scheduler.__init__)
+    tensor: Any
+    host: Any
+    cache: Any
+    cache_bytes: int | None
+    _prefill_tps: float | None
+    _restored: dict
+    _disk_key: dict | None
+    _disk_index: dict
+    _store: Any
+
+    if TYPE_CHECKING:
+        def _command(self, cmd: Command) -> Command: ...
 
     def save_prompt_cache(self, session: str | None = None) -> Command:
         """Queue a save of the prompt cache to disk (prompt_disk.save), on
@@ -121,6 +135,7 @@ class PromptCacheCommands:
                 store.outbox += got.pop("pending", [])
                 mine = store.dir
             else:
+                assert key is not None      # returned above when both are None
                 got = prompt_disk.save(self.cache.lru, key, **common)
                 mine = prompt_location.fallback() / prompt_disk.key_id(key)
             gone = sorted(f.name for f in removed if f.parent == mine)
@@ -426,6 +441,7 @@ class PromptCacheCommands:
         return {"sessionless": True, "memory": mem, "disk": disk}
 
     def _cmd_park(self, c: Command) -> dict:
+        assert c.session is not None    # park_prompt_cache sets it
         got = self._park(c.session, why="parked on request")
         if self.tensor is not None:
             # every rank saves and frees the same entries (park_session);
@@ -435,6 +451,7 @@ class PromptCacheCommands:
         return {"session": c.session, **got}
 
     def _cmd_pin(self, c: Command) -> dict:
+        assert c.session is not None    # pin_prompt_cache sets it
         n = self._pin(c.session, c.pinned)
         return {"session": c.session, "pinned": c.pinned, "entries": n}
 
@@ -457,7 +474,7 @@ class PromptCacheCommands:
                 "session": meta.get("session"), "role": meta.get("role"),
                 "run": meta.get("run"), "tokens": len(t),
                 "bytes": int(e.nbytes), "in_memory": True,
-                "on_disk": bool(f) and Path(f).exists(),
+                "on_disk": bool(f and Path(f).exists()),
                 "saved_at": meta.get("saved_at"),
                 "pinned": bool(meta.get("pinned")),
                 "hash": prompt_disk.tokens_hash(t) if ints else None})

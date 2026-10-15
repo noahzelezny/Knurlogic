@@ -27,7 +27,7 @@ def _addresses_of(host: str, ttl: float = 60.0) -> set:
         return hit[1]
     import socket
     try:
-        got = {a[4][0].split("%")[0] for a in socket.getaddrinfo(
+        got = {str(a[4][0]).split("%")[0] for a in socket.getaddrinfo(
             host, None, proto=socket.IPPROTO_TCP)}
     except (OSError, UnicodeError):
         got = set()

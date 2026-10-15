@@ -20,9 +20,9 @@ class DiskCache:
         self.name = name
         #: what a loaded entry's value must satisfy to be kept
         self.valid = valid
-        self.file = None
+        self.file: Path | None = None
         self.data: dict = {}
-        self.timer = None
+        self.timer: threading.Timer | None = None
         self.dirty = False
         self.atexit = False
         #: guards every read and write (page handler threads and the flush

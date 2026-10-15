@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import queue
 import threading
+from typing import TYPE_CHECKING, Any
 
 from . import openai as O
 
@@ -21,6 +22,15 @@ logger = logging.getLogger(__name__)
 class CompactingChat:
     """App's chat entry (interfaces/http/server): context management, then
     the engine."""
+
+    # what App (interfaces/http/server) gives these methods
+    scheduler: Any
+
+    if TYPE_CHECKING:
+        def submit(self, body: dict, chat: bool,
+                   extra: dict | None = None): ...
+        def window(self) -> int: ...
+        def count(self, messages: list, tools=None) -> int: ...
 
     def _generate(self, body: dict) -> dict:
         """One non-streaming completion, in-process (the summary pass).

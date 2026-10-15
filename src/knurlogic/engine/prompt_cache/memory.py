@@ -94,7 +94,7 @@ class PromptCache:
         and its file is returned to be deleted."""
         t = tuple(tokens)
         s = (owner or {}).get("session")
-        if not s:
+        if owner is None or not s:
             self.owners.pop(t, None)
             if (owner or {}).get("shared"):
                 self.shared.add(t)

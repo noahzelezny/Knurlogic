@@ -83,7 +83,7 @@ class DeepseekVision(Family):
             }),
         )
         self.tower = None   # built lazily, mx is engine-only
-        self.rows = None    # [5, dim]: image_start, pad, pad, newline, end
+        self.rows: Any = None   # [5, dim]: image_start, pad, pad, newline, end
 
     # -- weights ---------------------------------------------------------
 

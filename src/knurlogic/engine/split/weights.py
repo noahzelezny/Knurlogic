@@ -124,6 +124,7 @@ def _read(read: dict, built: dict, stop) -> int:
     -> bytes."""
     import mlx.core as mx
     p = weight_files.peer()
+    assert p is not None                # fill runs only with one (read_share)
     took = [0]
 
     def put(k, a) -> None:
