@@ -157,7 +157,13 @@ class Watch:
 
     def verdict(self, job: str, ranks: list, alive, now: float | None = None,
                 read=read_marker) -> str:
-        """"" when healthy, else why the job has failed. `ranks`: the
+        """"" when healthy, else why the job has failed (check's reason)."""
+        return self.check(job, ranks, alive, now, read)[0]
+
+    def check(self, job: str, ranks: list, alive, now: float | None = None,
+              read=read_marker) -> tuple[str, str | None]:
+        """("", None) when healthy, else (why the job has failed, its
+        recovery kind when the watchdog knows it: "stall"). `ranks`: the
         ranks this page started, [{"rank", "pid", "machine"}]; `alive(pid)`
         says whether that rank's process is still there."""
         now = time.time() if now is None else now
@@ -169,14 +175,14 @@ class Watch:
             who = r.get("machine") or (ms[rank] if rank < len(ms)
                                        else None) or "this machine"
             if not alive(int(r["pid"])):
-                return f"rank {rank} on {who} (pid {r['pid']}) exited"
+                return f"rank {rank} on {who} (pid {r['pid']}) exited", None
             m = read(job, rank) or {}
             phase = m.get("phase") or "joining"
             since = next((v for v in (m.get("since"), r.get("t"))
                           if v is not None), now)
             if phase == "joining" and now - float(since) > JOIN_S:
                 return (f"rank {rank} on {who} has not joined the ring in "
-                        f"{JOIN_S:.0f} s")
+                        f"{JOIN_S:.0f} s"), None
             step = int(m.get("step") or 0)
             # a step, or a prefill chunk inside one (a long prompt is one
             # step of many chunks), is progress
@@ -192,10 +198,11 @@ class Watch:
                 self.seen[key] = (work, now)
                 continue
             if m.get("busy") and now - was[1] > STALL_S:
-                return (f"rank {rank} on {who} has had work in flight and "
-                        f"not taken a step in {now - was[1]:.0f} s (step "
-                        f"{step}); the ring is stalled")
-        return ""
+                return (f"stopped: {who} stalled mid-step; its GPU may be "
+                        f"hung -- check it, then load again (rank {rank} had "
+                        f"work in flight and took no step in "
+                        f"{now - was[1]:.0f} s, step {step})"), "stall"
+        return "", None
 
     def forget(self, job: str) -> None:
         for k in [k for k in self.seen if k[0] == job]:

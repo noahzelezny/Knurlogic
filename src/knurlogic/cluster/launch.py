@@ -1171,9 +1171,8 @@ def watch_once(now: float | None = None) -> list:
             stop(job, reason=recs[0].get("stop_reason") or "stopped",
                  propagate=False)
             continue
-        why = _WATCH.verdict(job, recs, lambda pid, j=job: _alive(j, pid),
-                             now=now)
-        fkind = None
+        why, fkind = _WATCH.check(job, recs,
+                                  lambda pid, j=job: _alive(j, pid), now=now)
         if not why:
             why = peer_verdict(job, recs, now=now)
             if why and "stopped the job:" not in why:

@@ -13,7 +13,7 @@ from dataclasses import dataclass, field, fields
 from typing import Any, ClassVar
 
 VERSION = (1, 0)
-FAILURE_KINDS = ("refusal", "memory", "machine", "failure")
+FAILURE_KINDS = ("refusal", "memory", "machine", "stall", "failure")
 
 #: the link names people see (load(), state(), the page, the recovery
 #: record) -> mlx's distributed backend. The ONE place they are mapped:

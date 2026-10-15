@@ -25,7 +25,7 @@ from pathlib import Path
 
 from knurlogic.cluster import NET_ERRORS, REFUSED_EXIT, every, transport
 from knurlogic.cluster.jobs import log_tail
-from knurlogic.cluster.protocol import link_name
+from knurlogic.cluster.protocol import FAILURE_KINDS, link_name
 from knurlogic.machine import files, paths, processes
 
 logger = logging.getLogger(__name__)
@@ -74,7 +74,13 @@ MEMORY_LINE_RX = re.compile(
     r"[^\n]*(?:out of memory|OutOfMemory|Insufficient Memory|"
     r"Resource limit|Unable to allocate|Failed to allocate|MemoryError)"
     r"[^\n]*", re.I)
-
+#: a rank that had work in flight and stopped taking steps (the page's
+#: watchdog, jobs.Watch): its GPU may be hung, and a relaunch onto it wedged
+#: that Mac until a reboot -- never relaunched
+STALL_RX = re.compile(r"stalled mid-step|the ring is stalled", re.I)
+#: kinds the same launch would meet again (or that would hurt the machine):
+#: failed at once, the reason shown, never relaunched
+NOT_RETRIED = ("memory", "refusal", "stall")
 
 
 def _no_load(**_):
@@ -112,9 +118,10 @@ def enabled() -> bool:
 
 
 def kind(reason: str, known: str | None = None) -> str:
-    """requested | refusal | memory | machine | failure: `known` (set where
-    the failure was seen) first, the wording only when it is not given."""
-    if known in ("requested", "refusal", "memory", "machine", "failure"):
+    """requested | refusal | memory | machine | stall | failure: `known`
+    (set where the failure was seen) first, the wording only when it is not
+    given."""
+    if known in (*FAILURE_KINDS, "requested"):
         return known
     r = str(reason or "").strip()
     # a peer's page relaying its own stop: "B stopped the job: unloaded"
@@ -126,6 +133,8 @@ def kind(reason: str, known: str | None = None) -> str:
         return "refusal"
     if MEMORY_RX.search(r):
         return "memory"
+    if STALL_RX.search(r):
+        return "stall"
     if MACHINE_RX.search(r):
         return "machine"
     return "failure"
@@ -501,9 +510,9 @@ def _schedule(rec: dict, now: float, why: str,
     if k == "requested":
         _drop(rec["key"])
         return f"stopped on request ({why}); not recovered"
-    if k in ("memory", "refusal"):
-        # deterministic: the same launch fails the same way, so the reason
-        # is shown now instead of after three relaunches
+    if k in NOT_RETRIED:
+        # deterministic (the same launch fails the same way) or a machine
+        # that may be hung: the reason is shown now, never a relaunch
         return _failed(rec, now, why)
     n = len(_window(rec, now))
     if n >= MAX_ATTEMPTS:
@@ -749,7 +758,7 @@ def _tick_single(rec: dict, now: float) -> str:
     if out.get("refused") == "memory is about to move":
         return _defer(rec, now, why)
     rec["pending"] = False
-    if kind(why) in ("memory", "refusal"):
+    if kind(why) in NOT_RETRIED:
         return _failed(rec, now, f"relaunch refused: {why}")
     rec["attempts"].append(now)
     return _schedule(rec, now, f"relaunch {n} refused: {why}")
