@@ -259,13 +259,25 @@ def pids_of_job(job: str) -> list:
     return processes.matching(rf"[-]-job[ =]{re.escape(job)}( |$)")
 
 
+def mid_step(job: str, rank: int, pid: int, read=read_marker) -> bool:
+    """Rank `rank` of `job`, process `pid`, says by its marker that it is
+    inside a step (work in flight) or stuck in one. Killed there, a rank
+    left its GPU's command queue waiting on a collective that never
+    completed: the Mac held the job's memory at 100% GPU until a reboot."""
+    m = read(job, int(rank)) or {}
+    return m.get("pid") == int(pid) and (
+        bool(m.get("busy")) or m.get("phase") == "stuck")
+
+
 def terminate(pids: list, grace: float = GRACE_S, alive=None,
-              reap: float = 0.0) -> list:
+              reap: float = 0.0, spare=None) -> list:
     """SIGTERM every pid, wait up to `grace`, SIGKILL what is left, then
     up to `reap` for the killed to be gone (wait_gone says which are not).
     -> the pids that needed the SIGKILL. A pid this user may not signal
     is not waited on: `alive` counts one it may not inspect as running
-    (machine/processes.running), so it would hold the whole grace."""
+    (machine/processes.running), so it would hold the whole grace.
+    `spare(pid)` true (a rank mid-step, `mid_step`): never SIGKILLed; it
+    is left running and logged as stuck."""
     import signal
     alive = alive or _reaped_alive
     ours = []
@@ -283,7 +295,12 @@ def terminate(pids: list, grace: float = GRACE_S, alive=None,
         time.sleep(0.1)
     killed = []
     for pid in pids:
-        if alive(pid):
+        if alive(pid) and spare is not None and spare(pid):
+            logging.getLogger(__name__).error(
+                "pid %d is mid-step and did not stop in %.0f s: not killed "
+                "(killing it there can hang its GPU until a reboot); it is "
+                "stuck -- check this machine", pid, grace)
+        elif alive(pid):
             try:
                 os.kill(pid, signal.SIGKILL)
                 killed.append(pid)

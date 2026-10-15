@@ -25,6 +25,9 @@ class Sched:
     def abort(self, err):
         self.calls.append(("abort",))
 
+    def wait_stopped(self, timeout):
+        return True
+
 
 def _term(monkeypatch, state, ends=True, within=15.0):
     exited = threading.Event()
@@ -72,6 +75,33 @@ def test_a_step_that_never_ends_fails_the_requests_then_leaves(monkeypatch):
     # a peer is gone: the old path, so in-flight requests get their 503
     assert _term(monkeypatch, "ready", ends=False) == [("stop_ring", 15.0),
                                                        ("abort",)]
+
+
+def test_a_scheduler_still_inside_a_step_is_not_exited(monkeypatch):
+    """Rank 0 whose step never ends (its peer's GPU hung): leaving
+    mid-step wedged the Mac until a reboot, so it stays, says stuck and
+    keeps answering 503."""
+    from knurlogic.engine.split import marker
+    exited = []
+    monkeypatch.setattr(os, "_exit", lambda code: exited.append(code))
+    said = []
+    monkeypatch.setattr(marker, "progress", lambda **f: said.append(f))
+    s = Sched(ends=False)
+    s.busy = True
+    s.wait_stopped = lambda timeout: False
+    old = signal.getsignal(signal.SIGTERM)
+    try:
+        H.watch_ring(s, SimpleNamespace(state="ready"), exit_after=0.01,
+                     stop_within=0.01)
+        signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)
+        end = time.monotonic() + 2
+        while {"phase": "stuck", "busy": True} not in said \
+                and time.monotonic() < end:
+            time.sleep(0.01)
+    finally:
+        signal.signal(signal.SIGTERM, old)
+    assert {"phase": "stuck", "busy": True} in said
+    assert ("abort",) in s.calls and exited == []
 
 
 def test_a_warming_ring_also_stops_between_steps(monkeypatch):

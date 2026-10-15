@@ -1781,3 +1781,26 @@ def test_a_failed_beat_does_not_end_the_heartbeat(tmp_path, monkeypatch):
     while len(calls) < 5 and time.time() < end:
         time.sleep(0.01)
     assert len(calls) >= 5
+
+
+# --- a rank mid-step is never SIGKILLed ---------------------------------------
+
+def test_mid_step_reads_the_marker_of_that_pid():
+    doc = {"pid": 7, "busy": True, "phase": "ready"}
+    assert J.mid_step("j", 1, 7, read=lambda j, r: doc)
+    assert not J.mid_step("j", 1, 8, read=lambda j, r: doc)   # pid reused
+    assert not J.mid_step("j", 1, 7, read=lambda j, r: {**doc, "busy": False})
+    assert J.mid_step("j", 1, 7, read=lambda j, r: {"pid": 7,
+                                                    "phase": "stuck"})
+    assert not J.mid_step("j", 1, 7, read=lambda j, r: None)
+
+
+def test_terminate_never_sigkills_a_busy_rank(monkeypatch):
+    import signal
+    sent = []
+    monkeypatch.setattr(os, "kill", lambda pid, sig: sent.append((pid, sig)))
+    killed = J.terminate([11, 12], grace=0, alive=lambda p: True,
+                         spare=lambda p: p == 11)
+    assert killed == [12]
+    assert (11, signal.SIGKILL) not in sent and (11, signal.SIGTERM) in sent
+    assert (12, signal.SIGKILL) in sent

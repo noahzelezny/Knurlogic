@@ -147,12 +147,13 @@ def watch_ring(sched, mh, exit_after: float = 1.5,
 
     log = logging.getLogger(__name__)
     armed: list = []
+    stuck: list = []
 
     def probe():
         if not armed and getattr(mh, "state", "") == "ready":
             armed.append(1)
             marker.after_load()
-        return {"busy": bool(sched.busy)}
+        return {"busy": bool(stuck) or bool(sched.busy)}
     m = marker.CURRENT["marker"]
     if m is not None:
         m.probe = probe
@@ -164,8 +165,20 @@ def watch_ring(sched, mh, exit_after: float = 1.5,
             "retry once it is loaded again"))
         import time
         time.sleep(exit_after)          # the 503s go out first
+        if not sched.wait_stopped(0) and sched.busy:
+            # Still inside a step: leaving here left the GPU's command
+            # queue waiting on a collective that never completed (the Mac
+            # wedged until a reboot). Stay, answering 503, and say stuck;
+            # the page does not SIGKILL a rank whose marker says so.
+            stuck.append(1)
+            marker.progress(phase="stuck", busy=True)
+            log.error("the scheduler is still inside a step; not leaving "
+                      "(its GPU may be hung) -- this rank stays, answering "
+                      "503, until it is checked")
+            return
         logging.shutdown()
-        # a failed ring leaves non-zero: the page relaunches it
+        # a ring whose collective failed leaves non-zero (a crash); a stop
+        # (a stall included) leaves 0
         os._exit(1 if getattr(sched, "ring_failed", None) else 0)
 
     def leave_after_ring_failure(_exc):

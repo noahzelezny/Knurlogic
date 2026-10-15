@@ -1051,9 +1051,13 @@ def stop(job: str, reason: str = "unloaded", propagate: bool = True,
 
         def alive(p):
             return _alive(job, p)
+        rank_of = {int(v["pid"]): int(v["rank"]) for v in mine.values()}
+
+        def spare(p):
+            return J.mid_step(job, rank_of[p], p)
 
         killed = J.terminate(pids, grace=grace, alive=alive,
-                             reap=reap) if pids else []
+                             reap=reap, spare=spare) if pids else []
         left = [p for p in pids if alive(p)]
     finally:
         with _LOCK:
