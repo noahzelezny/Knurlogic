@@ -221,7 +221,9 @@ def admit(
     `prefill_ctx` (a zero-arg context-manager factory) wraps the chunked
     prompt forwards only — a vision request's embedding patch goes there,
     and the final single-token forward that produces the first logits runs
-    outside it, as it does on the stock path.
+    outside it, as it does on the stock path. It yields a callable, called
+    before each `on_progress` (pipeline.overlapped: the sends in
+    flight complete before the ring's stop word).
 
     The head is seeded from position 0 (see loop.py on alignment), which is
     why an admitted row always starts from a FRESH trunk cache: a reused
@@ -295,8 +297,9 @@ def admit(
     seeded = start_pos          # the head is seeded over [start_pos, seeded)
     cps = ([] if on_checkpoint is None else
            _checkpoints(checkpoints, start_pos, last, spans, row_drafts))
-    ctx = prefill_ctx() if prefill_ctx is not None else contextlib.nullcontext()
-    with ctx:
+    ctx = (prefill_ctx() if prefill_ctx is not None
+           else contextlib.nullcontext(lambda: None))
+    with ctx as settle:
         i = start_pos
         while i < last:
             end = _snap_chunk_end(i, min(i + prefill_step_size, last), spans,
@@ -332,6 +335,7 @@ def admit(
                 assert on_checkpoint is not None    # cps is empty without one
                 on_checkpoint(c, cache, dcache if drafts else None, h_c)
             if on_progress is not None:
+                settle()
                 on_progress(end, n)
 
     logits = model(ids[:, max(last, 0):], cache=cache, **_kw(max(last, 0), n))

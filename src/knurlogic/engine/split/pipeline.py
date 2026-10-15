@@ -116,9 +116,8 @@ class Send(_Wrap):
     """The last layer of a stage that is not the last: its output goes to
     the next stage in that stage's dtype, sent before the forward returns
     -- or, inside `overlapped` (a prompt's prefill chunks), sent while the
-    next chunk computes: at most two sends are in flight, and all of them
-    have completed before the prefill's last forward, so nothing is in
-    flight when the next collective runs."""
+    next chunk computes: at most two sends are in flight, and `overlapped`
+    settles them before any collective."""
 
     def __init__(self, inner, dst: int, group, dtype):
         super().__init__(inner)
@@ -179,22 +178,27 @@ def overlap_on() -> bool:
 @contextlib.contextmanager
 def overlapped(model):
     """Around a prompt's prefill chunks (batch_loop.admit's prefill_ctx):
-    each chunk's hidden state is sent while the next chunk computes, and
-    every send
-    has completed on the way out -- before the prefill's last forward and
-    any collective after it. Nothing but sends and receives happens
-    between the chunks, so the point-to-point order is the program order
-    on every rank, as without it."""
+    each chunk's hidden state is sent while the next chunk computes. It
+    yields `settle`, which waits for every send in flight: admit calls it
+    before anything between chunks that is not a send or receive (the
+    ring's per-chunk stop word, Coord.stop, is a collective), and every
+    send has completed on the way out. A collective run with a send still
+    in flight can reach the next rank before the send does and wedge both:
+    a ring did, rank 1 in the stop word's all_gather and rank 0 in the
+    chunk's recv."""
     sends = sends_of(model) if overlap_on() else []
     for sd in sends:
         sd.overlap = True
+
+    def settle() -> None:
+        for sd in sends:
+            sd.flush()
     try:
-        yield
+        yield settle
     finally:
         for sd in sends:
             sd.overlap = False
-        for sd in sends:
-            sd.flush()
+        settle()
 
 
 def bounds_of(counts: Sequence[int]) -> list[tuple[int, int]]:

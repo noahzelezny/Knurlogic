@@ -639,6 +639,29 @@ def test_overlap_finds_a_stages_send_and_is_undone_on_the_way_out(
         assert not send.overlap
 
 
+def test_a_prefills_sends_settle_before_the_stop_word(monkeypatch):
+    """admit settles the sends in flight before each chunk's on_progress:
+    on a ring that is Coord.stop, a collective, and run with a send still
+    in flight it wedged both ranks (rank 1 in its all_gather, rank 0 in
+    the chunk's recv)."""
+    import contextlib
+
+    from test_image_cache import tiny_model
+
+    from knurlogic.engine.mtp.batch_loop import RowParams, admit
+    seen: list = []
+
+    @contextlib.contextmanager
+    def ctx():
+        yield lambda: seen.append("settle")
+    params = RowParams(max_tokens=4, dist=None, processors=[], eos=set(),
+                       drafts=False)
+    admit(tiny_model(), None, lambda: None, mx.array(list(range(40, 53))),
+          params, uid=0, make_draft_cache=lambda: None, prefill_step_size=4,
+          prefill_ctx=ctx, on_progress=lambda done, n: seen.append(done))
+    assert seen == ["settle", 4, "settle", 8, "settle", 12]
+
+
 @pytest.mark.parametrize("start,end,recv,send", [(0, 3, False, True),
                                                  (1, 4, True, False),
                                                  (1, 2, True, True)])
