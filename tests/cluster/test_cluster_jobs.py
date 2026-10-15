@@ -394,15 +394,15 @@ def test_verdict_idle_is_not_stalled_but_busy_and_still_is(monkeypatch):
     idle = {"phase": "ready", "step": 5, "busy": False}
     busy = {"phase": "ready", "step": 5, "busy": True}
     alive = lambda p: True
-    assert w.verdict("j", ranks, alive, now=0, read=lambda j, r: idle) == ""
-    assert w.verdict("j", ranks, alive, now=1e6, read=lambda j, r: idle) == ""
-    assert w.verdict("j", ranks, alive, now=1e6 + J.STALL_S - 1,
-                     read=lambda j, r: busy) == ""
-    why = w.verdict("j", ranks, alive, now=1e6 + J.STALL_S + 1,
-                    read=lambda j, r: busy)
+    assert w.check("j", ranks, alive, now=0, read=lambda j, r: idle)[0] == ""
+    assert w.check("j", ranks, alive, now=1e6, read=lambda j, r: idle)[0] == ""
+    assert w.check("j", ranks, alive, now=1e6 + J.STALL_S - 1,
+                   read=lambda j, r: busy)[0] == ""
+    why = w.check("j", ranks, alive, now=1e6 + J.STALL_S + 1,
+                  read=lambda j, r: busy)[0]
     assert "stalled" in why
     moved = {**busy, "step": 6}
-    assert w.verdict("j", ranks, alive, now=2e6, read=lambda j, r: moved) == ""
+    assert w.check("j", ranks, alive, now=2e6, read=lambda j, r: moved)[0] == ""
 
 
 def test_verdict_a_long_prefill_is_one_step_of_many_chunks_not_a_stall():
@@ -414,11 +414,11 @@ def test_verdict_a_long_prefill_is_one_step_of_many_chunks_not_a_stall():
     alive = lambda p: True
     doc = lambda c: (lambda j, r: {"phase": "ready", "step": 9, "busy": True,
                                    "chunk": c})
-    assert w.verdict("j", ranks, alive, now=0, read=doc(0)) == ""
+    assert w.check("j", ranks, alive, now=0, read=doc(0))[0] == ""
     for k in range(1, 6):          # a chunk every 60 s, no step for 300 s
-        assert w.verdict("j", ranks, alive, now=60 * k, read=doc(k)) == ""
-    assert "stalled" in w.verdict("j", ranks, alive,
-                                  now=300 + J.STALL_S + 1, read=doc(5))
+        assert w.check("j", ranks, alive, now=60 * k, read=doc(k))[0] == ""
+    assert "stalled" in w.check("j", ranks, alive,
+                                now=300 + J.STALL_S + 1, read=doc(5))[0]
 
 
 def test_verdict_a_request_waiting_on_a_slow_load_is_not_a_stall():
@@ -430,15 +430,15 @@ def test_verdict_a_request_waiting_on_a_slow_load_is_not_a_stall():
     ranks = [{"rank": 0, "pid": 1, "machine": "A"}]
     alive = lambda p: True
     loading = lambda j, r: {"phase": "loading", "step": 0, "busy": True}
-    assert w.verdict("j", ranks, alive, now=0, read=loading) == ""
-    assert w.verdict("j", ranks, alive, now=10 * J.STALL_S,
-                     read=loading) == ""
+    assert w.check("j", ranks, alive, now=0, read=loading)[0] == ""
+    assert w.check("j", ranks, alive, now=10 * J.STALL_S,
+                   read=loading)[0] == ""
     # once ready, the clock starts from there
     ready = lambda j, r: {"phase": "ready", "step": 0, "busy": True}
     t = 10 * J.STALL_S + 1
-    assert w.verdict("j", ranks, alive, now=t, read=ready) == ""
-    assert "stalled" in w.verdict("j", ranks, alive, now=t + J.STALL_S + 1,
-                                  read=ready)
+    assert w.check("j", ranks, alive, now=t, read=ready)[0] == ""
+    assert "stalled" in w.check("j", ranks, alive, now=t + J.STALL_S + 1,
+                                read=ready)[0]
 
 
 def test_a_prefill_chunk_bumps_the_marker(tmp_path, monkeypatch):
@@ -454,9 +454,9 @@ def test_a_prefill_chunk_bumps_the_marker(tmp_path, monkeypatch):
 def test_verdict_dead_pid_and_never_joined():
     w = J.Watch()
     ranks = [{"rank": 1, "pid": 7, "machine": "B", "t": 0}]
-    assert "exited" in w.verdict("j", ranks, lambda p: False, now=1)
-    why = w.verdict("j", ranks, lambda p: True, now=J.JOIN_S + 5,
-                    read=lambda j, r: {"phase": "joining", "since": 0})
+    assert "exited" in w.check("j", ranks, lambda p: False, now=1)[0]
+    why = w.check("j", ranks, lambda p: True, now=J.JOIN_S + 5,
+                  read=lambda j, r: {"phase": "joining", "since": 0})[0]
     assert "not joined" in why
 
 
@@ -663,8 +663,8 @@ def test_kill_rank_0_and_its_page_has_rank_1_killed(two_pages):
 
 def test_the_verdict_names_a_ranks_machine_from_the_job_when_unrecorded():
     w = J.Watch()
-    why = w.verdict("j", [{"rank": 1, "pid": 5, "machines": ["A", "B"]}],
-                    lambda p: False, now=1)
+    why = w.check("j", [{"rank": 1, "pid": 5, "machines": ["A", "B"]}],
+                  lambda p: False, now=1)[0]
     assert "rank 1 on B " in why
 
 

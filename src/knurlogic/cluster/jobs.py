@@ -154,11 +154,6 @@ class Watch:
     def __init__(self):
         self.seen: dict = {}              # (job, rank) -> (step, since)
 
-    def verdict(self, job: str, ranks: list, alive, now: float | None = None,
-                read=read_marker) -> str:
-        """"" when healthy, else why the job has failed (check's reason)."""
-        return self.check(job, ranks, alive, now, read)[0]
-
     def check(self, job: str, ranks: list, alive, now: float | None = None,
               read=read_marker) -> tuple[str, str | None]:
         """("", None) when healthy, else (why the job has failed, its
