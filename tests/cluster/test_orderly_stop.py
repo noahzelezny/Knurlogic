@@ -83,7 +83,7 @@ def test_a_scheduler_still_inside_a_step_is_not_exited(monkeypatch):
     keeps answering 503."""
     from knurlogic.engine.split import marker
     exited = []
-    monkeypatch.setattr(os, "_exit", lambda code: exited.append(code))
+    monkeypatch.setattr(os, "_exit", exited.append)
     said = []
     monkeypatch.setattr(marker, "progress", lambda **f: said.append(f))
     s = Sched(ends=False)

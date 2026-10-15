@@ -48,7 +48,7 @@ REQUESTED = ("unloaded", "the page that started it closed", "refused",
 MEMORY_RX = re.compile(
     r"out of memory|outofmemory|insufficient memory|does not fit|"
     r"will not fit|resource limit|unable to allocate|failed to allocate|"
-    r"memoryerror|\boom\b|held now by|still holds", re.I)
+    r"memoryerror|\boom\b|held now by|still holds", re.IGNORECASE)
 #: a process that REFUSED to start (`knurlogic serve` printed "REFUSING"
 #: and exited REFUSED_EXIT): bad settings, a context past the model's
 #: maximum, a model it cannot load as asked. A missing Python module (a
@@ -68,16 +68,16 @@ REFUSAL_LINE_RX = re.compile(r"REFUSING[^\n]*(?:\n  - [^\n]*)*|"
 #: a machine that went away or stopped answering: wait for it
 MACHINE_RX = re.compile(
     r"has not answered|not a peer this page knows|is not a machine "
-    r"answering|did not answer|no longer runs its rank", re.I)
+    r"answering|did not answer|no longer runs its rank", re.IGNORECASE)
 #: a rank's or server's own output saying it ran out of memory
 MEMORY_LINE_RX = re.compile(
     r"[^\n]*(?:out of memory|OutOfMemory|Insufficient Memory|"
     r"Resource limit|Unable to allocate|Failed to allocate|MemoryError)"
-    r"[^\n]*", re.I)
+    r"[^\n]*", re.IGNORECASE)
 #: a rank that had work in flight and stopped taking steps (the page's
 #: watchdog, jobs.Watch): its GPU may be hung, and a relaunch onto it wedged
 #: that Mac until a reboot -- never relaunched
-STALL_RX = re.compile(r"stalled mid-step|the ring is stalled", re.I)
+STALL_RX = re.compile(r"stalled mid-step|the ring is stalled", re.IGNORECASE)
 #: kinds the same launch would meet again (or that would hurt the machine):
 #: failed at once, the reason shown, never relaunched
 NOT_RETRIED = ("memory", "refusal", "stall")
@@ -129,15 +129,10 @@ def kind(reason: str, known: str | None = None) -> str:
     if any(r == q or r.startswith(q + ";") or r.startswith(q + ":")
            for q in REQUESTED):
         return "requested"
-    if REFUSAL_RX.search(r):
-        return "refusal"
-    if MEMORY_RX.search(r):
-        return "memory"
-    if STALL_RX.search(r):
-        return "stall"
-    if MACHINE_RX.search(r):
-        return "machine"
-    return "failure"
+    return next((k for k, rx in (("refusal", REFUSAL_RX),
+                                 ("memory", MEMORY_RX), ("stall", STALL_RX),
+                                 ("machine", MACHINE_RX)) if rx.search(r)),
+                "failure")
 
 
 def refusal_line(text: str) -> str:
