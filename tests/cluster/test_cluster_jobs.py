@@ -1804,3 +1804,17 @@ def test_terminate_never_sigkills_a_busy_rank(monkeypatch):
     assert killed == [12]
     assert (11, signal.SIGKILL) not in sent and (11, signal.SIGTERM) in sent
     assert (12, signal.SIGKILL) in sent
+
+
+def test_a_recorded_rank_whose_command_line_is_unreadable_is_alive(
+        monkeypatch):
+    from knurlogic.machine import processes
+    monkeypatch.setattr(processes, "command", lambda pid: "")
+    monkeypatch.setattr(processes, "exists", lambda pid: True)
+    assert J.is_rank(4321, "ab12cd34ef567890")
+    monkeypatch.setattr(processes, "exists", lambda pid: False)
+    assert not J.is_rank(4321, "ab12cd34ef567890")
+    monkeypatch.setattr(processes, "command",
+                        lambda pid: "python other --job 0000000000000000")
+    monkeypatch.setattr(processes, "exists", lambda pid: True)
+    assert not J.is_rank(4321, "ab12cd34ef567890")     # the pid was reused

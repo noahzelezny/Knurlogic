@@ -246,8 +246,13 @@ def by_job(reg: dict | None = None) -> dict:
 
 
 def is_rank(pid: int, job: str) -> bool:
-    """Alive, and still this job's process (a pid is reused once free)."""
+    """Alive, and still this job's process (a pid is reused once free). A
+    recorded pid whose command line cannot be read (AccessDenied, a zombie)
+    is alive while it exists: taking it for gone let a relaunch start
+    beside a rank still holding its GPU."""
     out = processes.command(pid)
+    if not out:
+        return processes.exists(pid)
     return f"--job {job}" in out or f"--job={job}" in out
 
 
