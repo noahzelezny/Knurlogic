@@ -168,14 +168,13 @@ def pipeline_shares(layer_bytes: list, ranks: list, other_bytes: int = 0,
     for i, c in enumerate(cap):
         if c <= 0:
             raise ValueError(
-                f"{names[i]}: working set {wss[i] / fit.GIB:.1f} GiB "
-                f"holds none of the layers after the {held[i] / fit.GIB:.1f} "
-                f"GiB it keeps besides them (embeddings, norm, lm_head"
-                + (", and on rank 0 the MTP head and vision tower"
-                   if i == 0 and leader_bytes else "")
-                + f") and the {fit.rank_margin(wss[i], reserve) / fit.GIB:.1f} GiB "
-                f"it keeps free (step margin or first-request transient, "
-                f"plus a minimum context's KV)")
+                f"does not fit: {names[i]} has no room for any layers "
+                f"({wss[i] / fit.GIB:.1f} GiB free, less "
+                f"{held[i] / fit.GIB:.1f} GiB of "
+                + ("embeddings, MTP head and vision tower"
+                   if i == 0 and leader_bytes else "embeddings")
+                + f" and {fit.rank_margin(wss[i], reserve) / fit.GIB:.1f} "
+                f"GiB kept free)")
     bws = [r.get("memory_bandwidth_gbs") for r in ranks]
     known = all(b for b in bws)
     weights = [cap[i] * (float(bws[i]) if known else 1.0) for i in range(n)]
@@ -184,10 +183,10 @@ def pipeline_shares(layer_bytes: list, ranks: list, other_bytes: int = 0,
     ceil = [max(1, min(L, int(cap[i] // avg))) if avg else L for i in range(n)]
     if sum(ceil) < L:
         raise ValueError(
-            f"{L} layers x {avg / fit.GIB:.2f} GiB average = "
-            f"{sum(layer_bytes) / fit.GIB:.1f} GiB; the ranks hold "
-            + " + ".join(f"{names[i]} {cap[i] / fit.GIB:.1f}" for i in range(n))
-            + f" = {sum(cap) / fit.GIB:.1f} GiB of layers")
+            f"does not fit: the layers need {sum(layer_bytes) / fit.GIB:.1f} "
+            f"GiB, the machines have room for {sum(cap) / fit.GIB:.1f} ("
+            + ", ".join(f"{names[i]} {cap[i] / fit.GIB:.1f}" for i in range(n))
+            + ")")
     counts = _largest_remainder(L, weights, [1] * n, ceil)
     # stage order: rank n-1 first ... rank 0 last
     bounds: list = [None] * n

@@ -400,6 +400,10 @@ function launchBlock(ns){
     if(SEL && Array.isArray(SEL.splits) && !SEL.splits.length)
       return `${SEL.model_type||'this model'} cannot be split across machines`;
     if(MULTI.link==='rdma'){ const why=rdmaWhy(ns); if(why) return why }
+    // the split preview places it as Launch would, so its refusal is Launch's
+    const sr=PREVIEW && PREVIEW.for===SEL?.path && PREVIEW.split_room;
+    if(sr && sr.error) return sr.error;
+    if(sr && sr.fits===false) return 'does not fit the memory free there now';
     return '';
   }
   if(ns.length===1 && !isLocal(ns[0])){

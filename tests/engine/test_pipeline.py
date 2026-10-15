@@ -53,9 +53,10 @@ def test_shares_are_capped_by_what_fits_and_every_rank_gets_one():
     assert min(tiny["layers"]) >= 1 and sum(tiny["layers"]) == 4
     with pytest.raises(ValueError, match="cannot give each of 3 ranks"):
         pipeline_split.pipeline_shares([GIB] * 2, _ranks(10, 10, 10))
-    with pytest.raises(ValueError, match="the ranks hold"):
+    with pytest.raises(ValueError, match=r"^does not fit: the layers need "
+                       r"40\.0 GiB, the machines have room for "):
         pipeline_split.pipeline_shares([GIB] * 40, _ranks(10, 10))
-    with pytest.raises(ValueError, match="holds none of the layers"):
+    with pytest.raises(ValueError, match="has no room for any layers"):
         pipeline_split.pipeline_shares([GIB] * 4, _ranks(10, 3), other_bytes=4 * GIB)
 
 
