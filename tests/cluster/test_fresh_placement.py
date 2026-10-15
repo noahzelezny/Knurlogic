@@ -100,3 +100,12 @@ def test_a_relaunch_onto_a_machine_still_holding_memory_is_refused(
     assert e.value.doc["placement"] == _kept()
     from knurlogic.cluster import recovery as R
     assert R.kind(f"relaunch 1 refused: {why}") == "memory"   # not retried
+
+
+def test_a_relaunch_whose_machine_is_absent_is_refused(monkeypatch):
+    monkeypatch.setattr(C, "refresh_memory", lambda infos, post: False)
+    infos = [{"name": "A", "working_set_bytes": 84 * GIB}]
+    with pytest.raises(C._Refused) as e:
+        C._kept_split(_kept(), infos, post=None)
+    assert e.value.doc["refused"] == ("B is not answering; the split this "
+                                      "job started with needs it")

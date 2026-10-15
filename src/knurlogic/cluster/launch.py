@@ -1642,18 +1642,24 @@ def _place(infos: list, shape: dict, split: str, order, post) -> dict:
 
 
 def _kept_split(kept: dict, infos: list, post) -> dict:
-    """A relaunch keeps the placement its first launch made (`kept`):
-    re-placed on the memory read now, a machine whose hung GPU still held
-    the old job's memory got a smaller share, the job went back onto it,
-    and that Mac wedged. A machine whose budget no longer covers its share
-    (read once more after any rank still exiting) refuses the relaunch,
-    saying how much it still holds."""
+    """A relaunch keeps the placement its first launch made (`kept`), so a
+    machine still holding the old job's memory is refused, not handed a
+    smaller share; memory is read once more before refusing."""
     from knurlogic.tuning import fit
+
+    names = {m["name"] for m in infos}
+    gone = next((s["machine"] for s in kept["shares"]
+                 if s.get("machine") not in names), None)
+    if gone:
+        raise _Refused({
+            "refused": f"{gone} is not answering; the split this job "
+                       f"started with needs it",
+            "placement": kept})
 
     def short() -> list:
         by = {m["name"]: m for m in infos}
         return [(s, by[s["machine"]]) for s in kept["shares"]
-                if s.get("machine") in by and fit.share_refusal(
+                if fit.share_refusal(
                     int(s["bytes"]), budget_of(by[s["machine"]]))]
     bad = short()
     if bad and refresh_memory(infos, post):
