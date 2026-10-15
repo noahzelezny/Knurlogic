@@ -12,6 +12,7 @@ Thunderbolt/--peer gate (Wi-Fi) staying "answering".
 """
 import json
 import os
+import time
 import urllib.error
 import urllib.request
 
@@ -208,6 +209,25 @@ def test_a_restarted_peer_is_noticed_by_its_boot_id(tmp_path):
         c.restart_page(1)
         assert wait(lambda: a.peer_public(b).get("restarts") == 1
                     and a.peer_state(b) == "answering", 30)
+
+
+def test_a_redeployed_page_keeps_the_job_its_rank_still_runs(tmp_path):
+    """A page restart is a new boot_id, but the rank lives in its own
+    session: the coordinator's watcher must keep the job (a redeploy used
+    to stop a healthy one as "restarted, its rank is gone")."""
+    with FakeCluster(2, tmp_path) as c:
+        a, b = c.pages
+        assert c.wait_peers()
+        out = c.launch(0, split="pipeline", link="tcp")
+        job = out.get("job")
+        assert job, out
+        assert wait(lambda: c.running(job), 60)
+        c.restart_page(1)
+        assert wait(lambda: a.peer_public(b).get("restarts") == 1
+                    and a.peer_state(b) == "answering", 30)
+        time.sleep(GONE_S * 2)
+        assert ended_reason(a, job) is None, ended_reason(a, job)
+        assert c.running(job)
 
 
 def test_a_peer_not_on_the_thunderbolt_gate_stays_answering_but_takes_no_job(

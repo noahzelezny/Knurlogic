@@ -231,7 +231,6 @@ def test_prepare_accepts_and_remembers(cache):
     code, doc = prep(spec())
     assert code == 200 and doc["ok"]
     assert "ab12cd34ef567890" in C.PREPARED
-    C.PREPARED.clear()
 
 
 @pytest.mark.parametrize("change,why", [
@@ -323,7 +322,6 @@ def test_prepare_refuses_a_share_that_does_not_fit_here(cache):
     code, doc = prep(spec(), info=info("Apple M3 Ultra", "192.0.2.2",
                                        ws=8 * GIB))
     assert doc["ok"], doc
-    C.PREPARED.clear()
 
 
 def test_prepare_says_not_on_and_rejects_bad_shapes(cache):
@@ -361,7 +359,6 @@ def test_prepare_refuses_unknown_sets_and_stores_only_clean_ones(
     code, doc = prep(spec(sets={"kv_bits": "8"}))
     assert doc["ok"]
     assert C.PREPARED["ab12cd34ef567890"]["spec"]["sets"] == {"kv_bits": "8"}
-    C.PREPARED.clear()
 
 
 def test_stop_tells_only_pages_this_page_knows(cache, monkeypatch):
@@ -933,7 +930,6 @@ def test_prepare_refuses_a_share_beside_what_another_job_holds(cache):
                           registry=dict,
                           held=lambda job: [])
     assert doc["ok"], doc
-    C.PREPARED.clear()
 
 
 def test_what_is_held_counts_live_ranks_and_servers_not_the_stopping(
@@ -970,7 +966,6 @@ def test_prepare_refuses_while_another_jobs_rank_is_loading(cache):
                           registry=lambda: reg,
                           held=lambda job: [])
     assert doc["ok"], doc
-    C.PREPARED.clear()
 
 
 SLOW = ("import signal, sys, time\n"
@@ -1053,7 +1048,6 @@ def test_prepare_waits_for_a_stopping_rank_then_goes(cache, monkeypatch):
     p.wait(timeout=5)
     C._PROCS.clear()
     J.save_registry({})
-    C.PREPARED.clear()
 
 
 def test_prepare_names_a_stuck_old_rank_in_its_refusal(cache, monkeypatch):
@@ -1283,8 +1277,13 @@ def test_peer_verdict_reads_the_peer_lists_clock_and_boot_id(monkeypatch):
     rec.boot_id = "two"
     # the page restarted, its rank (its own session) did not: kept
     assert C.peer_verdict(job, recs, now=201, ask=up, **kw) == ""
+    assert C._PEER_BOOT[(job, "b")] == "two"
+    # the same process later answering without the rank is not a restart:
+    # it runs the PEER_GONE_S clock
+    assert C.peer_verdict(job, recs, now=202, ask=(
+        lambda page, j: {"ranks_here": [], "prepared": False}), **kw) == ""
     rec.boot_id = "three"
-    why = C.peer_verdict(job, recs, now=202, ask=(
+    why = C.peer_verdict(job, recs, now=203, ask=(
         lambda page, j: {"ranks_here": [], "prepared": False}), **kw)
     assert "M3 restarted" in why
 
@@ -1580,7 +1579,6 @@ def test_same_build_different_version_string_is_accepted_with_a_note(cache):
     code, doc = prep(spec(versions=other))
     assert code == 200 and doc["ok"], doc
     assert "0.1.0.dev0" in doc["note"]
-    C.PREPARED.clear()
 
 
 # --- control-plane contract (docs/design/orchestration.md) --------------------
@@ -1751,7 +1749,6 @@ def test_start_runs_the_rings_chunk_and_says_why(cache, monkeypatch):
     cmd = cmds[0]
     assert cmd[cmd.index("--prefill-chunk") + 1] == "1024"
     assert cmd[cmd.index("--prefill-why") + 1] == C.RING_CHUNK_WHY
-    C.PREPARED.clear()
     C._PROCS.clear()
 
 

@@ -24,6 +24,20 @@ def _no_cluster_watcher_thread(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _own_job_state(monkeypatch):
+    """Every test gets its own copy of launch's in-memory job state
+    (prepared ranks, ended jobs, the peer watcher's clocks): what one test
+    leaves behind -- an assertion failing before its cleanup -- is
+    otherwise seen by whichever test the same worker runs next."""
+    from knurlogic.cluster import launch
+    for name in ("PREPARED", "ENDED", "SPECS", "_PROCS", "_PEER_OK",
+                 "_PEER_BOOT"):
+        monkeypatch.setattr(launch, name, {})
+    for name in ("_STOPPING", "FOLLOWING", "_PEER_SLOW"):
+        monkeypatch.setattr(launch, name, set())
+
+
+@pytest.fixture(autouse=True)
 def _no_real_page(monkeypatch):
     """The MCP's cross-machine tools ask the page on this Mac (127.0.0.1:8899
     by default). A test must never reach the REAL page -- an `unload` there

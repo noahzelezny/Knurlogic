@@ -116,7 +116,9 @@ compatibility is not build compatibility.
   in every envelope `from`. Peers are keyed by id (`peers.json`, as now), so
   one machine with several addresses stays one node. `boot_id` (random per
   process start) in `Hello` and `Heartbeat` lets a peer see "same id, new
-  process": rank records from the old boot are gone.
+  process": a restarted page. Ranks run in their own session and outlive it
+  (the new page adopts them, `launch.start_watching_existing`), so only a new
+  boot holding no rank counts as lost ranks.
 - **Liveness.** Every node asks every known peer for its light status each
   2 s (one thread, parallel, timeout 1.5 s; the `Heartbeat` kind's content
   -- `boot_id`, version -- rides the status doc, and no handler is registered
@@ -132,8 +134,9 @@ machine's node entry built once per 1.5 s however many peers ask, the memory
 map reused for 30 s), and there is one in-flight probe per peer (a probe
 still out is not overlapped; a machine's several addresses are asked at
 once). One clock serves both `Peers` and `peer_verdict`: a rank's machine is
-gone when the peer list says so, and a new `boot_id` is a restart (its ranks
-went with the old process). The interval is `peers.REFRESH_S` = 2 s, the
+gone when the peer list says so, and a new `boot_id` holding no rank is a
+restart whose ranks went with the old process (one still holding its rank is
+a redeployed page and the job is kept). The interval is `peers.REFRESH_S` = 2 s, the
 status timeout 1.5 s; `answering` is `peers.ANSWERING_S` = 6 s.
 - Membership is a full mesh of heartbeats; at 16 nodes that is 240 tiny
   requests per 2 s, about 120 per second across the cluster, about 8 per node
@@ -154,7 +157,8 @@ status timeout 1.5 s; `answering` is `peers.ANSWERING_S` = 6 s.
   the failing pair only, for any world size.
 - **Coordinator's page dies**: the job stops. The other pages see it `gone`
   within 20 s and stop (what `peer_verdict` does today for any page); its own
-  rank process is reaped when that page restarts (`_leftovers`). No takeover.
+  rank, in its own session, outlives the page, and a restarted page adopts it
+  (`launch.start_watching_existing`). No takeover.
   Reason: the coordinator is also a rank's machine, so its death already
   breaks the collective; a takeover needs election, a replicated recovery
   record and a restart of the ranks anyway, so it buys nothing over a relaunch.
