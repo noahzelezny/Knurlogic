@@ -104,6 +104,37 @@ def test_a_scheduler_still_inside_a_step_is_not_exited(monkeypatch):
     assert ("abort",) in s.calls and exited == []
 
 
+def test_a_ring_failure_whose_cleanup_never_ends_is_not_exited(monkeypatch):
+    """The ring failed and the scheduler's cleanup is stuck behind a
+    collective: the same stay-stuck path as a stop, not os._exit."""
+    from knurlogic.engine.split import marker
+    exited = []
+    monkeypatch.setattr(os, "_exit", exited.append)
+    said = []
+    monkeypatch.setattr(marker, "progress", lambda **f: said.append(f))
+    s = Sched()
+    s.wait_stopped = lambda timeout: False
+    H.watch_ring(s, SimpleNamespace(state="ready"), exit_after=0.01,
+                 stop_within=0.01)
+    s.on_ring_failed(RuntimeError("collective failed"))
+    end = time.monotonic() + 2
+    while {"phase": "stuck", "busy": True} not in said \
+            and time.monotonic() < end:
+        time.sleep(0.01)
+    assert {"phase": "stuck", "busy": True} in said and exited == []
+
+
+def test_a_ring_failure_whose_cleanup_ends_leaves_non_zero(monkeypatch):
+    exited = threading.Event()
+    codes = []
+    monkeypatch.setattr(os, "_exit", lambda c: (codes.append(c), exited.set()))
+    s = Sched()
+    H.watch_ring(s, SimpleNamespace(state="ready"), exit_after=0.01,
+                 stop_within=0.01)
+    s.on_ring_failed(RuntimeError("collective failed"))
+    assert exited.wait(2) and codes == [1]
+
+
 def test_a_warming_ring_also_stops_between_steps(monkeypatch):
     # the warm-up runs real forwards with the ring's collectives: a rank
     # killed in one pinned its peer's GPU like one killed mid-generation

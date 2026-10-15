@@ -158,18 +158,16 @@ def watch_ring(sched, mh, exit_after: float = 1.5,
     if m is not None:
         m.probe = probe
 
-    def fail_and_leave():
-        sched.abort(RingFailed(
-            "this model is split across machines and the cluster job is "
-            "stopping (a rank exited or stalled, or it was unloaded); "
-            "retry once it is loaded again"))
+    def leave_unless_in_step(code: int, in_step) -> None:
+        """After the 503s go out, leave with `code` -- unless the
+        scheduler is still inside GPU work (`in_step()`): leaving there
+        left the GPU's command queue waiting on a collective that never
+        completed (the Mac wedged until a reboot). Then stay, answering
+        503, and say stuck; the page does not SIGKILL a rank whose marker
+        says so."""
         import time
         time.sleep(exit_after)          # the 503s go out first
-        if not sched.wait_stopped(0) and sched.busy:
-            # Still inside a step: leaving here left the GPU's command
-            # queue waiting on a collective that never completed (the Mac
-            # wedged until a reboot). Stay, answering 503, and say stuck;
-            # the page does not SIGKILL a rank whose marker says so.
+        if in_step():
             stuck.append(1)
             marker.progress(phase="stuck", busy=True)
             log.error("the scheduler is still inside a step; not leaving "
@@ -177,28 +175,34 @@ def watch_ring(sched, mh, exit_after: float = 1.5,
                       "503, until it is checked")
             return
         logging.shutdown()
+        os._exit(code)
+
+    def fail_and_leave():
+        sched.abort(RingFailed(
+            "this model is split across machines and the cluster job is "
+            "stopping (a rank exited or stalled, or it was unloaded); "
+            "retry once it is loaded again"))
         # a ring whose collective failed leaves non-zero (a crash); a stop
         # (a stall included) leaves 0
-        os._exit(1 if getattr(sched, "ring_failed", None) else 0)
+        leave_unless_in_step(
+            1 if getattr(sched, "ring_failed", None) else 0,
+            lambda: not sched.wait_stopped(0) and sched.busy)
 
     def leave_after_ring_failure(_exc):
         # The scheduler stopped at a step boundary on a failed collective
         # and answered everything with RingFailed: let it finish its
         # cleanup (the executor, the model, mx.synchronize) so nothing is
         # left on the GPU, then leave non-zero so the page's recovery
-        # relaunches the job. A cleanup stuck behind a collective is not
-        # waited for past stop_within.
+        # relaunches the job. A cleanup still running after stop_within
+        # is GPU work stuck behind a collective: the rank stays, stuck.
         marker.progress(phase="stopping")
 
         def go():
-            import time
-            if not sched.wait_stopped(stop_within):
-                logging.getLogger(__name__).error(
-                    "the scheduler did not finish its cleanup within %.0f s "
-                    "after the ring failed; leaving anyway", stop_within)
-            time.sleep(exit_after)          # the 503s go out first
-            logging.shutdown()
-            os._exit(1)
+            done = sched.wait_stopped(stop_within)
+            if not done:
+                log.error("the scheduler did not finish its cleanup within "
+                          "%.0f s after the ring failed", stop_within)
+            leave_unless_in_step(1, lambda: not done)
         threading.Thread(target=go, daemon=True).start()
     sched.on_ring_failed = leave_after_ring_failure
 
