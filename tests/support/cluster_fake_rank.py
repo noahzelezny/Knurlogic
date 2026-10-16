@@ -7,6 +7,11 @@ the REAL scheduler's submit/abort and the real SIGTERM path
 (interfaces/http/lifecycle.watch_ring), answering with the real error mapping: a
 request is held in flight until the job is torn down, then 503s.
 
+The ranks join the REAL bell (engine/split/link.bell_early, as the
+launcher sets it) and stand in for mlx's ring: a bell that closes -- a peer
+rank's process ended -- makes this rank leave non-zero, as a collective
+whose peer died raises "[ring] connection to a peer was lost".
+
 argv: <artifact> knurlogic serve --rank R --job J [--port P] ...
 env:  FAKE_STEPS=1  advance the step counter (a healthy, busy ring)
       FAKE_BAD_CABLE=<subnet>  rank 1 fails jaccl init on that cable
@@ -14,6 +19,7 @@ env:  FAKE_STEPS=1  advance the step counter (a healthy, busy ring)
 import json
 import os
 import sys
+import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -21,6 +27,45 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 def flag(name, default=None):
     a = sys.argv
     return a[a.index(name) + 1] if name in a else default
+
+
+#: what mlx's ring raises when a peer's process died (ring.cpp)
+LOST = "[ring] connection to a peer was lost"
+
+
+def ring_like(socks, lost):
+    """Call `lost()` once any bell closes, as a collective whose peer died
+    raises in mlx."""
+    def watch(c):
+        try:
+            while c.recv(1):
+                pass
+        except OSError:
+            pass
+        lost()
+    for c in socks:
+        threading.Thread(target=watch, args=(c,), daemon=True).start()
+
+
+def follower_lost():
+    """A follower whose ring failed: one error line, non-zero (follower.py
+    ring_error -> SystemExit(1))."""
+    print(f"rank: lost the ring to rank 0 ({LOST}); leaving", flush=True)
+    os._exit(1)
+
+
+def bell(job):
+    """The real bell, on loopback: the fake machines' ring addresses are
+    documentation addresses no socket can bind. Its port comes from the job
+    id over a wide range, not the job's ring slot: parallel tests' pages
+    do not see each other's slots, and nothing else here binds them."""
+    from knurlogic.engine.split import link
+    spec = os.environ.get("KNURLOGIC_BELL")
+    if spec:
+        _, _, rest = spec.split(":", 2)
+        port = 20000 + int(job[:8], 16) % 40000
+        os.environ["KNURLOGIC_BELL"] = f"127.0.0.1:{port}:{rest}"
+    return link.bell_early() or []
 
 
 def main():
@@ -43,8 +88,10 @@ def main():
         # which reads a job whose rank 0 is ready as serving.)
         while True:
             time.sleep(0.3)
+    socks = bell(job)
     marker.progress(phase="loading")
     if rank != 0:
+        ring_like(socks, follower_lost)
         marker.after_load()
         n = 0
         while True:
@@ -63,6 +110,9 @@ def main():
 
     sched = Scheduler(Host())             # never started: nothing steps
     lifecycle.watch_ring(sched, Host(), exit_after=1.0)
+    # a peer's death fails rank 0's ring: the scheduler's own path (503s,
+    # then a non-zero exit), as a collective raising in a real tick
+    ring_like(socks, lambda: sched._ring_fatal(RuntimeError(LOST)))
     m.beat()
 
     class H(BaseHTTPRequestHandler):

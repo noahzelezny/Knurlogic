@@ -4,8 +4,10 @@ each with its own cache and identity, on this Mac, with short liveness
 clocks. Only the model is fake (tests/support/cluster_fake_rank.py).
 
 What these pin: a pipeline launch over tcp at n=3, 4, 8; the coordinator's
-page dying (every page stops the job within PEER_GONE_S, the recovery
-record relaunches it once that page is back); a rank and a whole page dying;
+machine dying (its rank's death ends every rank over the ring -- the fake
+ranks stand in for mlx's ring with the real bell -- so every page stops the
+job, and the recovery record relaunches it once that page is back); a rank
+and a whole machine dying; a page alone dying (the job is kept);
 one machine's refusal in a world of 8; duplicate Prepare/Start/Stop; two
 pages of different protocol majors; and a peer that is not on the
 Thunderbolt/--peer gate (Wi-Fi) staying "answering".
@@ -25,7 +27,7 @@ from knurlogic.cluster import protocol, transport
 # time, so a parallel suite on a busy machine does not starve them
 pytestmark = pytest.mark.xdist_group("orchestration")
 
-#: the fake pages' PEER_GONE_S (cluster_fake_page.fast) and slack for the
+#: the fake pages' peers.GONE_S (cluster_fake_page.fast) and slack for the
 #: watcher, the probes, and this machine being busy
 GONE_S = 4.0
 SLACK_S = 25.0
@@ -70,13 +72,13 @@ def test_the_coordinators_page_dying_stops_the_job_everywhere_and_relaunches(
         coord.kill()                        # the machine goes: page and rank
         for pid in pids:
             os.kill(pid, 9)
-        # every other page stops within PEER_GONE_S (plus its clocks)
+        # its rank's death ends every rank over the ring: every page stops
         assert wait(lambda: c.job_stopped_everywhere(job), GONE_S + SLACK_S)
         # the page records the stop on its watcher's next pass, after its
         # ranks are gone
         why = wait(lambda: ended_reason(c.pages[1], job), SLACK_S)
         assert why is not None
-        assert "answered" in why["reason"] or "runs its rank" in why["reason"]
+        assert "exited" in why["reason"] or "runs its rank" in why["reason"]
         # the coordinator's page returns: its recovery record relaunches
         c.restart_page(0)
         assert wait(lambda: any(j != job for j in c.jobs_running()), 90), \
@@ -228,6 +230,24 @@ def test_a_redeployed_page_keeps_the_job_its_rank_still_runs(tmp_path):
         time.sleep(GONE_S * 2)
         assert ended_reason(a, job) is None, ended_reason(a, job)
         assert c.running(job)
+
+
+def test_a_page_that_stays_down_keeps_the_job_its_rank_still_runs(tmp_path):
+    """A page process gone for many times the old 20 s clock while its rank
+    runs: nothing about the job is decided from its silence."""
+    with FakeCluster(2, tmp_path) as c:
+        a, b = c.pages
+        assert c.wait_peers()
+        out = c.launch(0, split="pipeline", link="tcp")
+        job = out.get("job")
+        assert job, out
+        assert wait(lambda: c.running(job), 60)
+        pid = int(b.ranks(job)[0]["pid"])
+        b.kill()                            # the page only: its rank lives
+        assert wait(lambda: a.peer_state(b) == "gone", GONE_S + SLACK_S)
+        time.sleep(GONE_S * 4)
+        assert ended_reason(a, job) is None, ended_reason(a, job)
+        assert alive(pid) and len(a.live_ranks(job)) == 1
 
 
 def test_a_peer_not_on_the_thunderbolt_gate_stays_answering_but_takes_no_job(

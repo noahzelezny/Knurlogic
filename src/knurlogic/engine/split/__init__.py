@@ -8,6 +8,7 @@ cluster/'s (no mlx there).
   pipeline.py      the pipeline split: each rank a run of layers, Coord
   plan.py          the step plan rank 0 sends every rank (pure Python)
   link.py          joining the ring, the per-step exchange, the bell (Link)
+  liveness.py      a peer machine gone silent: keepalive on the bell, Watcher
   ring.py          rank 0's side: Ring, Journal, TensorExecutor, assign_seed
   follower.py      a rank >= 1: serve_follower, follow, Mark, HeadAgreement
   marker.py        a rank's progress marker, as the engine reports it

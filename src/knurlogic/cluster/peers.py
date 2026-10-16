@@ -5,7 +5,8 @@ Every peer carries a state, computed from when it last answered the status
 GET every peer can reach (Wi-Fi and Ethernet Bonjour peers too -- liveness
 is not behind the Thunderbolt/--peer gate): `answering` (heard within 6 s),
 `stale` (6..20 s silent: shown, no new jobs placed), `gone` (20 s or more,
-jobs.PEER_GONE_S: a job with a rank there stops) and, apart from those,
+GONE_S; what the card shows -- a page's silence never stops a job:
+docs/design/liveness.md) and, apart from those,
 `version_mismatch` (its protocol major differs, or it speaks none), with the
 text that says which machine to update. The same status doc carries its
 `boot_id`: a new one is a restarted page process (its ranks, in their own
@@ -31,7 +32,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from knurlogic.cluster import NET_ERRORS, every, protocol, transport
-from knurlogic.cluster import jobs as J
 from knurlogic.machine import files, paths
 from knurlogic.machine.http_client import send_json
 from knurlogic.machine.processes import PROC_ERRORS
@@ -42,8 +42,10 @@ HEADER = "X-Knurlogic-Peer"
 STORE_SCHEMA = 1
 REFRESH_S = 2.0          # one light status GET per peer per round
 #: heard within this long: answering (three rounds); past it, stale until
-#: jobs.PEER_GONE_S, then gone
+#: GONE_S, then gone
 ANSWERING_S = 6.0
+#: silent this long: shown as gone (the card's state, never a job's verdict)
+GONE_S = 20.0
 #: Peers known ONLY because they introduced themselves: any client can send
 #: the header, so they are capped, and forgotten after an hour of silence.
 MAX_INTRODUCED = 32
@@ -291,12 +293,12 @@ class Peers:
     def _classify(self, p: Peer, now: float) -> None:
         """Its state, from how long ago it last answered."""
         age = now - p.last_seen if p.last_seen else float("inf")
-        if p.mismatch and age < J.PEER_GONE_S:
+        if p.mismatch and age < GONE_S:
             p.state, p.problem = "version_mismatch", p.mismatch
         elif age < ANSWERING_S:
             p.state = "answering"
             p.problem = ""
-        elif age < J.PEER_GONE_S:
+        elif age < GONE_S:
             p.state = "stale"
             p.problem = p.problem or (f"{p.name or p.host} has not answered "
                                       f"for {age:.0f} s")

@@ -222,6 +222,7 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
                              "the prompt cache byte cap")
         self.tensor = tensor
         self.host = host
+        self._wake_on_dead_link()
         # the load-time warm-up row is not a user's request (requests())
         self._warming = False
         if hasattr(host, "warm"):
@@ -525,7 +526,23 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
                                         "error; see the server log"))
             self._close_executor()
 
+    def _wake_on_dead_link(self) -> None:
+        """A peer machine gone silent (split/liveness) wakes the loop,
+        which then fails the ring on this thread (_tick)."""
+        link = getattr(self.tensor, "link", None)
+        if link is not None:
+            link.on_dead = self._wake_now
+
+    def _wake_now(self) -> None:
+        self._wake.set()
+
     def _tick(self) -> None:
+        link = getattr(self.tensor, "link", None)
+        if link is not None and link.dead and self.ring_failed is None:
+            # set from the bell watcher's thread: an idle rank 0 is in no
+            # collective, so only this check fails its ring
+            from knurlogic.engine.split.link import Desync
+            raise Desync(link.dead_why or "a peer of the ring is gone")
         self._sample_pressure()
         self._do_commands()
         if self.tensor is not None:

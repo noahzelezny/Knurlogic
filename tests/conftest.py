@@ -26,12 +26,11 @@ def _no_cluster_watcher_thread(monkeypatch):
 @pytest.fixture(autouse=True)
 def _own_job_state(monkeypatch):
     """Every test gets its own copy of launch's in-memory job state
-    (prepared ranks, ended jobs, the peer watcher's clocks): what one test
+    (prepared ranks, ended jobs, the peer watcher's records): what one test
     leaves behind -- an assertion failing before its cleanup -- is
     otherwise seen by whichever test the same worker runs next."""
     from knurlogic.cluster import launch
-    for name in ("PREPARED", "ENDED", "SPECS", "_PROCS", "_PEER_OK",
-                 "_PEER_BOOT"):
+    for name in ("PREPARED", "ENDED", "SPECS", "_PROCS", "_PEER_BOOT"):
         monkeypatch.setattr(launch, name, {})
     for name in ("_STOPPING", "FOLLOWING", "_PEER_SLOW"):
         monkeypatch.setattr(launch, name, set())

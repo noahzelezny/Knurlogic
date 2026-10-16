@@ -55,10 +55,12 @@ Every page that runs a rank watches it (cluster/jobs.py); any rank dying or
 stalling stops the whole job: its own ranks SIGTERM then SIGKILL, and
 a `Stop` message to every other page of the job. It also asks the
 job's other pages (`JobState`) whether they still run their
-ranks: one unreachable (the peer list's own clock, from the status GET
-every peer answers), or answering without its rank, for `PEER_GONE_S`
--- or saying the job ended there -- stops the job here too (a rank idle in
-a collective on a peer that vanished never exits and is never "stalled").
+ranks: one answering without its rank, or with it exited, or saying the job
+ended there, stops the job here too, at once. One that does not answer
+says nothing: a page is not its rank. A peer machine that vanishes is
+caught by the ranks themselves -- keepalive on the bell, which closes the
+ring -- since a rank idle in a collective on it never exits and is never
+"stalled" (docs/design/liveness.md).
 
 A stop is done when the ranks' processes are gone, not when they were
 signalled: until then their records stay, marked stopping. A prepare

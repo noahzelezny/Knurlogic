@@ -38,12 +38,12 @@ class DenyGate:
 
 
 def fast():
-    from knurlogic.cluster import jobs, peers, recovery, transport
+    from knurlogic.cluster import peers, recovery, transport
     recovery.BACKOFF_S = (0.5, 1.0, 2.0)
     recovery.TICK_S = 0.5
     peers.REFRESH_S = 0.5
     peers.ANSWERING_S = 1.5
-    jobs.PEER_GONE_S = 4.0
+    peers.GONE_S = 4.0
     transport.TIMEOUTS["status"] = 1.0
 
 

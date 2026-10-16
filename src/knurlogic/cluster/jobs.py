@@ -34,9 +34,6 @@ GRACE_S = 25.0
 #: 50 GiB of Metal memory takes seconds to give it back, and a job is not
 #: stopped -- nor its memory free -- until its pid is
 REAP_S = 30.0
-#: a peer page of a job unreachable (or not running its rank) this long:
-#: the job is gone, and this page's ranks go too
-PEER_GONE_S = 20.0
 #: the self-heal deadline set after load, when the fork is present
 JACCL_TIMEOUT_MS = 60000
 #: a job id: what the coordinator mints; nothing else is a path part
@@ -103,6 +100,8 @@ class Marker:
             turn = fields.get("turn")
             if turn and turn != self.doc.get("turn"):
                 self._last = 0.0          # so is a load-order turn
+            if fields.get("peer_gone"):
+                self._last = 0.0          # and a peer machine gone silent
             self.doc.update({k: v for k, v in fields.items()
                              if v is not None})
             now = time.time()
@@ -168,9 +167,16 @@ class Watch:
             ms = r.get("machines") or []
             who = r.get("machine") or (ms[rank] if rank < len(ms)
                                        else None) or "this machine"
+            m = read(job, rank) or {}
+            if m.get("peer_gone") and m.get("pid") == r.get("pid"):
+                # the rank's bell watcher saw a peer machine go silent
+                # (engine/split/liveness): evidence, and the only way out
+                # for a rank blocked in a transfer it cannot unblock (jaccl).
+                # Read before the exit: the rank leaves right after, and the
+                # machine, not the exit, is why
+                return f"rank {rank} on {who}: {m['peer_gone']}", "machine"
             if not alive(int(r["pid"])):
                 return f"rank {rank} on {who} (pid {r['pid']}) exited", None
-            m = read(job, rank) or {}
             phase = m.get("phase") or "joining"
             since = next((v for v in (m.get("since"), r.get("t"))
                           if v is not None), now)

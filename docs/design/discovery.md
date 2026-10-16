@@ -89,7 +89,7 @@ Silence is the failure mode, so every peer has a state:
 |---|---|
 | `answering` | status heard within 6 s |
 | `stale` | silent 6..20 s: shown, no new jobs placed |
-| `gone` | silent 20 s or more (`jobs.PEER_GONE_S`, a job with a rank there stops), or never heard, with a `problem`; a remembered peer shows how long it has been gone ("asleep?") and is never dropped silently |
+| `gone` | silent 20 s or more (`peers.GONE_S`; shown only -- a page's silence never stops a job, docs/design/liveness.md), or never heard, with a `problem`; a remembered peer shows how long it has been gone ("asleep?") and is never dropped silently |
 | `version_mismatch` | protocol major differs (or none), or status schema differs; the `problem` says which machine to update |
 
 **A blocked machine learns it is blocked from its peers.** Its outbound

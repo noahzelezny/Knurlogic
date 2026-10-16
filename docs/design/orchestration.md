@@ -124,8 +124,9 @@ compatibility is not build compatibility.
   -- `boot_id`, version -- rides the status doc, and no handler is registered
   for `Hello`/`Heartbeat` on the message route). States per peer:
   `answering` (heard within 3 intervals = 6 s), `stale` (6..20 s silent:
-  shown, no new jobs placed), `gone` (>20 s, `PEER_GONE_S`: a job that has a
-  rank there stops). `version_mismatch` is a fourth, separate state.
+  shown, no new jobs placed), `gone` (>20 s, `peers.GONE_S`: shown on the
+  card; a page's silence never stops a job, docs/design/liveness.md).
+  `version_mismatch` is a fourth, separate state.
   Liveness stays on the status GET (no separate route, and not behind the
 Thunderbolt/`--peer` gate: a Wi-Fi or Ethernet Bonjour peer stays
 `answering`, it just takes no job); the status doc carries `boot_id` and
@@ -155,10 +156,13 @@ status timeout 1.5 s; `answering` is `peers.ANSWERING_S` = 6 s.
   No pairwise assumptions: loops run over `nodes[]`; `failover`/`_pair`
   keep a bad-cable record per pair but the relaunch picks the next cable for
   the failing pair only, for any world size.
-- **Coordinator's page dies**: the job stops. The other pages see it `gone`
-  within 20 s and stop (what `peer_verdict` does today for any page); its own
-  rank, in its own session, outlives the page, and a restarted page adopts it
-  (`launch.start_watching_existing`). No takeover.
+- **Coordinator's page dies, its rank runs on**: nothing stops. The rank, in
+  its own session, outlives the page, and a restarted page adopts it
+  (`launch.start_watching_existing`); a page's silence is not evidence
+  (docs/design/liveness.md).
+- **Coordinator's machine dies**: the job stops. Its rank's death -- or its
+  kernel's silence on the bell -- fails every other rank over the ring, and
+  each page stops the job on its own rank's exit. No takeover.
   Reason: the coordinator is also a rank's machine, so its death already
   breaks the collective; a takeover needs election, a replicated recovery
   record and a restart of the ranks anyway, so it buys nothing over a relaunch.
@@ -166,8 +170,9 @@ status timeout 1.5 s; `answering` is `peers.ANSWERING_S` = 6 s.
   when that page returns; if the machine never returns, the job stays
   stopped and the `Failure(kind=machine)` is shown on every surviving page.
   A non-coordinator may issue `Stop` (Unload from any page, as today).
-- **A rank's machine drops** (heartbeat `gone`, or its page answers without the
-  rank): every other page stops the job within `PEER_GONE_S`; recovery rules
+- **A rank's machine drops**: the ranks' bell watchers see its kernel go
+  silent (keepalive, about 30 s) and close the ring; a page that answers
+  without the rank, or with it `exited`, stops the job at once; recovery rules
   are today's (`recovery._tick_cluster`: `machine` kind waits for the node
   to be `answering`, relaunches the same order; `refusal` does not retry;
   `memory` after the user changes something). A stop completes when
@@ -257,9 +262,10 @@ states are now `answering`/`stale`/`gone`/`version_mismatch` (there is no
 - Heartbeat timeout: a paused fake page goes `answering -> stale -> gone` on
   the injected clock; resumed page returns to `answering`; new `boot_id`
   detected.
-- Coordinator death (kill the launching fake page at world 3, 4, 8): every
-  other page stops the job within `PEER_GONE_S`; restart resumes through
-  `restore()`.
+- Coordinator death (kill the launching fake page and its rank at world 3,
+  4, 8): every rank leaves over the ring (the fake ranks hold the real bell)
+  and every page stops the job; restart resumes through `restore()`.
+- A page alone dying, or redeployed: the job is kept.
 - Rank death (kill one rank, then one whole page, in a world of 4 and 8): all
   pages stop; `Failure.kind` is right; recovery relaunches in the same order.
 - Refusal in a world of 8 at rank 5: nothing starts anywhere, all prepared

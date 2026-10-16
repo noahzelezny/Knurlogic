@@ -6,9 +6,13 @@ no longer agree."""
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import socket
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from pathlib import Path
 
 import mlx.core as mx
 
@@ -54,9 +58,17 @@ class Link:
         #: line the ranks up over the bell before the next exchange (align):
         #: after joining, and after a parked rank wakes
         self.need_align = True
-        #: the ring failed (scheduler._ring_fatal): every later exchange or
-        #: align raises at once instead of waiting on a gone peer
+        #: the ring failed (scheduler._ring_fatal), or a peer machine went
+        #: silent (gone): every later exchange or align raises at once
+        #: instead of waiting on a gone peer
         self.dead = False
+        #: why a peer is gone (gone), "" otherwise
+        self.dead_why = ""
+        #: called once a peer is gone, from the bell watcher's thread: rank
+        #: 0's scheduler sets it to wake its idle loop (Scheduler.__init__)
+        self.on_dead: Callable[[], None] | None = None
+        #: the liveness.Watcher over the bell (watch_peers); None before
+        self.watcher = None
         #: time.monotonic() an exchange in progress began, None between
         #: exchanges: a stopping rank 0 does not leave inside one that is
         #: still moving (http.watch_ring), which tore the peer's half
@@ -105,11 +117,40 @@ class Link:
         for c in self.socks:
             c.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
+    def gone(self, why: str) -> None:
+        """A peer machine stopped answering (liveness.Watcher, which has
+        shut the ring sockets already): tell the page by the marker, and
+        wake rank 0's scheduler, whose loop then fails the ring on its own
+        thread -- an idle rank 0 is in no collective, so nothing else would
+        raise there."""
+        self.dead_why = why
+        self.dead = True
+        progress(peer_gone=why)
+        if self.on_dead is not None:
+            self.on_dead()
+
+    @contextmanager
+    def _bell_io(self, what: str) -> Iterator[None]:
+        """Every bell send and receive: any socket error becomes a
+        ConnectionError (a ring failure, scheduler.ring_error). With
+        keepalive, a dead peer machine surfaces here as TimeoutError or a
+        plain OSError (EHOSTUNREACH), which are neither."""
+        try:
+            yield
+        except ConnectionError:
+            raise
+        except OSError as e:
+            raise ConnectionError(
+                f"bell: {what}: the connection to the other rank failed "
+                f"({type(e).__name__}: {e})") from e
+
     def sleep(self) -> None:
         """A parked rank >= 1: wait, without spinning, for rank 0's bell."""
         if not self.socks:
             return
-        if self.socks[0].recv(1) != b"w":
+        with self._bell_io("waiting for rank 0's wake-up"):
+            got = self.socks[0].recv(1)
+        if got != b"w":
             raise ConnectionError("rank 0 left while this rank was parked")
         self.need_align = True
 
@@ -126,28 +167,37 @@ class Link:
         says it is here; rank 0, once all have, says go. A dead peer is a
         ConnectionError (its socket closes)."""
         if self.dead:
-            raise Desync("the ring between the ranks failed")
+            raise Desync(self.dead_why or "the ring between the ranks failed")
         if not self.socks:
             return
         if self.rank == 0:
             for c in self.socks:
                 c.settimeout(timeout)
-                try:
-                    got = _recv_exact(c, 1)
-                except TimeoutError as e:
-                    raise ConnectionError(
-                        f"a rank did not line up within {timeout:.0f} s") from e
-                finally:
-                    c.settimeout(None)
+                with self._bell_io("lining up"):
+                    try:
+                        got = _recv_exact(c, 1)
+                    except TimeoutError as e:
+                        if timeout is not None and not e.errno:
+                            # our own wait ran out (no errno); one with an
+                            # errno is keepalive giving up on the machine
+                            raise ConnectionError(
+                                f"a rank did not line up within "
+                                f"{timeout:.0f} s") from e
+                        raise
+                    finally:
+                        c.settimeout(None)
                 if got != b"r":
                     raise ConnectionError("a rank left while the ranks were "
                                           "lining up")
-            for c in self.socks:
-                c.sendall(b"g")
+            with self._bell_io("lining up"):
+                for c in self.socks:
+                    c.sendall(b"g")
         else:
             c = self.socks[0]
-            c.sendall(b"r")
-            if _recv_exact(c, 1) != b"g":
+            with self._bell_io("lining up"):
+                c.sendall(b"r")
+                got = _recv_exact(c, 1)
+            if got != b"g":
                 raise ConnectionError("rank 0 left while the ranks were "
                                       "lining up")
         self.need_align = False
@@ -156,7 +206,7 @@ class Link:
         """-> (control rows, one per rank; the plan bytes or None)."""
         import time
         if self.dead:
-            raise Desync("the ring between the ranks failed")
+            raise Desync(self.dead_why or "the ring between the ranks failed")
         self.entered = time.monotonic()
         try:
             return self._exchange(over, payload)
@@ -166,8 +216,9 @@ class Link:
     def _exchange(self, over: int, payload: bytes | None):
         import numpy as np
         if self.parked:
-            for c in self.socks:
-                c.sendall(b"w")
+            with self._bell_io("waking the other ranks"):
+                for c in self.socks:
+                    c.sendall(b"w")
             self.parked = False
             self.need_align = True
         if self.need_align:
@@ -315,7 +366,6 @@ def bell_dial(host: str, port: int, nonce: int, rank: int, wait_s: float,
             last = e
             continue
         c.settimeout(None)
-        c.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
         logger.info("bell: rank %d connected to rank 0 at %s:%d (try %d)",
                     rank, host, port, tries)
         return c
@@ -352,12 +402,14 @@ def init(link_kind: str) -> Link:
             link.socks = early
             for c in link.socks:
                 c.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            watch_peers(link, backend)
             link.align()
             link.need_align = True
             link.barrier()
         else:
             link.barrier()
             link.bell()
+            watch_peers(link, backend)
     finally:
         if armed:
             os.environ["JACCL_COLLECTIVE_TIMEOUT_MS"] = "0"
@@ -365,6 +417,28 @@ def init(link_kind: str) -> Link:
     from . import weights
     weights.CURRENT["link"] = link      # its bell carries the load order
     return link
+
+
+def watch_peers(link: Link, backend: str) -> None:
+    """Keepalive on every bell socket, and a liveness.Watcher over them
+    that shuts this rank's ring sockets (found only on the TCP ring: jaccl
+    has none) and calls `link.gone` when a peer machine goes silent."""
+    from . import liveness
+    for c in link.socks:
+        liveness.keepalive(c)
+    peers = range(1, link.size) if link.rank == 0 else [0]
+    ring: list = []
+    if backend == "ring":
+        rows = json.loads(Path(os.environ["MLX_HOSTFILE"]).read_text())
+        hosts = [h for row in rows for h in row]
+        ring = liveness.ring_sockets(hosts)
+        if not ring:
+            logger.error("liveness is not armed: none of mlx's ring sockets "
+                         "was found among this process's files (has mlx "
+                         "changed how it opens them?); a peer machine that "
+                         "powers off can leave this rank blocked")
+    link.watcher = liveness.Watcher(dict(zip(peers, link.socks)), ring,
+                                    link.gone).start()
 
 
 #: how long ranks wait for each other on the bell before joining the ring
@@ -404,7 +478,6 @@ def bell_early():
 def _rank0_host() -> str:
     """Rank 0's address on the ring: the jaccl coordinator's host, or the
     ring hostfile's first entry."""
-    import json
     coord = os.environ.get("MLX_JACCL_COORDINATOR")
     if coord:
         return coord.rsplit(":", 1)[0]

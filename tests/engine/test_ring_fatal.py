@@ -201,3 +201,22 @@ def test_rank_0_leaves_non_zero_after_the_ring_fails(monkeypatch):
     H.watch_ring(s, _Host(), exit_after=0.0, stop_within=3.0)
     s.on_ring_failed(split_link.Desync("x"))
     assert exited.wait(5) and code == [1] and s.waited == [3.0]
+
+
+def test_a_peer_gone_wakes_an_idle_rank_0_into_ending_the_job():
+    """The bell watcher (split/liveness) runs on its own thread: an idle
+    rank 0 is in no collective, so nothing raises there. It marks the link
+    and wakes the loop, whose next tick ends the job on this thread."""
+    ring = _Ring()
+    ring.link = split_link.Link(type("G", (), {"rank": lambda s: 0,
+                                               "size": lambda s: 2})())
+    s = _sched(ring)
+    assert ring.link.on_dead is not None
+    s._wake.set()                        # so the healthy idle tick returns
+    s._loop_once()
+    assert s.ring_failed is None
+    ring.link.gone("the machine holding rank 1 stopped answering")
+    assert s._wake.is_set()
+    s._loop_once()
+    assert isinstance(s.ring_failed, split_link.Desync) and s._stop
+    assert "rank 1 stopped answering" in str(s.ring_failed)

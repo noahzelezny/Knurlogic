@@ -383,6 +383,30 @@ def test_stop_tells_only_pages_this_page_knows(cache, monkeypatch):
     C.ENDED.pop("ab12cd34ef567890", None)
 
 
+def test_stop_tells_the_other_pages_before_it_stops_its_own_ranks(
+        cache, monkeypatch):
+    """A rank stopped here before its peers hear of it fails their ranks'
+    ring ("[ring] connection to a peer was lost"): their pages would record
+    a crash, and recovery relaunch, a job that was asked to stop."""
+    from knurlogic.cluster.peers import Peer
+    job = "ab12cd34ef567890"
+    monkeypatch.setattr(identity, "identity", lambda: {"id": "me"})
+    monkeypatch.setattr(page_nodes, "PEERS", SimpleNamespace(all=lambda: [
+        Peer(host="192.0.2.2", port=8765, id="b", name="B",
+             state="answering")]))
+    C.SPECS[job] = spec(nodes=[{"rank": 0, "id": "me", "name": "A"},
+                               {"rank": 1, "id": "b", "name": "B"}])
+    J.save_registry({f"{job}/0": {"job": job, "rank": 0, "pid": 4242}})
+    monkeypatch.setattr(C, "_alive", lambda j, pid: True)
+    order = []
+    monkeypatch.setattr(J, "terminate", lambda pids, **kw: order.append(
+        "own ranks") or [])
+    C.stop(job, post=lambda page, kind, d: order.append(kind), grace=0)
+    assert order == ["Stop", "own ranks"]
+    C.ENDED.pop(job, None)
+    J.save_registry({})
+
+
 # --- the stall verdict -------------------------------------------------------
 
 def test_verdict_idle_is_not_stalled_but_busy_and_still_is(monkeypatch):
@@ -400,6 +424,28 @@ def test_verdict_idle_is_not_stalled_but_busy_and_still_is(monkeypatch):
     assert "stalled" in why
     moved = {**busy, "step": 6}
     assert w.check("j", ranks, alive, now=2e6, read=lambda j, r: moved)[0] == ""
+
+
+def test_verdict_a_rank_whose_peer_machine_went_silent(tmp_path, monkeypatch):
+    """The rank's bell watcher (engine/split/liveness) marks peer_gone; the
+    page stops the job on it -- the way out for a rank blocked in a transfer
+    nothing else can unblock (jaccl) -- and the mark is written at once."""
+    w = J.Watch()
+    ranks = [{"rank": 0, "pid": 7, "machine": "A"}]
+    gone = {"phase": "ready", "busy": True, "pid": 7,
+            "peer_gone": "the machine holding rank 1 stopped answering"}
+    why, kind = w.check("j", ranks, lambda p: True, now=0,
+                        read=lambda j, r: gone)
+    assert why == ("rank 0 on A: the machine holding rank 1 stopped "
+                   "answering") and kind == "machine"
+    # an earlier process's mark (a reused marker file) is not this rank's
+    assert w.check("j", ranks, lambda p: True, now=0,
+                   read=lambda j, r: {**gone, "pid": 8})[0] == ""
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    m = J.Marker("ab12cd34ef567890", 0)
+    m._last = time.time()                 # just written: a plain set waits
+    m.set(peer_gone="the machine holding rank 1 stopped answering")
+    assert (J.read_marker("ab12cd34ef567890", 0) or {}).get("peer_gone")
 
 
 def test_verdict_a_long_prefill_is_one_step_of_many_chunks_not_a_stall():
@@ -451,7 +497,8 @@ def test_a_prefill_chunk_bumps_the_marker(tmp_path, monkeypatch):
 def test_verdict_dead_pid_and_never_joined():
     w = J.Watch()
     ranks = [{"rank": 1, "pid": 7, "machine": "B", "t": 0}]
-    assert "exited" in w.check("j", ranks, lambda p: False, now=1)[0]
+    assert "exited" in w.check("ab12cd34ef567890", ranks, lambda p: False,
+                               now=1)[0]
     why = w.check("j", ranks, lambda p: True, now=J.JOIN_S + 5,
                   read=lambda j, r: {"phase": "joining", "since": 0})[0]
     assert "not joined" in why
@@ -660,7 +707,8 @@ def test_kill_rank_0_and_its_page_has_rank_1_killed(two_pages):
 
 def test_the_verdict_names_a_ranks_machine_from_the_job_when_unrecorded():
     w = J.Watch()
-    why = w.check("j", [{"rank": 1, "pid": 5, "machines": ["A", "B"]}],
+    why = w.check("ab12cd34ef567890",
+                  [{"rank": 1, "pid": 5, "machines": ["A", "B"]}],
                   lambda p: False, now=1)[0]
     assert "rank 1 on B " in why
 
@@ -1128,164 +1176,123 @@ def test_a_stop_whose_rank_outlives_the_reap_is_finished_by_the_watcher(
     C.ENDED.clear()
 
 
-# --- a peer that vanishes takes the job with it ------------------------------
+# --- a peer's page: what it says is evidence, its silence is not ------------
+# docs/design/liveness.md: a page is not its rank (ranks outlive a page
+# restart), so only what a page reports stops a job; a peer machine that
+# goes silent is caught by the ranks' bell watchers (engine/split/liveness).
 
-def test_peer_verdict_counts_an_unreachable_page_for_peer_gone_s(
-        monkeypatch):
-    monkeypatch.setattr(C, "_PEER_OK", {})
-    job = "ab12cd34ef567890"
-    recs = [{"job": job, "rank": 0, "pid": 1, "t": 0.0,
-             "nodes": [{"rank": 0, "id": "a", "name": "M4"},
-                       {"rank": 1, "id": "b", "name": "M3"}]}]
-
-    def down(page, j):
-        raise OSError("no route to host")
-    kw = dict(pages={"b": "192.0.2.1:8765"}, me="a",
-              reach=lambda page: False)
-    assert C.peer_verdict(job, recs, now=100, ask=down, **kw) == ""
-    assert C.peer_verdict(job, recs, now=110, ask=down, **kw) == ""
-    why = C.peer_verdict(job, recs, now=100 + J.PEER_GONE_S, ask=down, **kw)
-    assert "M3's page has not answered" in why and "20 s" in why
-    # an answer with the rank running resets the clock
-    up = (lambda page, j: {"ranks_here": [1]})
-    assert C.peer_verdict(job, recs, now=130, ask=up, **kw) == ""
-    assert C.peer_verdict(job, recs, now=145, ask=down, **kw) == ""
-    # answering without the rank counts the same as not answering
-    gone = (lambda page, j: {"ranks_here": [], "prepared": False})
-    assert "no longer runs its rank" in C.peer_verdict(
-        job, recs, now=151, ask=gone, **kw)
-    # a page that says the job ended there: at once, with its reason
-    ended = (lambda page, j: {"ranks_here": [], "ended": "rank 1 exited"})
-    assert C.peer_verdict(job, recs, now=131, ask=ended, **kw) \
-        == "M3 stopped the job: rank 1 exited"
-    # a peer this page no longer knows is unreachable too
-    monkeypatch.setattr(C, "_PEER_OK", {})
-    assert C.peer_verdict(job, recs, now=0, ask=up, pages={}, me="a") == ""
-    assert "M3" in C.peer_verdict(job, recs, now=J.PEER_GONE_S, ask=up,
-                                  pages={}, me="a")
+JOB = "ab12cd34ef567890"
+RECS = [{"job": JOB, "rank": 0, "pid": 1, "t": 0.0,
+         "nodes": [{"rank": 0, "id": "a", "name": "M4"},
+                   {"rank": 1, "id": "b", "name": "M3"}]}]
+PAGES = dict(pages={"b": "192.0.2.1:8765"}, me="a")
 
 
-def test_a_slow_page_whose_machine_is_there_keeps_the_job(monkeypatch):
-    """2026-10-04: the M4 page was slow to answer for 28 s while both ranks
-    ran and the ring was fine; the M3 stopped the job. A page that does not
-    answer while its machine accepts a connection is slow, not gone."""
-    monkeypatch.setattr(C, "_PEER_OK", {})
-    monkeypatch.setattr(C, "_PEER_SLOW", set())
+def _down(page, j):
+    raise C.transport.PeerUnreachable("timed out")
+
+
+def test_a_page_that_does_not_answer_never_stops_a_job(monkeypatch, caplog):
+    """2026-10-04: a slow M4 page (28 s) stopped a job whose ranks were
+    fine; 2026-10-15: a page redeploy did. However long a page is silent
+    -- or unknown to this page -- the job is kept, with one warning."""
     monkeypatch.setattr(C, "peers_fn", list)
-    job = "ab12cd34ef567890"
-    recs = [{"job": job, "rank": 0, "pid": 1, "t": 0.0,
-             "nodes": [{"rank": 0, "id": "a", "name": "M4"},
-                       {"rank": 1, "id": "b", "name": "M3"}]}]
-
-    def down(page, j):
-        raise C.transport.PeerUnreachable("timed out")
-    there = dict(pages={"b": "192.0.2.1:8765"}, me="a", reach=lambda p: True)
-    for t in (100, 130, 100 + 10 * J.PEER_GONE_S):
-        assert C.peer_verdict(job, recs, now=t, ask=down, **there) == ""
-    # its machine stops accepting too (off, unplugged, page died): gone
-    # PEER_GONE_S after the last time it was there
-    gone = dict(there, reach=lambda p: False)
-    t0 = 100 + 10 * J.PEER_GONE_S
-    assert C.peer_verdict(job, recs, now=t0 + 5, ask=down, **gone) == ""
-    assert "has not answered" in C.peer_verdict(
-        job, recs, now=t0 + J.PEER_GONE_S, ask=down, **gone)
-    # a page that answers without the rank still stops it, reachable or not
-    monkeypatch.setattr(C, "_PEER_OK", {})
-    norank = (lambda page, j: {"ranks_here": [], "prepared": False})
-    assert C.peer_verdict(job, recs, now=0, ask=norank, **there) == ""
-    assert "no longer runs its rank" in C.peer_verdict(
-        job, recs, now=J.PEER_GONE_S, ask=norank, **there)
+    with caplog.at_level("WARNING"):
+        for _ in range(5):
+            assert C.peer_verdict(JOB, RECS, ask=_down, **PAGES) == ("", None)
+        assert C.peer_verdict(JOB, RECS, ask=_down, pages={},
+                              me="a") == ("", None)
+    assert sum("is not evidence" in r.message for r in caplog.records) == 1
 
 
-def test_page_up_is_the_machine_accepting_not_the_page_answering():
-    """A listening socket nobody accepts from (a page whose handlers are
-    stuck) still connects through the kernel's backlog; a closed port does
-    not."""
-    srv = socket.socket()
-    srv.bind(("127.0.0.1", 0))
-    srv.listen(8)
-    port = srv.getsockname()[1]
-    try:
-        assert C._page_up(f"127.0.0.1:{port}", timeout=1.0)
-    finally:
-        srv.close()
-    assert not C._page_up(f"127.0.0.1:{port}", timeout=1.0)
+def test_peer_verdict_acts_at_once_on_what_a_page_says(monkeypatch):
+    monkeypatch.setattr(C, "peers_fn", list)
+
+    def says(doc):
+        return lambda page, j: doc
+    assert C.peer_verdict(JOB, RECS, ask=says({"ranks_here": [1]}),
+                          **PAGES) == ("", None)
+    # preparing (from Prepare until its registry record exists): held
+    assert C.peer_verdict(JOB, RECS, ask=says({"ranks_here": [],
+                                               "prepared": True}),
+                          **PAGES) == ("", None)
+    why, kind = C.peer_verdict(JOB, RECS, ask=says(
+        {"ranks_here": [], "prepared": False}), **PAGES)
+    assert "M3 no longer runs its rank" in why and kind == "machine"
+    # a rank that exited there: that page's own reason and kind
+    why, kind = C.peer_verdict(JOB, RECS, ask=says(
+        {"ranks_here": [], "exited": "rank 1 on M3 (pid 9) exited: out of "
+         "memory: OOM", "exited_kind": "memory"}), **PAGES)
+    assert why.startswith("M3: rank 1 on M3") and kind == "memory"
+    # the job ended there: its reason
+    assert C.peer_verdict(JOB, RECS, ask=says(
+        {"ranks_here": [], "ended": "rank 1 exited"}), **PAGES) \
+        == ("M3 stopped the job: rank 1 exited", None)
+    # with the kind that page recorded: recovery treats it the same here
+    assert C.peer_verdict(JOB, RECS, ask=says(
+        {"ranks_here": [], "ended": "rank 1 exited: its ring lost a peer",
+         "ended_kind": "machine"}), **PAGES)[1] == "machine"
 
 
-def test_watch_keeps_a_job_whose_peer_page_is_slow(monkeypatch):
-    """The watcher end to end: ranks alive here, the peer page silent but
-    its machine there -> nothing stopped, so recovery has nothing to
-    relaunch; a rank dead here -> stopped as before."""
+def test_watch_keeps_a_job_whose_peer_page_is_silent(monkeypatch):
+    """The watcher end to end: ranks alive here, the peer page silent ->
+    nothing stopped, so recovery has nothing to relaunch; a rank dead here
+    -> stopped as before."""
     from knurlogic.cluster import recovery as R
-    monkeypatch.setattr(C, "_PEER_OK", {})
-    monkeypatch.setattr(C, "_PEER_SLOW", set())
-    job = "ab12cd34ef567890"
-    recs = [{"job": job, "rank": 0, "pid": 4242, "t": 990.0,
-             "nodes": [{"rank": 0, "id": "a", "name": "M4"},
-                       {"rank": 1, "id": "b", "name": "M3"}]}]
-    monkeypatch.setattr(J, "by_job", lambda: {job: recs})
+    recs = [dict(RECS[0], pid=4242, t=990.0)]
+    monkeypatch.setattr(J, "by_job", lambda: {JOB: recs})
     monkeypatch.setattr(C, "_peer_pages", lambda: {"b": "192.0.2.1:8765"})
     monkeypatch.setattr(C, "peers_fn", list)
-    monkeypatch.setattr(C, "_page_up", lambda page, timeout=2.0: True)
-
-    def down(page, j):
-        raise C.transport.PeerUnreachable("timed out")
-    monkeypatch.setattr(C, "_ask_job", down)
+    monkeypatch.setattr(C, "_ask_job", _down)
     from knurlogic.machine import identity
     monkeypatch.setattr(identity, "identity", lambda: {"id": "a"})
     stops = []
     monkeypatch.setattr(C, "stop", lambda job, **kw: stops.append(kw))
     alive = {"v": True}
     monkeypatch.setattr(C, "_alive", lambda j, pid: alive["v"])
-    for t in (1000.0, 1010.0, 1000.0 + 5 * J.PEER_GONE_S):
+    # (under the join deadline: no marker here, so the rank reads as joining)
+    for t in (1000.0, 1010.0, 1000.0 + J.JOIN_S - 20):
         assert C.watch_once(now=t) == []
-    assert stops == [] and job not in R.MODELS
+    assert stops == [] and JOB not in R.MODELS
     alive["v"] = False
-    out = C.watch_once(now=1110.0)
-    assert out and out[0][0] == job and stops
+    out = C.watch_once(now=1000.0 + J.JOIN_S - 10)
+    assert out and out[0][0] == JOB and stops
 
 
-def test_peer_verdict_reads_the_peer_lists_clock_and_boot_id(monkeypatch):
-    """One clock: a page the peer list heard lately is not gone however the
-    JobState ask fails; a new boot_id holding no rank is a restart, at once,
-    and one still holding its rank is a restarted page whose rank lived on."""
+def test_peer_verdict_reads_the_peer_lists_boot_id(monkeypatch):
+    """A new boot_id holding no rank is a restart; one still holding its
+    rank is a restarted page whose rank lived on."""
     from knurlogic.cluster.peers import Peer
-    monkeypatch.setattr(C, "_PEER_OK", {})
-    monkeypatch.setattr(C, "_PEER_BOOT", {})
     rec = Peer(host="192.0.2.1", port=8765, id="b", name="M3",
                state="answering", last_seen=100.0, boot_id="one")
     monkeypatch.setattr(C, "peers_fn", lambda: [rec])
-    job = "ab12cd34ef567890"
-    recs = [{"job": job, "rank": 0, "pid": 1, "t": 0.0,
-             "nodes": [{"rank": 0, "id": "a", "name": "M4"},
-                       {"rank": 1, "id": "b", "name": "M3"}]}]
-    kw = dict(pages={"b": "192.0.2.1:8765"}, me="a")
-
-    def down(page, j):
-        raise OSError("timed out")
     up = (lambda page, j: {"ranks_here": [1]})
-    assert C.peer_verdict(job, recs, now=100, ask=up, **kw) == ""
-    # JobState fails, but the status GET was heard at 130: still not gone
-    rec.last_seen = 130.0
-    assert C.peer_verdict(job, recs, now=140, ask=down, **kw) == ""
-    # the status GET goes quiet too: gone PEER_GONE_S after the last word
-    assert "has not answered" in C.peer_verdict(
-        job, recs, now=130 + J.PEER_GONE_S, ask=down, **kw)
-    # a new process answering: its rank went with the old one
-    monkeypatch.setattr(C, "_PEER_OK", {})
-    assert C.peer_verdict(job, recs, now=200, ask=up, **kw) == ""
+    assert C.peer_verdict(JOB, RECS, ask=up, **PAGES) == ("", None)
     rec.boot_id = "two"
     # the page restarted, its rank (its own session) did not: kept
-    assert C.peer_verdict(job, recs, now=201, ask=up, **kw) == ""
-    assert C._PEER_BOOT[(job, "b")] == "two"
-    # the same process later answering without the rank is not a restart:
-    # it runs the PEER_GONE_S clock
-    assert C.peer_verdict(job, recs, now=202, ask=(
-        lambda page, j: {"ranks_here": [], "prepared": False}), **kw) == ""
+    assert C.peer_verdict(JOB, RECS, ask=up, **PAGES) == ("", None)
+    assert C._PEER_BOOT[(JOB, "b")] == "two"
     rec.boot_id = "three"
-    why = C.peer_verdict(job, recs, now=203, ask=(
-        lambda page, j: {"ranks_here": [], "prepared": False}), **kw)
+    why, _ = C.peer_verdict(JOB, RECS, ask=(
+        lambda page, j: {"ranks_here": [], "prepared": False}), **PAGES)
     assert "M3 restarted" in why
+
+
+def test_job_state_says_why_a_rank_here_exited(cache, monkeypatch):
+    """A rank whose process is gone, before this page's watcher stopped the
+    job: JobState carries the watcher's own reason, so a peer page stops the
+    job with it at once -- whether or not this page's watcher runs."""
+    job = "41648583878fcdfc"
+    log = cache / "rank1.log"
+    log.write_text("RuntimeError: [metal::malloc] Resource limit exceeded\n")
+    J.save_registry({f"{job}/1": {"job": job, "rank": 1, "pid": 999999,
+                                  "machine": "M3", "log": str(log)}})
+    monkeypatch.setattr(C, "_alive", lambda j, pid: False)
+    doc = C.job_state(job)
+    assert doc["ranks_here"] == []
+    assert doc["exited"].startswith("rank 1 on M3 (pid 999999) exited")
+    assert doc["exited_kind"] == C.exit_reason("x", [{"log": str(log)}])[1]
+    J.save_registry({})
 
 
 def test_the_job_route_says_what_this_page_runs(two_pages):
@@ -1296,24 +1303,19 @@ def test_the_job_route_says_what_this_page_runs(two_pages):
     assert code == 400
 
 
-def test_a_vanished_peer_page_has_the_idle_rank_0_torn_down(
+def test_a_vanished_peer_page_keeps_the_job(
         two_pages, monkeypatch):
-    """One machine reboots; the other's rank 0 is idle in a collective, so
-    no stall verdict. Its page watches the job's other pages too, not only
-    its own ranks."""
+    """B's page process dies (a redeploy, a crash) while its rank, in its
+    own session, runs on: A keeps the job however long B's page is gone. A
+    machine that dies is the ranks' bell watchers' to catch."""
     p = two_pages
-    monkeypatch.setattr(J, "PEER_GONE_S", 1.0)
     assert C.watch_once() == []                 # B answers: healthy
     p.page_b.kill()                             # B's page is gone
     p.page_b.wait()
-    assert C.watch_once() == []                 # the clock starts
-    time.sleep(1.2)
-    stopped = C.watch_once()
-    assert stopped and stopped[0][0] == p.job
-    assert "B's page has not answered" in stopped[0][1]
-    assert not alive(p.rank0["pid"])
-    ended = [d for d in C.jobs_document() if d["job"] == p.job]
-    assert ended and ended[0]["phase"] == "stopped"
+    for _ in range(3):
+        assert C.watch_once() == []
+        time.sleep(0.5)
+    assert alive(p.rank0["pid"])
 
 
 def test_a_peer_page_that_stopped_the_job_has_this_one_stop_too(
@@ -1321,7 +1323,6 @@ def test_a_peer_page_that_stopped_the_job_has_this_one_stop_too(
     """B's page (in its own process) watches A's: A forgetting the job
     without telling B is caught from B's side."""
     p = two_pages
-    monkeypatch.setattr(J, "PEER_GONE_S", 0.5)
     # A drops its ranks without propagating: B must notice by itself
     C.stop(p.job, reason="rank 0 on A exited", propagate=False, grace=1)
     assert wait(lambda: not alive(p.rank1["pid"]), 30)
@@ -1351,6 +1352,10 @@ def test_link_init_failure_reads_jaccl_and_ring_lines():
         "with errno 96\n")
     assert C.link_init_failure("[ring] Couldn't connect (error: 61)")
     assert C.link_init_failure("rank 1 exited") == ""
+    # a running peer that died is not a link that failed to come up: the
+    # job must not move to another cable, and recovery waits for machines
+    lost = "RuntimeError: [ring] connection to a peer was lost"
+    assert C.link_init_failure(lost) == ""
 
 
 def test_a_failing_cable_goes_last_for_that_pair_only(monkeypatch):
@@ -1610,6 +1615,67 @@ def test_a_retried_start_answers_started_again(cache, monkeypatch):
             p.wait()
         C._PROCS.clear()
         J.save_registry({})
+
+
+def test_a_start_stays_prepared_until_its_rank_is_recorded(cache,
+                                                          monkeypatch):
+    """A peer page asking JobState while this page's Start is under way
+    (waiting on an exiting rank, spawning) must see the job held: with no
+    clock in peer_verdict, "not prepared, no rank" stops the job at once
+    (docs/design/liveness.md). A Start retried meanwhile spawns nothing."""
+    monkeypatch.setattr(C, "_local_info",
+                        lambda: info("Apple M3 Ultra", "192.0.2.2"))
+    monkeypatch.setattr(C, "_ensure_watcher", lambda: None)
+    job = "db0cb292aefeba55"
+    assert prep(spec(job=job))[1]["ok"]
+    seen, procs, go = [], [], threading.Event()
+
+    def spawn(cmd, **kw):
+        seen.append(C.job_state(job))
+        go.wait(10)
+        procs.append(subprocess.Popen(["sleep", "30"]))
+        return procs[-1]
+    out: dict = {}
+    first = threading.Thread(target=lambda: out.setdefault(
+        "first", C.start(job, spawn=spawn, wait_s=0.5)))
+    retry = threading.Thread(target=lambda: out.setdefault(
+        "retry", C.start(job, spawn=spawn, wait_s=0.5)))
+    try:
+        first.start()
+        assert wait(lambda: seen, 10)
+        assert seen[0]["prepared"] and not seen[0]["ranks_here"]
+        retry.start()
+        time.sleep(0.2)
+        go.set()
+        first.join(10)
+        retry.join(10)
+        assert out["first"][0] == 200 and out["retry"][0] == 200
+        assert len(procs) == 1
+        assert out["retry"][1]["pid"] == out["first"][1]["pid"]
+        doc = C.job_state(job)
+        assert not doc["prepared"] and doc["ranks_here"] == [1]
+        assert job not in C.PREPARED
+    finally:
+        go.set()
+        for p in procs:
+            p.kill()
+            p.wait()
+        C._PROCS.clear()
+        J.save_registry({})
+
+
+def test_a_start_that_fails_to_spawn_is_no_longer_prepared(cache,
+                                                           monkeypatch):
+    monkeypatch.setattr(C, "_local_info",
+                        lambda: info("Apple M3 Ultra", "192.0.2.2"))
+    job = "db0cb292aefeba55"
+    assert prep(spec(job=job))[1]["ok"]
+
+    def spawn(cmd, **kw):
+        raise OSError("no such file")
+    code, out = C.start(job, spawn=spawn, wait_s=0.5)
+    assert code == 500 and "no such file" in out["error"]
+    assert job not in C.PREPARED and not C.job_state(job)["prepared"]
 
 
 def test_failure_kind_is_read_before_the_wording():

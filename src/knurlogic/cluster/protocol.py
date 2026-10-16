@@ -226,6 +226,10 @@ class JobState(Body):
     processes: list = field(default_factory=list)
     ended: str | None = None
     ended_kind: str | None = None
+    #: a rank here whose process exited before this page stopped the job:
+    #: why (its log's words), and the recovery kind
+    exited: str | None = None
+    exited_kind: str | None = None
 
 
 @_register

@@ -306,7 +306,7 @@ def live(tmp_path, answers, **kw):
 
 
 def test_a_silent_peer_goes_answering_stale_gone_and_comes_back(tmp_path):
-    from knurlogic.cluster import jobs
+    from knurlogic.cluster import peers
     up = {"up": True}
     ps, clock, _ = live(tmp_path, up)
     ps.refresh()
@@ -314,7 +314,7 @@ def test_a_silent_peer_goes_answering_stale_gone_and_comes_back(tmp_path):
     assert p.state == "answering"
     up["up"] = False
     for dt, want in ((2, "answering"), (5, "answering"), (6, "stale"),
-                     (19, "stale"), (jobs.PEER_GONE_S, "gone"), (60, "gone")):
+                     (19, "stale"), (peers.GONE_S, "gone"), (60, "gone")):
         clock.t = 1000.0 + dt
         ps.refresh()
         assert ps.all()[0].state == want, dt

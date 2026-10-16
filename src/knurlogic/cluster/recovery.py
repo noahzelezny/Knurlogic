@@ -68,7 +68,8 @@ REFUSAL_LINE_RX = re.compile(r"REFUSING[^\n]*(?:\n  - [^\n]*)*|"
 #: a machine that went away or stopped answering: wait for it
 MACHINE_RX = re.compile(
     r"has not answered|not a peer this page knows|is not a machine "
-    r"answering|did not answer|no longer runs its rank", re.IGNORECASE)
+    r"answering|did not answer|no longer runs its rank|stopped answering|"
+    r"ring lost a peer", re.IGNORECASE)
 #: a rank's or server's own output saying it ran out of memory
 MEMORY_LINE_RX = re.compile(
     r"[^\n]*(?:out of memory|OutOfMemory|Insufficient Memory|"
