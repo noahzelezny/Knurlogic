@@ -536,19 +536,22 @@ def _model_refusals(spec: dict, path, shape) -> tuple:
     return refusals, spec, sh
 
 
-def _share_check(spec: dict, shape: dict, budget: int, me: str,
+def _share_check(spec: dict, shape: dict, info: dict, me: str,
                  held) -> tuple:
     """(this rank's share in bytes, why it does not fit or ""): the weights
-    and the minimum step margin against the budget, less what other ranks
-    and servers hold here now."""
+    and the minimum step margin against `info`'s working set less what
+    other ranks and servers hold here now, and against the memory
+    available now (fit.share_refusal)."""
     from knurlogic.tuning.fit import rank_share_bytes, share_refusal
     counts = spec.get("layers") or []
     if spec["split"] != "tensor" and not counts:
         return 0, ""
     need = rank_share_bytes(shape, spec["rank"], counts or None)
-    if not (need and budget):
+    ws = int(info.get("working_set_bytes") or 0)
+    if not (need and ws):
         return need, ""
-    why = share_refusal(need, budget, (held or held_here)(spec["job"]))
+    why = share_refusal(need, ws, (held or held_here)(spec["job"]),
+                        int(info.get("available_bytes") or 0))
     return need, (f"rank {spec['rank']}'s share is {gib(need)} and {me}'s "
                   + why if why else "")
 
@@ -653,7 +656,7 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
     budget = budget_of(info)
     need, room_chunk = 0, None
     if not refusals:
-        need, why = _share_check(spec, sh, budget, me, held)
+        need, why = _share_check(spec, sh, info, me, held)
         if why:
             refusals.append(why)
         elif need and budget:

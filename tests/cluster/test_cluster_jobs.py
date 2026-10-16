@@ -980,6 +980,25 @@ def test_prepare_refuses_a_share_beside_what_another_job_holds(cache):
     assert doc["ok"], doc
 
 
+def test_prepare_counts_what_another_job_holds_once(cache):
+    """Memory available now already leaves out what other ranks hold: a
+    rank's 11 GiB share beside a 79.4 GiB rank, on a 128 GiB Mac with 29
+    GiB available, was refused at -50.3 GiB left (held subtracted twice)."""
+    m = dict(info("Apple M4 Max", "192.0.2.2", ws=120 * GIB),
+             available_bytes=29 * GIB)
+    held = [("job 416d59fd3aa52908 rank 0", 51487, int(79.4 * GIB))]
+
+    def go(need):
+        return C.prepare(spec(), resolve=lambda i: "/m/x", info=m,
+                         shape=lambda p, w, s, vision=True, mtp=True:
+                         dict(SHAPE, tensor_per_rank_bytes=need),
+                         registry=dict, held=lambda job: held)[1]
+    assert go(11 * GIB)["ok"]
+    # what is available now still bounds it: 29 GiB less the 6 GiB margin
+    r = go(24 * GIB)["refused"]
+    assert "29.0 GiB is available now; the 29.0 GiB left" in r, r
+
+
 def test_what_is_held_counts_live_ranks_and_servers_not_the_stopping(
         cache, monkeypatch):
     from knurlogic.machine import servers

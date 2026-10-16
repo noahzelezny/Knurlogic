@@ -274,23 +274,34 @@ def rank_share_bytes(shape: dict, rank: int, layers: list | None = None) -> int:
 
 
 def share_refusal(share_bytes: int, budget_bytes: int,
-                  held: Sequence[tuple] = ()) -> str:
-    """"" when a rank's share fits its budget less what `held` holds there
-    now ([(what, pid, bytes)]) and the step margin (`step_margin`, the fit
-    line single_fit_check draws); else the arithmetic, as a clause that
-    follows "its": "working set ... is ..."."""
+                  held: Sequence[tuple] = (), available_bytes: int = 0) -> str:
+    """"" when a rank's share fits; else the arithmetic, as a clause that
+    follows "its": "working set ... is ...".
+
+    The room is `budget_bytes` (the working set under the allowance) less
+    what `held` holds there now ([(what, pid, bytes)]), lowered to
+    `available_bytes` (what macOS would hand over now) when it is known,
+    less the step margin (`step_margin`, the fit line single_fit_check
+    draws). `held` comes off the working set only: memory available now
+    already leaves out what those processes hold, and taking it off both
+    refused an 11 GiB share on a Mac with 29 GiB free beside a 79 GiB
+    rank."""
     floor = step_margin(budget_bytes)
     hold = sum(b for _, _, b in held)
-    if share_bytes <= budget_bytes - hold - floor:
+    left = budget_bytes - hold
+    room = min(left, available_bytes) if available_bytes else left
+    if share_bytes <= room - floor:
         return ""
+    avail = (f"; {gib(available_bytes)} is available now"
+             if available_bytes and available_bytes < left else "")
     if not hold:
-        return (f"working set (under its allowance) is {gib(budget_bytes)}, "
-                f"which must leave the {gib(floor)} step margin: more space "
-                f"required")
+        return (f"working set (under its allowance) is {gib(budget_bytes)}"
+                f"{avail}, which must leave the {gib(floor)} step margin: "
+                f"more space required")
     return (f"working set (under its allowance) is {gib(budget_bytes)}, "
             f"{gib(hold)} of it held now by "
             + ", ".join(f"{w} (pid {p}, {gib(b)})" for w, p, b in held if b)
-            + f"; the {gib(budget_bytes - hold)} left must also leave the "
+            + f"{avail}; the {gib(room)} left must also leave the "
               f"{gib(floor)} step margin. Unload that first")
 
 
