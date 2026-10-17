@@ -7,7 +7,7 @@ import json
 import pytest
 from test_cluster_jobs import SHAPE, info, spec
 
-from knurlogic.cluster import launch as C
+from knurlogic.cluster import preparing, tables
 from knurlogic.interfaces import serve
 from knurlogic.tuning import checks
 
@@ -40,7 +40,7 @@ def test_launch_refusal_says_what_serve_would(cache):
 
 def test_prepare_refuses_bad_settings_before_a_rank_starts(cache):
     d = _model(cache)
-    code, doc = C.prepare(spec(sets={"KNURLOGIC_PRESET": "bogus"}),
+    code, doc = preparing.prepare(spec(sets={"KNURLOGIC_PRESET": "bogus"}),
                           resolve=lambda i: str(d),
                           info=info("Apple M3 Ultra", "192.0.2.2"),
                           shape=lambda p, w, sp, vision=True, mtp=True: SHAPE,
@@ -48,7 +48,7 @@ def test_prepare_refuses_bad_settings_before_a_rank_starts(cache):
     assert code == 200 and not doc["ok"]
     assert "launch settings are refused" in doc["refused"]
     assert "bogus" in doc["refused"]
-    assert "ab12cd34ef567890" not in C.PREPARED
+    assert "ab12cd34ef567890" not in tables.PREPARED
 
 
 def test_mcp_load_refuses_before_spawning(cache, monkeypatch):

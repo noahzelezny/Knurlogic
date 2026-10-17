@@ -39,7 +39,8 @@ interfaces/http/            the wire
   __init__.py               serve(), switch() (through interfaces/load_checks)
 interfaces/page/            the page (`knurlogic ui`)
 interfaces/load_checks.py   what a model must pass before it loads
-cluster/launch.py           a cluster job, page to page; recovery.py
+cluster/launch.py           a cluster job, page to page (preparing, starting,
+                            watching, stopping); recovery.py
 context_management/         what the model sees; no mlx, no HTTP
                             (see compaction.md)
 engine/runtime/             everything that touches mlx

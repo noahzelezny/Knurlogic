@@ -4,7 +4,7 @@ built by hand before."""
 import json
 import sys
 
-from knurlogic.cluster.launch import rank_argv
+from knurlogic.cluster.starting import rank_argv
 from knurlogic.machine.servers import serve_argv
 
 

@@ -248,7 +248,7 @@ def _load_on(names, artifact, port, tune, sets, force, draft, split, link,
         return no
     if len(ids) == 1:
         return dict(out, machines=names)
-    from knurlogic.cluster.launch import link_name
+    from knurlogic.cluster.protocol import link_name
     plan = dict(out.get("placement") or {})
     plan.update(cable=out.get("cable"), cable_note=out.get("cable_note"))
     return {"starting": out.get("starting"), "artifact": artifact,

@@ -4,7 +4,7 @@ machines it may be on -- not loaded, not stopping forever. A rank waiting
 on a hung peer is stuck too, so the reason names every machine of the job,
 never only the page's own."""
 from knurlogic.cluster import jobs as J
-from knurlogic.cluster import launch
+from knurlogic.cluster import tables, watching
 from knurlogic.interfaces.page import loads, running
 from knurlogic.machine import identity
 
@@ -19,9 +19,9 @@ def _jobs(monkeypatch, stopping):
     monkeypatch.setattr(identity, "identity", lambda: {"name": "box-a"})
     monkeypatch.setattr(J, "by_job", lambda reg=None: {"j1": [rec]})
     monkeypatch.setattr(J, "phase_of", lambda job, recs, read=None: "stuck")
-    monkeypatch.setattr(launch, "ENDED", {})
-    monkeypatch.setattr(launch, "SPECS", {})
-    (doc,) = launch.jobs_document()
+    monkeypatch.setattr(tables, "ENDED", {})
+    monkeypatch.setattr(tables, "SPECS", {})
+    (doc,) = watching.jobs_document()
     return doc
 
 
@@ -39,7 +39,7 @@ def test_a_stopped_job_whose_rank_was_spared_is_stuck_not_stopping(
 def test_the_card_and_running_json_say_stuck(monkeypatch):
     job = {"job": "j1", "phase": "stuck", "stuck": REASON, "port": 8080,
            "machines": ["box-a", "box-b"], "leader": "box-a"}
-    monkeypatch.setattr(launch, "jobs_document", lambda: [dict(job)])
+    monkeypatch.setattr(watching, "jobs_document", lambda: [dict(job)])
     monkeypatch.setattr(J, "registry", dict)
     from knurlogic.cluster import recovery
     monkeypatch.setattr(recovery, "for_job", lambda j: None)

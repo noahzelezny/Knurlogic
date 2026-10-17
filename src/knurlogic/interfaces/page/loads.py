@@ -52,11 +52,11 @@ def load_fn(serve_port: int):
                    if k not in ("nodes", "split", "link")}
             req["node"] = nodes[0]
         if act == "unload" and req.get("job"):
-            from knurlogic.cluster import launch, recovery
+            from knurlogic.cluster import recovery, stopping
             # what recovery held of it, said: a failed job has no ranks
             # left, and clearing its record is the whole of the unload
             cleared = recovery.cancel_job(str(req["job"]))
-            out = launch.stop(str(req["job"]), reason="unloaded")
+            out = stopping.stop(str(req["job"]), reason="unloaded")
             both = cleared + [c for c in out.get("cleared") or []
                               if c not in cleared]
             return dict(out, cleared=both)
@@ -183,8 +183,8 @@ def forward_launch(req: dict, post=None) -> dict:
 
 def cluster_launch(req: dict, serve_port: int) -> dict:
     """POST /loaded.json {action: load, identity, nodes: [>= 2 ids],
-    split, link[, cable]}: this page coordinates (cluster/launch.py)."""
-    from knurlogic.cluster import launch
+    split, link[, cable]}: this page coordinates (cluster/launch)."""
+    from knurlogic.cluster import here, launch
     if any(k in req for k in PATH_KEYS if k != "target") or req.get("target"):
         return {"error": "a model across machines is named by its "
                          "identity, never by a path"}
@@ -196,7 +196,7 @@ def cluster_launch(req: dict, serve_port: int) -> dict:
     return launch.launch(
         dict(req, link=link), me=identity.identity(),
         peers=nodes.PEERS.all() if nodes.PEERS else [],
-        local_info=own.get("cluster") or launch.node_info(),
+        local_info=own.get("cluster") or here.node_info(),
         ui_port=spawn.SERVE_PORT["ui"], serve_port=serve_port)
 
 
@@ -207,7 +207,7 @@ def room_across(path: str, ids: list, split: str, mtp: bool = True,
     rank's memory free now less its share and step margin, and the
     context the smallest leaves (tuning/fit.split_room). {"error"} when
     it cannot be placed: Launch says the same."""
-    from knurlogic.cluster import launch
+    from knurlogic.cluster import here, launch
     from knurlogic.machine.artifact import Artifact
     from knurlogic.tuning import placement as place
     snap, _ = nodes.status_fn()
@@ -216,7 +216,7 @@ def room_across(path: str, ids: list, split: str, mtp: bool = True,
     infos, why = launch.machine_infos(
         ids, me=identity.identity(),
         peers=nodes.PEERS.all() if nodes.PEERS else [],
-        local_info=own.get("cluster") or launch.node_info())
+        local_info=own.get("cluster") or here.node_info())
     if why:
         return {"error": why}
     try:
@@ -279,8 +279,8 @@ def with_jobs(doc: dict) -> dict:
     rank 0's resident row marked with its job, so the job is listed once,
     on its leader, with its machines."""
     try:
-        from knurlogic.cluster import launch
-        js = launch.jobs_document()
+        from knurlogic.cluster import watching
+        js = watching.jobs_document()
     except (OSError, ValueError, KeyError, AttributeError, TypeError):
         js = []
     # a port is reused by the next server: an ended job never claims the

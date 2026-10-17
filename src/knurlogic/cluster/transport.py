@@ -47,7 +47,7 @@ TIMEOUTS: dict = {
     "Prepare": 30.0,
     "Start": 30.0,
     # the peer answers once its ranks are marked stopping, before they
-    # are gone (launch.stop, wait=False)
+    # are gone (stopping.stop, wait=False)
     "Stop": 10.0,
     "JobState": 5.0,
     "Shape": 30.0,

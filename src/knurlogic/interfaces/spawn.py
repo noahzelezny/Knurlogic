@@ -245,8 +245,8 @@ def stop(port: int) -> dict:
         rec = {"pid": pid, "artifact": f"the server on port {port}"}
     if rec.get("job"):
         # rank 0 of a cluster job: the job stops, on every machine
-        from knurlogic.cluster import launch
-        out = launch.stop(rec["job"], reason="unloaded")
+        from knurlogic.cluster import stopping
+        out = stopping.stop(rec["job"], reason="unloaded")
         return {**out, "stopped": rec.get("artifact"), "port": port}
     pid = int(rec["pid"])
     if not is_our_server(pid):

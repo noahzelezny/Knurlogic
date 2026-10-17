@@ -16,6 +16,7 @@ import json
 import logging
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import ClassVar
 from urllib.parse import parse_qs, urlparse
 
 from knurlogic.interfaces import documents, spawn
@@ -45,259 +46,273 @@ MAX_BODY = 512 << 20
 RANGE_READ = 64 << 20
 
 
+class PageHandler(BaseHTTPRequestHandler):
+    """The page's request handler: its routes, the router, the proxies, and
+    the guards in front of every one of them. make_handler sets what one
+    page serves on a subclass."""
+    protocol_version = "HTTP/1.1"
+    #: path (or "POST path") -> handler
+    routes: ClassVar[dict] = {}
+    #: --host cluster's gate (cluster/links.Gate), or None
+    gate = None
+    allow_origins: tuple = ()
+    allow_hosts: tuple = ()
+    #: the /peer/ gate's link check (None: cluster/links.Gate)
+    gate_for_peers = None
+    #: the peer message kinds' handlers (messages.peer_table)
+    table: ClassVar[dict] = {}
+
+    def log_message(self, *a):
+        pass
+
+    def _send(self, body: bytes, ctype: str, code: int = 200):
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        # the page's files and documents are always asked for again:
+        # a restart shows new code, never a stale module
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _body_length(self, limit: int) -> int | None:
+        """The request's Content-Length when it is 0..`limit`, else None."""
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            return None
+        return n if 0 <= n <= limit else None
+
+    def _gated(self) -> bool:
+        """True when this request is refused: --host cluster's gate,
+        or the browser guard knurlogic's server applies too (a page
+        in the user's browser must not drive this one either)."""
+        if self.gate is not None:
+            local = self.connection.getsockname()[0]
+            if not self.gate.allows(local):
+                self._send(self.gate.refusal(local), "text/plain", 403)
+                return True
+        why = browser_refusal(self.headers, self.allow_origins, self.allow_hosts)
+        if why is not None:
+            self.close_connection = True
+            self._send(why.encode(), "text/plain; charset=utf-8", 403)
+            return True
+        return False
+
+    def do_GET(self):
+        u = urlparse(self.path)
+        if u.path.rstrip("/") == peers.MSG_PATH:
+            self._peer_msg("GET")
+            return
+        if u.path.startswith(peers.PEER_RELAY + "/v1/"):
+            self._peer_relay("GET", u.path)
+            return
+        if u.path.rstrip("/") in prompt_cache.PIECE_PATHS:
+            # a peer's (or this machine's model server's) read of the
+            # prompt cache's pieces: its own gate (piece_route)
+            prompt_cache.piece_route(self, u.path.rstrip("/"),
+                                     parse_qs(u.query),
+                                     gate=self.gate_for_peers)
+            return
+        if self._gated():
+            return
+        intro = self.headers.get("X-Knurlogic-Peer")
+        if intro and nodes.PEERS:
+            nodes.PEERS.introduce(self.client_address[0], intro)
+        if u.path.rstrip("/") == "/v1/models":
+            self._send(json.dumps(router.route_models_document()).encode(),
+                       "application/json")
+            return
+        if u.path.rstrip("/") == prompt_cache.PROMPT_CACHE_PATH:
+            prompt_cache.prompt_cache_forward(
+                self, "GET", prompt_cache.PROMPT_CACHE_PATH,
+                parse_qs(u.query), b"")
+            return
+        if u.path.rstrip("/") == "/peek":
+            code, doc = peek.peek(parse_qs(u.query))
+            self._send(doc.encode(), "application/json", code)
+            return
+        h = self.routes.get(u.path.rstrip("/") or "/")
+        if h is None:
+            self._send(b"not found", "text/plain", 404)
+            return
+        body, ctype = h(parse_qs(u.query), 0)
+        self._send(body, ctype)
+
+    def do_POST(self):
+        nodes.hot()               # a load, a chat, a peer's message: memory moves
+        u = urlparse(self.path)
+        if u.path.rstrip("/") == peers.MSG_PATH:
+            self._peer_msg("POST")
+            return
+        if u.path.startswith(peers.PEER_RELAY + "/v1/"):
+            self._peer_relay("POST", u.path)
+            return
+        if self._gated():
+            return
+        n = self._body_length(MAX_BODY)
+        if n is None:
+            self._send(b"Content-Length must be a number of bytes up "
+                       b"to %d" % MAX_BODY, "text/plain", 400)
+            return
+        if u.path.rstrip("/") == "/chat":
+            where = (parse_qs(u.query).get("where") or [""])[0]
+            router.proxy_chat(self, where, self.rfile.read(n) if n else b"")
+            return
+        if u.path.rstrip("/") in router.ROUTE_PATHS:
+            router.route(self, u.path.rstrip("/"),
+                  self.rfile.read(n) if n else b"")
+            return
+        if u.path.startswith(prompt_cache.PROMPT_CACHE_PATH + "/"):
+            prompt_cache.prompt_cache_forward(self, "POST", u.path.rstrip("/"),
+                                 parse_qs(u.query),
+                                 self.rfile.read(n) if n else b"")
+            return
+        if u.path.rstrip("/") == "/machine.json":
+            where = (parse_qs(u.query).get("where") or [""])[0]
+            code, doc = peers.machine_apply(where, self.rfile.read(n)
+                                      if n else b"")
+            self._send(json.dumps(doc).encode(), "application/json",
+                       code)
+            return
+        if u.path.rstrip("/") == "/apply":
+            where = (parse_qs(u.query).get("where") or [""])[0]
+            if n > peek.APPLY_MAX:
+                self._send(b"a settings change is small", "text/plain",
+                           413)
+                return
+            code, doc = peek.apply_settings(where, self.rfile.read(n)
+                                       if n else b"")
+            self._send(json.dumps(doc).encode(), "application/json",
+                       code)
+            return
+        h = self.routes.get("POST " + (u.path.rstrip("/") or "/"))
+        if h is None:
+            self._send(b"not found", "text/plain", 404)
+            return
+        body, ctype = h(parse_qs(u.query), 0, self.rfile.read(n) if n
+                        else b"")
+        self._send(body, ctype)
+
+    def _peer_relay(self, method: str, path: str):
+        """PEER_RELAY/v1/...: a peer page reaching a model this machine
+        started. The peer gate (peer_refusal), then a plain
+        Content-Length body -- never Transfer-Encoding, the framing a
+        smuggled request hides behind -- then peer_relay."""
+        manual = peers.manual_hosts()
+        refused = peers.peer_refusal(
+            self.headers, self.client_address[0],
+            self.connection.getsockname()[0], manual_hosts=manual,
+            what="relayed requests")
+        if refused:
+            self.close_connection = True
+            send_json(self, *refused)
+            return
+        if self._refuse_chunked():
+            return
+        n = self._body_length(MAX_BODY)
+        if n is None:
+            self.close_connection = True
+            send_json(self, 400, {"error": f"Content-Length must be a "
+                                   f"number of bytes up to {MAX_BODY}"})
+            return
+        body = self.rfile.read(n) if n else b""
+        relay.peer_relay(self, method,
+                   path[len(peers.PEER_RELAY):].rstrip("/"), body)
+
+    def _refuse_chunked(self) -> bool:
+        """A peer route's body is a plain Content-Length body -- never
+        Transfer-Encoding, the framing a smuggled request hides behind:
+        411 and the connection closed. -> True when refused."""
+        if not self.headers.get("Transfer-Encoding"):
+            return False
+        self.close_connection = True
+        send_json(self, 411, {"error": "send the body with a "
+                   "Content-Length and no Transfer-Encoding"})
+        return True
+
+    def _peer_msg(self, method: str):
+        """MSG_PATH, the ONE route between pages: POST only (a GET is a
+        405), the peer gate (no Origin; loopback, Thunderbolt or a
+        --peer address), a plain Content-Length body of at most
+        PEER_MAX -- never Transfer-Encoding -- then the envelope
+        (cluster/transport.handle) and the kind's handler."""
+        from knurlogic.cluster import launch, transport
+        if method != "POST":
+            self.close_connection = True
+            send_json(self, 405, {"error": "POST a protocol envelope"},
+                      {"Allow": "POST"})
+            return
+        if self._refuse_chunked():
+            return
+        n = self._body_length(launch.PEER_MAX)
+        if n is None:
+            self.close_connection = True
+            send_json(self, 413, {"error": "a peer message is small"})
+            return
+        manual = peers.manual_hosts()
+        refused = peers.peer_refusal(
+            self.headers, self.client_address[0],
+            self.connection.getsockname()[0], gate=self.gate_for_peers,
+            manual_hosts=manual, what="peer messages")
+        body = self.rfile.read(n) if n else b""
+        if refused:
+            self.close_connection = True
+            send_json(self, *refused)
+            return
+        code, doc = transport.handle(body, self.table)
+        if isinstance(doc, transport.Bytes):
+            self._send_range(doc)
+            return
+        send_json(self, code, doc)
+
+    def _send_range(self, b) -> None:
+        """A Weights reply: the shard's byte range, read in pieces of
+        at most RANGE_READ with pread and sent. Not socket.sendfile:
+        measured on a cold SoftRAID array, 8 sendfiles at once moved
+        0.08 GB/s, 8 preads of 64 MiB 0.76 GB/s (sendfile reads a cold
+        file in small steps; a split's share came at 0.5 GiB/s)."""
+        try:
+            fh = open(b.path, "rb")
+        except OSError as e:
+            from knurlogic.cluster.transport import failure_reply
+            send_json(self, 404, failure_reply(
+                f"could not open the shard: {type(e).__name__}"))
+            return
+        with fh:
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Length", str(b.length))
+            self.end_headers()
+            self.wfile.flush()
+            sent = 0
+            try:
+                fd = fh.fileno()
+                while sent < b.length:
+                    n = min(RANGE_READ, b.length - sent)
+                    chunk = os.pread(fd, n, b.offset + sent)
+                    if not chunk:
+                        break
+                    self.connection.sendall(chunk)
+                    sent += len(chunk)
+            except OSError:
+                sent = -1
+            if sent != b.length:
+                self.close_connection = True
+
+
 def make_handler(routes: dict, gate=None, allow_origins=(),
                  allow_hosts=(), gate_for_peers=None):
-    """The page's request handler: its routes, the router, the proxies, and
-    the guards in front of every one of them. `gate_for_peers`: the
-    /peer/ gate's link check (default cluster/links.Gate; tests pass
-    their own)."""
+    """A PageHandler for one page: its routes and gates. `gate_for_peers`:
+    the /peer/ gate's link check (default cluster/links.Gate; tests pass
+    their own). Wires the cluster to this page first (wire)."""
     wire()
-
-    table = messages.peer_table(routes)
-
-    class H(BaseHTTPRequestHandler):
-        protocol_version = "HTTP/1.1"
-
-        def log_message(self, *a):
-            pass
-
-        def _send(self, body: bytes, ctype: str, code: int = 200):
-            self.send_response(code)
-            self.send_header("Content-Type", ctype)
-            self.send_header("Content-Length", str(len(body)))
-            # the page's files and documents are always asked for again:
-            # a restart shows new code, never a stale module
-            self.send_header("Cache-Control", "no-cache")
-            self.end_headers()
-            self.wfile.write(body)
-
-        def _gated(self) -> bool:
-            """True when this request is refused: --host cluster's gate,
-            or the browser guard knurlogic's server applies too (a page
-            in the user's browser must not drive this one either)."""
-            if gate is not None:
-                local = self.connection.getsockname()[0]
-                if not gate.allows(local):
-                    self._send(gate.refusal(local), "text/plain", 403)
-                    return True
-            why = browser_refusal(self.headers, allow_origins, allow_hosts)
-            if why is not None:
-                self.close_connection = True
-                self._send(why.encode(), "text/plain; charset=utf-8", 403)
-                return True
-            return False
-
-        def do_GET(self):
-            u = urlparse(self.path)
-            if u.path.rstrip("/") == peers.MSG_PATH:
-                self._peer_msg("GET")
-                return
-            if u.path.startswith(peers.PEER_RELAY + "/v1/"):
-                self._peer_relay("GET", u.path)
-                return
-            if u.path.rstrip("/") in prompt_cache.PIECE_PATHS:
-                # a peer's (or this machine's model server's) read of the
-                # prompt cache's pieces: its own gate (piece_route)
-                prompt_cache.piece_route(self, u.path.rstrip("/"),
-                                         parse_qs(u.query),
-                                         gate=gate_for_peers)
-                return
-            if self._gated():
-                return
-            intro = self.headers.get("X-Knurlogic-Peer")
-            if intro and nodes.PEERS:
-                nodes.PEERS.introduce(self.client_address[0], intro)
-            if u.path.rstrip("/") == "/v1/models":
-                self._send(json.dumps(router.route_models_document()).encode(),
-                           "application/json")
-                return
-            if u.path.rstrip("/") == prompt_cache.PROMPT_CACHE_PATH:
-                prompt_cache.prompt_cache_forward(
-                    self, "GET", prompt_cache.PROMPT_CACHE_PATH,
-                    parse_qs(u.query), b"")
-                return
-            if u.path.rstrip("/") == "/peek":
-                code, doc = peek.peek(parse_qs(u.query))
-                self._send(doc.encode(), "application/json", code)
-                return
-            h = routes.get(u.path.rstrip("/") or "/")
-            if h is None:
-                self._send(b"not found", "text/plain", 404)
-                return
-            body, ctype = h(parse_qs(u.query), 0)
-            self._send(body, ctype)
-
-        def do_POST(self):
-            nodes.hot()               # a load, a chat, a peer's message: memory moves
-            u = urlparse(self.path)
-            if u.path.rstrip("/") == peers.MSG_PATH:
-                self._peer_msg("POST")
-                return
-            if u.path.startswith(peers.PEER_RELAY + "/v1/"):
-                self._peer_relay("POST", u.path)
-                return
-            if self._gated():
-                return
-            try:
-                n = int(self.headers.get("Content-Length") or 0)
-            except ValueError:
-                n = -1
-            if not 0 <= n <= MAX_BODY:
-                self._send(b"Content-Length must be a number of bytes up "
-                           b"to %d" % MAX_BODY, "text/plain", 400)
-                return
-            if u.path.rstrip("/") == "/chat":
-                where = (parse_qs(u.query).get("where") or [""])[0]
-                router.proxy_chat(self, where, self.rfile.read(n) if n else b"")
-                return
-            if u.path.rstrip("/") in router.ROUTE_PATHS:
-                router.route(self, u.path.rstrip("/"),
-                      self.rfile.read(n) if n else b"")
-                return
-            if u.path.startswith(prompt_cache.PROMPT_CACHE_PATH + "/"):
-                prompt_cache.prompt_cache_forward(self, "POST", u.path.rstrip("/"),
-                                     parse_qs(u.query),
-                                     self.rfile.read(n) if n else b"")
-                return
-            if u.path.rstrip("/") == "/machine.json":
-                where = (parse_qs(u.query).get("where") or [""])[0]
-                code, doc = peers.machine_apply(where, self.rfile.read(n)
-                                          if n else b"")
-                self._send(json.dumps(doc).encode(), "application/json",
-                           code)
-                return
-            if u.path.rstrip("/") == "/apply":
-                where = (parse_qs(u.query).get("where") or [""])[0]
-                if n > peek.APPLY_MAX:
-                    self._send(b"a settings change is small", "text/plain",
-                               413)
-                    return
-                code, doc = peek.apply_settings(where, self.rfile.read(n)
-                                           if n else b"")
-                self._send(json.dumps(doc).encode(), "application/json",
-                           code)
-                return
-            h = routes.get("POST " + (u.path.rstrip("/") or "/"))
-            if h is None:
-                self._send(b"not found", "text/plain", 404)
-                return
-            body, ctype = h(parse_qs(u.query), 0, self.rfile.read(n) if n
-                            else b"")
-            self._send(body, ctype)
-
-        def _peer_relay(self, method: str, path: str):
-            """PEER_RELAY/v1/...: a peer page reaching a model this machine
-            started. The peer gate (peer_refusal), then a plain
-            Content-Length body -- never Transfer-Encoding, the framing a
-            smuggled request hides behind -- then peer_relay."""
-            manual = peers.manual_hosts()
-            refused = peers.peer_refusal(
-                self.headers, self.client_address[0],
-                self.connection.getsockname()[0], manual_hosts=manual,
-                what="relayed requests")
-            if refused:
-                self.close_connection = True
-                send_json(self, *refused)
-                return
-            if self._refuse_chunked():
-                return
-            try:
-                n = int(self.headers.get("Content-Length") or 0)
-            except ValueError:
-                n = -1
-            if not 0 <= n <= MAX_BODY:
-                self.close_connection = True
-                send_json(self, 400, {"error": f"Content-Length must be a "
-                                       f"number of bytes up to {MAX_BODY}"})
-                return
-            body = self.rfile.read(n) if n else b""
-            relay.peer_relay(self, method,
-                       path[len(peers.PEER_RELAY):].rstrip("/"), body)
-
-        def _refuse_chunked(self) -> bool:
-            """A peer route's body is a plain Content-Length body -- never
-            Transfer-Encoding, the framing a smuggled request hides behind:
-            411 and the connection closed. -> True when refused."""
-            if not self.headers.get("Transfer-Encoding"):
-                return False
-            self.close_connection = True
-            send_json(self, 411, {"error": "send the body with a "
-                       "Content-Length and no Transfer-Encoding"})
-            return True
-
-        def _peer_msg(self, method: str):
-            """MSG_PATH, the ONE route between pages: POST only (a GET is a
-            405), the peer gate (no Origin; loopback, Thunderbolt or a
-            --peer address), a plain Content-Length body of at most
-            PEER_MAX -- never Transfer-Encoding -- then the envelope
-            (cluster/transport.handle) and the kind's handler."""
-            from knurlogic.cluster import launch, transport
-            if method != "POST":
-                self.close_connection = True
-                send_json(self, 405, {"error": "POST a protocol envelope"},
-                          {"Allow": "POST"})
-                return
-            if self._refuse_chunked():
-                return
-            try:
-                n = int(self.headers.get("Content-Length") or 0)
-            except ValueError:
-                n = -1
-            if not 0 <= n <= launch.PEER_MAX:
-                self.close_connection = True
-                send_json(self, 413, {"error": "a peer message is small"})
-                return
-            manual = peers.manual_hosts()
-            refused = peers.peer_refusal(
-                self.headers, self.client_address[0],
-                self.connection.getsockname()[0], gate=gate_for_peers,
-                manual_hosts=manual, what="peer messages")
-            body = self.rfile.read(n) if n else b""
-            if refused:
-                self.close_connection = True
-                send_json(self, *refused)
-                return
-            code, doc = transport.handle(body, table)
-            if isinstance(doc, transport.Bytes):
-                self._send_range(doc)
-                return
-            send_json(self, code, doc)
-
-        def _send_range(self, b) -> None:
-            """A Weights reply: the shard's byte range, read in pieces of
-            at most RANGE_READ with pread and sent. Not socket.sendfile:
-            measured on a cold SoftRAID array, 8 sendfiles at once moved
-            0.08 GB/s, 8 preads of 64 MiB 0.76 GB/s (sendfile reads a cold
-            file in small steps; a split's share came at 0.5 GiB/s)."""
-            try:
-                fh = open(b.path, "rb")
-            except OSError as e:
-                from knurlogic.cluster.transport import failure_reply
-                send_json(self, 404, failure_reply(
-                    f"could not open the shard: {type(e).__name__}"))
-                return
-            with fh:
-                self.send_response(200)
-                self.send_header("Content-Type", "application/octet-stream")
-                self.send_header("Content-Length", str(b.length))
-                self.end_headers()
-                self.wfile.flush()
-                sent = 0
-                try:
-                    fd = fh.fileno()
-                    while sent < b.length:
-                        n = min(RANGE_READ, b.length - sent)
-                        chunk = os.pread(fd, n, b.offset + sent)
-                        if not chunk:
-                            break
-                        self.connection.sendall(chunk)
-                        sent += len(chunk)
-                except OSError:
-                    sent = -1
-                if sent != b.length:
-                    self.close_connection = True
-
-    return H
+    return type("H", (PageHandler,), {
+        "routes": routes, "gate": gate,
+        "allow_origins": tuple(allow_origins),
+        "allow_hosts": tuple(allow_hosts),
+        "gate_for_peers": gate_for_peers,
+        "table": messages.peer_table(routes)})
 
 
 def serve_ui(host: str, port: int, serve_port: int, peers=(),
@@ -366,8 +381,8 @@ def serve_ui(host: str, port: int, serve_port: int, peers=(),
         documents.json_reply(hub.act(body)))
 
     H = make_handler(routes, gate, allow_origins, allow_hosts)
-    from knurlogic.cluster import launch
-    launch.start_watching_existing()
+    from knurlogic.cluster import stopping, tables, watching
+    watching.start_watching_existing()
 
     srv = ThreadingHTTPServer((bind, port), H)
     if gate:
@@ -403,9 +418,9 @@ def serve_ui(host: str, port: int, serve_port: int, peers=(),
         for port in list(spawn.CHILDREN):
             spawn.stop(port)
         # and the cluster ranks it started, on every machine of their job
-        from knurlogic.cluster import launch
-        for job in list(launch.SPECS):
-            launch.stop(job, reason="the page that started it closed")
+        from knurlogic.cluster import stopping, tables, watching
+        for job in list(tables.SPECS):
+            stopping.stop(job, reason="the page that started it closed")
     return 0
 
 
@@ -492,10 +507,10 @@ def wire() -> None:
     """Give launch and recovery what they need of this page; every page
     handler (make_handler) calls it, never this module's import. Each is
     a late-bound lambda, so a swapped PEERS or mcp lifecycle.load is what they see."""
-    from knurlogic.cluster import launch, recovery
+    from knurlogic.cluster import recovery, tables
     from knurlogic.interfaces.mcp import lifecycle
-    launch.status_fn = lambda: nodes.status_fn()
-    launch.peers_fn = lambda: nodes.PEERS.all() if nodes.PEERS else []
+    tables.status_fn = lambda: nodes.status_fn()
+    tables.peers_fn = lambda: nodes.PEERS.all() if nodes.PEERS else []
     recovery.peers_fn = lambda: nodes.PEERS.all() if nodes.PEERS else []
     recovery.child_fn = lambda port: spawn.CHILDREN.get(port)
     recovery.answers_fn = lambda port: spawn.answers(port)

@@ -1,1583 +1,57 @@
 """One model across several machines, launched page to page.
 
 The coordinator is the page Launch was pressed on with two or more
-machines picked. Every page starts only its own ranks, after checking the
-request against its own disk, memory, software and links, in two phases so
-nothing starts unless everything can: `prepare` (a Prepare message to
-every page; any refusal and nothing starts) then `start` (a Start message).
-Any rank dying or stalling stops the whole job on every page. A stop is
-done when the ranks' processes are gone, not when they were signalled.
-Rank 0's HTTP port is where chat goes. Every message is an envelope on
-/peer/v1/msg (cluster/transport.py), gated by ui.peer_refusal.
+machines picked. It places the ranks, picks the cable, and runs two
+rounds so nothing starts unless everything can: Prepare to every page
+(cluster/preparing), any refusal and nothing starts, then Start
+(cluster/starting). It follows the job for a link-init failure to move to
+the next cable on. Rank 0's HTTP port is where chat goes. Every message is
+an envelope on /peer/v1/msg (cluster/transport.py), gated by
+ui.peer_refusal; peer_step answers them.
 
 Design: docs/design/cluster.md (launch).
 """
 from __future__ import annotations
 
-import json
 import logging
-import os
 import re
 import secrets
-import subprocess
-import sys
 import threading
 import time
-from collections.abc import Callable
 from pathlib import Path
 
-from knurlogic.cluster import NET_ERRORS, every, links, recovery, transport
+from knurlogic.cluster import (
+    NET_ERRORS,
+    here,
+    links,
+    preparing,
+    recovery,
+    starting,
+    stopping,
+    tables,
+    transport,
+    watching,
+)
 from knurlogic.cluster import jobs as J
 from knurlogic.cluster.protocol import (
     FAILURE_KINDS,
     LINK_NAMES,
-    JobState,
-    PrepareReply,
-    Started,
-    Stopped,
     backend,
     link_name,
-    typed,
 )
-from knurlogic.machine import identity, processes, servers
-from knurlogic.machine.artifact import bytes_on_disk
-from knurlogic.machine.memory.wired import available_now, budget_of, gpu_working_set
-from knurlogic.machine.processes import PROC_ERRORS
+from knurlogic.machine.memory.wired import available_now, budget_of
 from knurlogic.machine.units import GIB, gib
 from knurlogic.tuning.knobs import canonical_sets
-from knurlogic.tuning.placement import placement, rank_room_chunk, shape_of
+from knurlogic.tuning.placement import placement, shape_of
 
 logger = logging.getLogger(__name__)
 
-
-def _no_status():
-    raise LookupError("no page has set cluster_jobs.status_fn")
-
-
-# What this module needs of the page that runs it, injected by that page at
-# startup (interfaces/page/server.wire, from make_handler) so this module
-# never imports it.
-# Unset, this machine is alone: no status snapshot (node_info() answers)
-# and no peers.
-#: () -> (status snapshot, _): the page's own status document
-status_fn: Callable = _no_status
-#: () -> [peer record]: the page's PEERS store
-peers_fn: Callable[[], list] = list
-
 #: the message kinds a page answers for a job (cluster/protocol.py)
 CLUSTER_KINDS = ("Prepare", "Start", "Stop", "JobState", "Shape")
-#: a prepare's fields; nothing else is read, and a path is refused
-SPEC_KEYS = ("job", "rank", "world", "split", "link", "identity", "hosts",
-             "ibv_devices", "coordinator", "layers", "prefill_chunk", "tune",
-             "port", "working_set_gib", "bandwidth_gbs", "nodes", "versions",
-             "jaccl_timeout_ms", "sets", "chips", "cable", "cable_note",
-             "recovery", "serve_hosts", "name", "auto_port", "bell_nonce",
-             "prefill_why")
-SPLITS = ("tensor", "pipeline")
-#: mlx's distributed backends a spec names (protocol.LINK_NAMES)
-LINKS = tuple(LINK_NAMES.values())
-def leader_url(spec: dict) -> str:
-    """The job's API as the other machines reach it: rank 0's link
-    address (the leader binds loopback and that), or '' when unknown."""
-    hs = [h for h in (spec.get("serve_hosts") or [])
-          if h not in ("127.0.0.1", "::1", "localhost")]
-    port = spec.get("port")
-    return f"http://{hs[0]}:{int(port)}/v1" if hs and port else ""
-
-#: the prompt chunk a ring runs when a rank cannot work out its own room's:
-#: the floor. Otherwise it is the smallest of the ranks' room-based chunks
-#: (each rank answers Prepare with its own; see ring_chunk)
-PREFILL_CHUNK = 512
-#: the launch setting that names the ring's chunk outright
-PREFILL_KNOB = "KNURLOGIC_PREFILL_CHUNK"
-RING_CHUNK_WHY = "ring: the smallest rank's room"
-#: first ring port; a job's ranks take ring_port(slot, rank) (+0..+17),
-#: rank 0's bell +BELL_OFFSET and the jaccl coordinator +COORDINATOR_OFFSET
-RING_PORT = 47200
-#: ports per slot, and slots
-SLOT_PORTS = 20
-SLOTS = 100
-COORDINATOR_OFFSET = 19
-#: a prepared job not started within this long is forgotten
-PREPARED_S = 120.0
-#: how long a prepare waits for a stopping rank of an earlier job to be gone
-EXIT_WAIT_S = 30.0
-#: how often the page checks its ranks
-WATCH_S = 2.0
-#: how long start waits for a stopped rank's process on this machine to be
-#: gone before it refuses: two jobs' shares in one working set is an OOM
-#: that can reboot the machine (a 397B share loading beside the last job's
-#: 50 GiB)
-START_WAIT_S = 20.0
-
-#: job -> prepared spec (+ resolved path), awaiting start
-PREPARED: dict = {}
-#: job -> {"reason", "t", "machines"} for jobs that stopped, shown a while
-ENDED: dict = {}
-#: job -> spec, for the jobs this page has ranks in (to stop the others)
-SPECS: dict = {}
-#: job -> Popen for ranks this page process started (exit codes, reaping)
-_PROCS: dict = {}
-_LOCK = threading.Lock()
-_WATCH = J.Watch()
-#: set once the watcher runs
-_WATCHER = threading.Event()
-#: one start at a time on this page: the loading check and the spawn are
-#: one step, so two jobs' ranks never begin loading together
-_START_LOCK = threading.Lock()
-#: jobs a stop() in this process is tearing down right now
-_STOPPING: set = set()
-#: the boot_id a peer had when it held its rank of a job: {(job, id): id}
-_PEER_BOOT: dict = {}
 #: how long the coordinator watches a job it launched for a link-init
 #: failure to move to the next cable on
 FAILOVER_S = 300.0
 FAILOVER_POLL_S = 2.0
-#: jobs a coordinator's _follow is watching now (recovery leaves a link-init
-#: failure of one of these to the cable failover)
-FOLLOWING: set = set()
-#: a rank's link init failing: its log line (mlx's jaccl / ring errors)
-#: mlx's words when a running peer of the ring died (ring.cpp): not a link
-#: that failed to come up, so never a reason to move the job to another cable
-RING_LOST = "connection to a peer was lost"
-LINK_INIT_RX = re.compile(
-    rf"[^\n]*\[(?:jaccl|ring)\](?![^\n]*{re.escape(RING_LOST)})[^\n]*"
-    r"(?:RTR|RTS|queue pair|connect|Connection)[^\n]*", re.I)
-
-
-# ------------------------------------------------------------ this machine
-
-_INFO: dict = {"doc": None, "at": 0.0}
-
-
-def _mlx_version() -> str:
-    from importlib import metadata
-    try:
-        return metadata.version("mlx")
-    except metadata.PackageNotFoundError:
-        return ""
-
-
-_BUILD: dict = {}
-
-
-def build_fingerprint(root=None, cache=None) -> str:
-    """Which build of knurlogic this is, beyond its version string (every
-    dev build says 0.1.0.dev0): a hash over the installed package's .py
-    files -- relative path and bytes, in a fixed order, so a wheel install
-    and a PYTHONPATH source tree of the same commit agree -- and the mlx
-    version, as "<12 hex>+mlx<version>". Read once per process."""
-    import hashlib
-    memo = _BUILD if cache is None else cache
-    if root is None:
-        import knurlogic
-        root = Path(knurlogic.__file__).resolve().parent
-    root = Path(root)
-    key = str(root)
-    if key not in memo:
-        h = hashlib.sha256()
-        for f in sorted(root.rglob("*.py"),
-                        key=lambda q: q.relative_to(root).as_posix()):
-            if "__pycache__" in f.parts:
-                continue
-            h.update(f.relative_to(root).as_posix().encode() + b"\0")
-            try:
-                h.update(f.read_bytes())
-            except OSError:
-                pass
-            h.update(b"\0")
-        memo[key] = h.hexdigest()[:12]
-    return f"{memo[key]}+mlx{_mlx_version() or 'none'}"
-
-
-def _selfheal() -> bool:
-    from knurlogic.machine import deps
-    m = deps.probe(sys.executable).get("mlx") or {}
-    return bool(m.get("jaccl_selfheal"))
-
-
-def node_info(working_set_bytes: int = 0, ttl: float = 30.0) -> dict:
-    """What a coordinator needs to know of THIS machine, for its status'
-    `cluster` block. Cached: it runs a few subprocesses."""
-    now = time.time()
-    doc = _INFO["doc"]
-    if doc is None or now - _INFO["at"] > ttl:
-        from knurlogic import __version__
-        chip = identity.chip()
-        try:
-            tb = [{"iface": i["iface"], "ip": i["ip"],
-                   "gbps": i.get("gbps"), "generation": i.get("generation")}
-                  for i in links.thunderbolt()]
-        except (*PROC_ERRORS, ValueError, KeyError):
-            tb = []
-        try:
-            heal = _selfheal()
-        except (*PROC_ERRORS, ValueError):
-            heal = False
-        from knurlogic.engine.matmul_padding import gpu_architecture
-        doc = {"chip": chip, "gpu_architecture": gpu_architecture(),
-               "bandwidth_gbs": identity.chip_bandwidth_gbs(chip),
-               "thunderbolt": tb, "rdma": links.rdma(),
-               "versions": {"knurlogic": __version__,
-                            "mlx": _mlx_version(),
-                            "build": build_fingerprint()},
-               "jaccl_selfheal": heal}
-        _INFO.update(doc=doc, at=now)
-    from knurlogic.machine.memory import allowance
-    return dict(doc, working_set_bytes=allowance.cap(
-        gpu_working_set(int(working_set_bytes or 0))),
-        available_bytes=available_now())
-
-
-# ------------------------------------------------------------ plan
-
-def link_init_failure(text: str) -> str:
-    """The line of a rank's output saying its link init failed ("" if
-    none): jaccl's queue pair not reaching RTR, a ring that could not
-    connect."""
-    m = LINK_INIT_RX.search(text or "")
-    return m.group(0).strip()[:240] if m else ""
-
-
-def _slot(job: str, used=None) -> int:
-    """The job's ring-port slot: its nonce's, or the next one after it that
-    no live job on this machine holds (`used`: default, the registry's)."""
-    if used is None:
-        used = _used_slots()
-    start = _nonce_slot(job)
-    for i in range(SLOTS):
-        s = (start + i) % SLOTS
-        if s not in used:
-            return s
-    raise ValueError("every ring-port slot is held by a live job here")
-
-
-def _used_slots() -> set:
-    """The ring-port slots of the live jobs in this machine's registry."""
-    out = set()
-    for job, recs in J.by_job().items():
-        for r in recs:
-            rp = r.get("ring_port")
-            if isinstance(rp, int) and rp >= RING_PORT:
-                out.add(_slot_of_port(rp))
-            else:
-                out.add(_nonce_slot(job))
-    return out
-
-
-def _nonce_slot(job: str) -> int:
-    """The ring-port slot a job's nonce names (`_slot` moves off it when a
-    live job holds it)."""
-    return int(job[:4], 16) % SLOTS
-
-
-def ring_port(slot: int, offset: int) -> int:
-    """Port `offset` of ring-port slot `slot`."""
-    return RING_PORT + slot * SLOT_PORTS + offset
-
-
-def _slot_of_port(port: int) -> int:
-    """The ring-port slot a port of it (ring_port) belongs to."""
-    return (port - RING_PORT) // SLOT_PORTS
-
-
-def viability_refusals(path: str, world: int) -> list:
-    """A tensor split of a module whose layout no split rule knows is run
-    whole and split on this machine (engine/split/viability) before any
-    rank starts; rank 0's page asks, once."""
-    from knurlogic.machine.artifact import Artifact
-    from knurlogic.tuning import tensor_split
-    todo = tensor_split.tensor_unverified(path)
-    if not todo:
-        return []
-    from knurlogic.engine.split import viability
-    a = Artifact.load(path)
-    try:
-        return viability.refusals(path, world, todo, a.raw_config,
-                                  bool(a.model_file))
-    except Exception as e:  # a module that cannot be built is not verified
-        return [f"the tensor split of {len(todo)} module layout(s) no rule "
-                f"knows could not be checked: {type(e).__name__}: {e}"]
-
-
-# ------------------------------------------------------------ one page
-
-def _resolve(identity: str | None, name: str = ""):
-    """The local path for this identity: several copies of it are the same
-    weights, and machine/artifact.resolve_identity picks one (the one
-    called `name`, else one on this Mac's disk)."""
-    from knurlogic.machine.artifact import resolve_identity
-    return resolve_identity(identity, name=name)
-
-
-def sets_refusal(path, sets: dict, tune: str = "default") -> str:
-    """"" when a rank of `path` would start with these launch settings,
-    else why not -- serve's own deterministic refusals (bad settings, a
-    context past the model's maximum, a preset or KV precision it cannot
-    take), asked BEFORE a rank starts: a refusal at startup would only be
-    seen in a rank's log."""
-    from knurlogic.machine.artifact import Artifact
-    from knurlogic.tuning.checks import launch_refusal
-    try:
-        a = Artifact.load(path)
-    except (OSError, ValueError, AttributeError):
-        return ""           # shape_of says why it cannot be read
-    why = launch_refusal(a, sets or {}, tune)
-    return f"its launch settings are refused: {why}" if why else ""
-
-
-def check_spec(spec) -> str:
-    """"" when `spec` has the prepare schema's shape, else why not."""
-    if not isinstance(spec, dict):
-        return "the body must be a JSON object"
-    extra = sorted(set(spec) - set(SPEC_KEYS))
-    if extra:
-        return f"not part of a cluster job: {', '.join(extra)[:200]}"
-    if not J.JOB_RX.fullmatch(str(spec.get("job") or "")):
-        return "job is a hex nonce"
-    for k in ("rank", "world", "prefill_chunk"):
-        v = spec.get(k)
-        if not isinstance(v, int) or isinstance(v, bool) or v < 0:
-            return f"{k} is a whole number"
-    if not 2 <= spec["world"] <= 16 or spec["rank"] >= spec["world"]:
-        return "rank and world do not make a ring"
-    if spec.get("split") not in SPLITS or spec.get("link") not in LINKS:
-        return "split is tensor|pipeline, link is ring|jaccl"
-    nm = spec.get("name", "")
-    if not isinstance(nm, str) or "/" in nm or nm in (".", "..") \
-            or len(nm) > 255:
-        return "name is a directory name, never a path"
-    hosts = spec.get("hosts")
-    if not isinstance(hosts, list) or not all(isinstance(h, str)
-                                              for h in hosts):
-        return "hosts is a list of address:port"
-    sh = spec.get("serve_hosts")
-    if sh is not None:
-        import ipaddress
-        try:
-            ok = isinstance(sh, list) and 1 <= len(sh) <= 4 and all(
-                isinstance(h, str) and ipaddress.ip_address(h) for h in sh)
-        except ValueError:
-            ok = False
-        if not ok:
-            return "serve_hosts is a list of IP addresses"
-    if spec["link"] == "ring" and len(hosts) != spec["world"]:
-        return "hosts names one address per rank"
-    if spec["link"] == "jaccl":
-        ibv = spec.get("ibv_devices")
-        if not (isinstance(ibv, list) and len(ibv) == spec["world"] and all(
-                isinstance(row, list) and len(row) == spec["world"] and all(
-                    d is None or isinstance(d, str) for d in row)
-                for row in ibv)) or not isinstance(spec.get("coordinator"),
-                                                   str):
-            return "jaccl needs an ibv_devices matrix and a coordinator"
-    nodes = spec.get("nodes")
-    if not isinstance(nodes, list) or len(nodes) != spec["world"]:
-        return "nodes names one machine per rank"
-    for n in nodes:
-        if not isinstance(n, dict) or not all(
-                isinstance(n.get(k), str) for k in ("name", "id")) or not (
-                n.get("page") is None or isinstance(n.get("page"), str)):
-            return "each node is {name, id, page}"
-    port = spec.get("port", 0)
-    if not isinstance(port, int) or isinstance(port, bool) \
-            or not 0 <= port <= 65535:
-        return "port is 0..65535"
-    for k in ("working_set_gib", "bandwidth_gbs"):
-        v = spec.get(k, 0)
-        if v is None:
-            continue
-        if not isinstance(v, (int, float)) or isinstance(v, bool) or v < 0:
-            return f"{k} is a number >= 0"
-    tune = spec.get("tune")
-    if tune is not None:
-        from knurlogic.tuning.presets import preset_of
-        try:
-            preset_of(tune)
-        except ValueError as e:
-            return str(e)
-    sets = spec.get("sets")
-    if sets is not None and not isinstance(sets, dict):
-        return "sets is an object"
-    chips = spec.get("chips")
-    if chips is not None and not (
-            isinstance(chips, list) and len(chips) <= 64 and all(
-                isinstance(c, dict) and set(c) <= {"name", "arch"} and all(
-                    isinstance(v, str) and len(v) <= 64 for v in c.values())
-                for c in chips)):
-        return "chips is [{name, arch}]"
-    for k, most in (("cable", 32), ("cable_note", 400)):
-        v = spec.get(k)
-        if v is not None and not (isinstance(v, str) and len(v) <= most):
-            return f"{k} is a short string"
-    rv = spec.get("recovery")
-    if rv is not None and not (isinstance(rv, dict) and len(rv) <= 8):
-        return "recovery is an object"
-    lay = spec.get("layers") or []
-    if not isinstance(lay, list) or (lay and len(lay) != spec["world"]):
-        return "layers is one count per rank"
-    return ""
-
-
-def held_here(job: str = "", reg=None, sreg=None, rss=None) -> list:
-    """What knurlogic ranks and servers on this machine hold now, other
-    than `job`'s: [(what, pid, bytes)]. A rank being stopped is left out
-    -- start waits for it to be gone -- so this is what a new load would
-    have to share the working set with."""
-    rss = rss or processes.rss
-    reg = J.registry() if reg is None else reg
-    out, seen = [], set()
-    for rec in reg.values():
-        j = str(rec.get("job") or "")
-        pid = int(rec["pid"])
-        if j == job or rec.get("stopping") or not _alive(j, pid):
-            continue
-        seen.add(pid)
-        out.append((f"job {j} rank {rec.get('rank')}", pid, rss(pid)))
-    for port, rec in sorted((servers.registry() if sreg is None
-                             else sreg).items()):
-        pid = int(rec["pid"])
-        if pid in seen or (job and rec.get("job") == job) \
-                or not servers.is_our_server(pid):
-            continue
-        out.append((f"the server on port {port}", pid, rss(pid)))
-    return out
-
-
-def _loading_elsewhere(job: str, reg: dict) -> str:
-    """"" unless another job's rank here is still joining or loading --
-    one load at a time on a machine."""
-    for j, recs in J.by_job(reg).items():
-        live = [r for r in recs if not r.get("stopping")]
-        if j == job or not live:
-            continue
-        ph = J.phase_of(j, live)
-        if ph != "ready":
-            return (f"job {j}'s rank {live[0].get('rank')} is still "
-                    f"{ph} here; one load at a time")
-    return ""
-
-
-def ring_chunk(sets: dict, got: list) -> tuple:
-    """(chunk, why) for the ring: an explicit set wins; else the smallest
-    of the ranks' room-based chunks, or the floor when one cannot say."""
-    chunk = canonical_sets(sets).get(PREFILL_KNOB)
-    if chunk is not None:
-        return int(chunk), "set"
-    rooms = [(g or {}).get("prefill_chunk") for g in got]
-    sized = [x for x in rooms if isinstance(x, int) and x > 0]
-    if rooms and len(sized) == len(rooms):
-        return min(sized), RING_CHUNK_WHY
-    return PREFILL_CHUNK, "ring: a rank could not work out its room"
-
-
-def _unreadable_spec(spec, why: str, info) -> str:
-    """`why` a spec failed check_spec, with the cause when it is the most
-    common one: a newer page's spec (a key added since), the versions
-    differing."""
-    theirs = (spec.get("versions") or {}) if isinstance(
-        spec.get("versions"), dict) else {}
-    try:
-        ours = (info if info is not None else _local_info()).get(
-            "versions") or {}
-    except (OSError, ValueError, AttributeError, TypeError):
-        ours = {}
-    k = "build" if theirs.get("build") and ours.get("build") else "knurlogic"
-    if theirs.get(k) and theirs.get(k) != ours.get(k):
-        why = (f"{why} -- the coordinator runs {k} {theirs.get(k)}, "
-               f"this machine {ours.get(k) or 'missing'}: every rank "
-               f"runs the same build")
-    return why
-
-
-def _version_refusals(want: dict, have: dict) -> list:
-    """The coordinator's build (`want`) against this machine's (`have`).
-    "Same build" is the code hash (it names mlx too): when both sides send
-    one, the version string is information only -- a source copy and a
-    wheel of the same commit can disagree on it."""
-    keys = ("mlx", "build") if want.get("build") and have.get("build") \
-        else ("knurlogic", "mlx", "build")
-    out = []
-    for k in keys:
-        if want.get(k) != have.get(k):
-            out.append(f"{k} {have.get(k) or 'missing'} here, "
-                       f"{want.get(k) or 'missing'} on the coordinator"
-                       f": every rank runs the same build")
-            if k == "mlx":
-                break           # the build names mlx too; say it once
-    return out
-
-
-def _model_refusals(spec: dict, path, shape) -> tuple:
-    """(refusals, the spec with only the settings a rank takes, the
-    artifact's shape): the launch settings, the shape's own refusals and,
-    for rank 0 of a tensor split, the viability check."""
-    from knurlogic.tuning.checks import clean_sets
-    from knurlogic.tuning.knobs import mtp_of, vision_of
-    refusals = []
-    ok_sets, bad_sets = clean_sets(spec.get("sets") or {})
-    if bad_sets:
-        refusals.append(f"settings a rank does not take: "
-                        f"{', '.join(bad_sets)}")
-    spec = dict(spec, sets=ok_sets)
-    why = sets_refusal(path, ok_sets, spec.get("tune") or "default")
-    if why:
-        refusals.append(why)
-    try:
-        sh = (shape or shape_of)(path, spec["world"], spec["split"],
-                                 vision=vision_of(ok_sets),
-                                 mtp=mtp_of(ok_sets))
-    except Exception as e:  # a failed read is reported as the launch's refusal
-        sh = {"refusals": [f"could not read the artifact: "
-                           f"{type(e).__name__}: {e}"]}
-    refusals += sh.get("refusals") or []
-    if not refusals and spec["split"] == "tensor" and spec["rank"] == 0:
-        refusals += viability_refusals(path, spec["world"])
-    return refusals, spec, sh
-
-
-def _share_check(spec: dict, shape: dict, info: dict, me: str,
-                 held) -> tuple:
-    """(this rank's share in bytes, why it does not fit or ""): the weights
-    and the minimum step margin against `info`'s working set less what
-    other ranks and servers hold here now, and against the memory
-    available now (fit.share_refusal)."""
-    from knurlogic.tuning.fit import rank_share_bytes, share_refusal
-    counts = spec.get("layers") or []
-    if spec["split"] != "tensor" and not counts:
-        return 0, ""
-    need = rank_share_bytes(shape, spec["rank"], counts or None)
-    ws = int(info.get("working_set_bytes") or 0)
-    if not (need and ws):
-        return need, ""
-    why = share_refusal(need, ws, (held or held_here)(spec["job"]),
-                        int(info.get("available_bytes") or 0))
-    return need, (f"rank {spec['rank']}'s share is {gib(need)} and {me}'s "
-                  + why if why else "")
-
-
-def _link_refusals(spec: dict, info: dict, me: str) -> list:
-    """This machine's end of the job's link: its ring address is one of its
-    Thunderbolt addresses, or its RDMA devices are active here."""
-    rank = spec["rank"]
-    if spec["link"] == "ring":
-        ip = spec["hosts"][rank].rsplit(":", 1)[0]
-        mine = {t.get("ip") for t in info.get("thunderbolt") or []}
-        if ip not in mine and not ip.startswith("127."):
-            return [f"{ip} is not one of {me}'s Thunderbolt addresses "
-                    f"({', '.join(sorted(mine)) or 'none'})"]
-        return []
-    rd = info.get("rdma") or {}
-    ibv = spec.get("ibv_devices")
-    mine_devs = [d for d in (ibv or [[]] * spec["world"])[rank]
-                 if d] if isinstance(ibv, list) else []
-    if not rd.get("available"):
-        return [f"RDMA on {me}: {rd.get('reason') or 'unknown'}"]
-    if not mine_devs or any(d not in (rd.get("active") or [])
-                            for d in mine_devs):
-        return [f"{', '.join(mine_devs) or 'no device'} is not an "
-                f"active RDMA device on {me} (active: "
-                f"{', '.join(rd.get('active') or []) or 'none'})"]
-    return []
-
-
-def _here_refusals(spec: dict, reg: dict, me: str) -> list:
-    """What this machine's own ranks say: the job already here, another
-    job still loading, a stopped rank not gone (waited for up to
-    EXIT_WAIT_S), or one holding this job's ring port."""
-    refusals = []
-    if any(k.startswith(spec["job"] + "/") for k in reg):
-        refusals.append(f"job {spec['job']} already runs here")
-    why = _loading_elsewhere(spec["job"], reg)
-    if why:
-        refusals.append(why)
-    stale = _wait_for_exit(reg, EXIT_WAIT_S)
-    if stale:
-        refusals.append("; ".join(
-            f"rank {r} of job {j} is still exiting on {me}"
-            for j, r, _ in stale))
-        return refusals
-    conflict = _slot_conflict(spec, reg)
-    if conflict:
-        j, r, pid = conflict
-        if J.wait_gone([pid], EXIT_WAIT_S, alive=lambda p: _alive(j, p)):
-            refusals.append(f"rank {r} of job {j} is still exiting on "
-                            f"{me} and holds this job's ring port; "
-                            f"wait for it to finish")
-    return refusals
-
-
-def _port_refusals(port: int, me: str) -> list:
-    """Rank 0's serving port: taken by a knurlogic server, or in use."""
-    from knurlogic.machine.servers import is_our_server, port_free
-    from knurlogic.machine.servers import registry as sreg
-    rec = sreg().get(port)
-    if rec and is_our_server(int(rec["pid"])):
-        return [f"port {port} on {me} already serves {rec.get('artifact')}"]
-    if port and not port_free(port):
-        return [f"port {port} on {me} is in use"]
-    return []
-
-
-def _remember(spec: dict, path) -> None:
-    """Hold a prepared job for its Start, forgetting ones never started."""
-    with _LOCK:
-        now = time.time()
-        for j in [j for j, p in PREPARED.items()
-                  if now - p["t"] > PREPARED_S and not p.get("starting")]:
-            PREPARED.pop(j)
-        PREPARED[spec["job"]] = {"spec": dict(spec), "path": path, "t": now}
-
-
-def prepare(spec: dict, *, resolve=None, info=None, shape=None,
-            registry=None, held=None) -> tuple:
-    """A Prepare message, on the page asked to run one rank:
-    (status, doc). Checks, and remembers the job for start; starts
-    nothing."""
-    why = check_spec(spec)
-    if why:
-        return 400, {"error": _unreadable_spec(spec, why, info)}
-    from knurlogic.machine import identity
-    me = identity.identity().get("name") or "this machine"
-    path = resolve(spec.get("identity")) if resolve else \
-        _resolve(spec.get("identity"), str(spec.get("name") or ""))
-    if not path:
-        return 200, {"ok": False, "machine": me,
-                     "refused": f"not on {me}: no artifact with identity "
-                                f"{str(spec.get('identity'))[:64]!r} in its "
-                                f"model stores. Copy it there first."}
-    info = info if info is not None else _local_info()
-    want = spec.get("versions") or {}
-    have = info.get("versions") or {}
-    rank = spec["rank"]
-    refusals = _version_refusals(want, have)
-    more, spec, sh = _model_refusals(spec, path, shape)
-    refusals += more
-    budget = budget_of(info)
-    need, room_chunk = 0, None
-    if not refusals:
-        need, why = _share_check(spec, sh, info, me, held)
-        if why:
-            refusals.append(why)
-        elif need and budget:
-            room_chunk = rank_room_chunk(path, spec, budget, need)
-    refusals += _link_refusals(spec, info, me)
-    refusals += _here_refusals(spec, registry() if registry else J.registry(),
-                               me)
-    if rank == 0:
-        port = int(spec.get("port") or 0)
-        refusals += _port_refusals(port, me)
-        if refusals and spec.get("auto_port"):
-            # a port nobody asked for: say which one is free instead
-            from knurlogic.machine.servers import free_port
-            try:
-                return 200, typed(PrepareReply(
-                    ok=False, machine=me, free_port=free_port(port + 1),
-                    refused=f"{me} refuses rank {rank}: "
-                    + "; ".join(refusals)))
-            except OSError:
-                pass
-    if refusals:
-        return 200, typed(PrepareReply(
-            ok=False, machine=me, refused=f"{me} refuses rank {rank}: "
-            + "; ".join(refusals)))
-    _remember(spec, path)
-    differs = _local_copy_differs(path, spec)
-    note = None
-    if want.get("knurlogic") != have.get("knurlogic"):
-        note = (f"same build, but knurlogic says "
-                f"{have.get('knurlogic') or 'missing'} here and "
-                f"{want.get('knurlogic') or 'missing'} on the "
-                f"coordinator")
-    from knurlogic.machine.artifact import on_network
-    return 200, typed(PrepareReply(
-        ok=True, machine=me, rank=rank, prefill_chunk=room_chunk,
-        alert=f"on {me}: {differs}" if differs else None, note=note,
-        local_copy=not on_network(path)))
-
-
-def _local_copy_differs(path, spec: dict) -> str:
-    """"" unless this Mac also holds its own copy of the job's model (same
-    name) that is NOT the weights the job runs -- then what to tell the
-    person: the rank runs the job's copy, the local one differs."""
-    from knurlogic.machine import artifact as A
-    name = str(spec.get("name") or "")
-    if not name:
-        return ""
-    try:
-        from knurlogic.machine import discover
-        for f in discover.find():
-            p = str(f.path)
-            if Path(p).name == name and p != str(path) \
-                    and not A.on_network(p) \
-                    and A.identity(p) not in ("", spec.get("identity")):
-                return (f"the local copy of {name} ({p}) differs from the "
-                        f"shared copy this job runs ({path}); this rank "
-                        f"loads the shared one")
-    except (OSError, ValueError):
-        return ""
-    return ""
-
-
-def _local_info() -> dict:
-    """This machine's cluster block, off the page's own status."""
-    try:
-        snap, _ = status_fn()
-        own = next(n for n in snap.get("nodes") or []
-                   if n.get("role") in ("local", "server"))
-        return dict(own.get("cluster") or node_info(),
-                    available_bytes=available_now())
-    except (LookupError, StopIteration, AttributeError, TypeError, OSError, ValueError):
-        return node_info()
-
-
-def rank_argv(path: str, spec: dict, files: dict) -> list:
-    """`knurlogic serve` for one rank, with the hidden ring flags."""
-    from knurlogic.machine.servers import serve_argv
-    cmd = serve_argv(
-        path,
-        "--rank", str(spec["rank"]), "--world", str(spec["world"]),
-        "--split", spec["split"], "--link", spec["link"],
-        "--job", spec["job"],
-        "--prefill-chunk", str(spec["prefill_chunk"]),
-        "--prefill-why", str(spec.get("prefill_why") or ""),
-        "--working-set-gib", f"{float(spec.get('working_set_gib') or 0):.3f}",
-        "--tune", spec.get("tune") or "default")
-    if spec.get("port"):
-        cmd += ["--port", str(int(spec["port"]))]
-    if spec.get("serve_hosts") and spec["rank"] == 0:
-        # the leader answers the job's other machines on its link
-        # address, and this one on loopback -- never every interface
-        cmd += ["--host", ",".join(spec["serve_hosts"])]
-    if spec["link"] == "ring":
-        cmd += ["--hosts", ",".join(spec["hosts"])]
-    else:
-        cmd += ["--ibv-devices", files["ibv"],
-                "--coordinator", spec["coordinator"]]
-    if spec.get("layers"):
-        cmd += ["--layers", ",".join(str(int(x)) for x in spec["layers"])]
-    if spec.get("bandwidth_gbs"):
-        cmd += ["--bandwidth-gbs", str(float(spec["bandwidth_gbs"]))]
-    for k, v in sorted((spec.get("sets") or {}).items()):
-        cmd += ["--set", f"{k}={v}"]
-    if spec.get("chips"):
-        # every rank's chip: per-chip rounding off names them in status
-        # and the log (engine/matmul_padding.resolve)
-        cmd += ["--ring-chips", json.dumps(spec["chips"])]
-    return cmd
-
-
-#: the argv builder; tests put a fake rank here
-RANK_ARGV = [rank_argv]
-
-
-#: the bell's port: rank 0's ring port + this (a slot's ranks take +0..+17
-#: of it here, the jaccl coordinator +19)
-BELL_OFFSET = 18
-
-
-def _bell_nonce() -> int:
-    """A job's bell nonce (bell_address): random, never derived from the
-    job id the page shows."""
-    return secrets.randbits(62)
-
-
-def bell_address(spec: dict) -> str:
-    """"host:port:nonce:world" of rank 0's bell (engine/split/link.init):
-    every rank connects to it over TCP BEFORE the ring is joined, so the
-    ranks enter jaccl's first collectives together -- a rank that arrives
-    seconds late (a slower chip, a longer start) can have rank 0's first
-    RDMA message dropped. "" when the job has no ring hosts or more ranks
-    than a slot leaves room for (the bell's port then comes over the ring,
-    as before)."""
-    hosts = spec.get("hosts") or []
-    world = int(spec.get("world") or len(hosts))
-    if not hosts or world < 2 or world > BELL_OFFSET:
-        return ""
-    nonce = spec.get("bell_nonce")
-    if not isinstance(nonce, int) or nonce <= 0:
-        return ""                 # a spec from a page without it: as before
-    host, port = hosts[0].rsplit(":", 1)
-    return f"{host}:{int(port) + BELL_OFFSET}:{nonce}:{world}"
-
-
-def rank_env(spec: dict, files: dict, selfheal: bool) -> dict:
-    # MLX_METAL_FAST_SYNCH: the GPU hands each collective to the CPU (and
-    # takes it back) by a spinning shared event, not a command-buffer
-    # completion. Measured M4 + M3 Ultra over Thunderbolt, 35B-A3B VQ split
-    # two ways, one decode step (80 all_sums): jaccl 71 -> 18.5 ms, ring
-    # 94 -> 25 ms. exo sets it for every runner.
-    env = {"PYTHONUNBUFFERED": "1", "MLX_RANK": str(spec["rank"]),
-           "MLX_METAL_FAST_SYNCH": "1"}
-    bell = bell_address(spec)
-    if bell:
-        env["KNURLOGIC_BELL"] = bell
-    from knurlogic.cluster import weights
-    env.update(weights.rank_env(spec.get("read")))
-    if spec["link"] == "ring":
-        env["MLX_HOSTFILE"] = files["hostfile"]
-    else:
-        env["MLX_IBV_DEVICES"] = files["ibv"]
-        env["MLX_JACCL_COORDINATOR"] = spec["coordinator"]
-        if selfheal and spec.get("jaccl_timeout_ms"):
-            # 0 while loading -- a cold read is not a hang -- and the
-            # deadline once the model is in (engine/split/marker.after_load)
-            env["JACCL_COLLECTIVE_TIMEOUT_MS"] = "0"
-            env["KNURLOGIC_JACCL_TIMEOUT_MS"] = str(int(
-                spec["jaccl_timeout_ms"]))
-    return env
-
-
-def exiting(reg: dict) -> dict:
-    """{pid: job} of the ranks here that were stopped and are not gone."""
-    return {int(r["pid"]): str(r.get("job") or "") for r in reg.values()
-            if r.get("stopping")}
-
-
-def _wait_for_exit(reg: dict, wait_s: float) -> list:
-    """Wait up to `wait_s` for every rank on this machine that was stopped
-    (a previous job, mid-relaunch) to be gone. -> [(job, rank, pid)] still
-    alive after the wait: a job being stopped counts as alive until its
-    process is reaped, and its memory -- and its ring port -- are not
-    free until then."""
-    going = {int(r["pid"]): (str(r.get("job") or ""), r.get("rank"))
-             for r in reg.values() if r.get("stopping")}
-    if not going:
-        return []
-    left = J.wait_gone(list(going), wait_s,
-                       alive=lambda p: _alive(going[p][0], p))
-    return [(going[p][0], going[p][1], p) for p in left]
-
-
-def _slot_conflict(spec: dict, reg: dict):
-    """(job, rank, pid) of an alive rank of a DIFFERENT job on this
-    machine whose ring port falls in this job's slot, else None. A
-    coordinator's `_slot` only scans its own registry (`_used_slots`),
-    so a quick relaunch can still hand a job a slot a previous job's
-    still-live rank holds on a PEER machine; this is the peer-side net
-    that catches it before two jobs' ranks talk over the same port."""
-    try:
-        port = int(spec["hosts"][spec["rank"]].rsplit(":", 1)[1])
-    except (IndexError, ValueError, TypeError, AttributeError, KeyError):
-        return None
-    slot = _slot_of_port(port)
-    for rec in reg.values():
-        j = str(rec.get("job") or "")
-        if not j or j == spec["job"]:
-            continue
-        rp = rec.get("ring_port")
-        if not isinstance(rp, int) or _slot_of_port(rp) != slot:
-            continue
-        pid = int(rec["pid"])
-        if _alive(j, pid):
-            return j, rec.get("rank"), pid
-    return None
-
-
-def start(job: str | None, *, spawn=None, wait_s: float | None = None,
-          ring: dict | None = None) -> tuple:
-    """A Start message: spawn this page's prepared rank -- once
-    every stopped rank on this machine is gone (up to START_WAIT_S), and
-    never beside another job's rank still loading."""
-    key = str(job or "")
-    with _LOCK:
-        prep = PREPARED.get(key)
-    c = (ring or {}).get("prefill_chunk")
-    if prep is not None and isinstance(c, int) and not isinstance(c, bool) \
-            and c > 0:
-        # the ring's chunk, known only once every rank answered Prepare
-        prep["spec"] = dict(prep["spec"], prefill_chunk=c,
-                            prefill_why=str((ring or {}).get("prefill_why")
-                                            or "")[:120])
-    reads = (ring or {}).get("reads")
-    if prep is not None and isinstance(reads, list) and \
-            len(reads) == prep["spec"]["world"]:
-        # this rank's entry of the job's read plan (cluster/weights.py)
-        prep["spec"] = dict(prep["spec"], read=reads[prep["spec"]["rank"]])
-    if prep is None:
-        return _started_already(key)
-    mine: dict = prep
-    with _START_LOCK:
-        # The job stays prepared until _start has written its registry
-        # record (or refused, or failed): a peer page asking JobState
-        # in between sees it held, never "no rank" (docs/design/liveness.md)
-        try:
-            with _LOCK:
-                if PREPARED.get(key) is not mine:
-                    # a retried Start that waited on the first one
-                    return _started_already(key)
-                mine["starting"] = True
-            return _start(mine, spawn, START_WAIT_S if wait_s is None
-                          else wait_s)
-        finally:
-            with _LOCK:
-                if PREPARED.get(key) is mine:
-                    PREPARED.pop(key)
-
-
-def _started_already(job: str) -> tuple:
-    """A retried Start (the answer was lost): the rank is already here, or
-    the job is not prepared here."""
-    again = _running_here(job)
-    if again:
-        return 200, typed(Started(job=job, rank=again[0], pid=again[1],
-                                  log=again[2]))
-    return 404, {"error": f"no prepared job {job[:40]!r} here"}
-
-
-def _running_here(job: str):
-    """(rank, pid, log) of this machine's live, not-stopping rank of `job`,
-    or None."""
-    for rec in J.by_job().get(job, []):
-        try:
-            if not rec.get("stopping") and _alive(job, int(rec["pid"])):
-                return int(rec["rank"]), int(rec["pid"]), rec.get("log")
-        except (KeyError, TypeError, ValueError):
-            continue
-    return None
-
-
-def _start(prep: dict, spawn, wait_s: float) -> tuple:
-    spec, path = prep["spec"], prep["path"]
-    from knurlogic.machine import identity
-    me = identity.identity().get("name") or "this machine"
-    going = exiting(J.registry())
-    left = J.wait_gone(list(going), wait_s,
-                       alive=lambda p: _alive(going[p], p)) if going else []
-    if left:
-        return 409, {"error": f"{me} refuses rank {spec['rank']}: "
-                              + ", ".join(f"job {going[p]}'s rank (pid {p})"
-                                          for p in left)
-                              + f" was stopped and is still exiting after "
-                                f"{wait_s:.0f} s; its memory is not free"}
-    why = _loading_elsewhere(spec["job"], J.registry())
-    if why:
-        return 409, {"error": f"{me} refuses rank {spec['rank']}: {why}"}
-    conflict = _slot_conflict(spec, J.registry())
-    if conflict:
-        j, r, pid = conflict
-        left = J.wait_gone([pid], wait_s, alive=lambda p: _alive(j, p))
-        if left:
-            return 409, {"error": f"{me} refuses rank {spec['rank']}: rank "
-                                  f"{r} of job {j} is still exiting on "
-                                  f"{me} and holds this job's ring port; "
-                                  f"its memory is not free"}
-    d = J.job_dir(spec["job"])
-    files = {"hostfile": str(d / f"hostfile-rank{spec['rank']}.json"),
-             "ibv": str(d / "ibv-devices.json")}
-    if spec["link"] == "ring":
-        Path(files["hostfile"]).write_text(json.dumps(
-            [[h] for h in spec["hosts"]]))
-    else:
-        Path(files["ibv"]).write_text(json.dumps(spec["ibv_devices"]))
-    log = d / f"rank{spec['rank']}.log"
-    try:
-        heal = bool(_local_info().get("jaccl_selfheal"))
-    except (OSError, ValueError, AttributeError, TypeError):
-        heal = False
-    cmd = RANK_ARGV[0](path, spec, files)
-    env = {**os.environ, **rank_env(spec, files, heal)}
-    try:
-        with open(log, "w") as fh:
-            proc = (spawn or subprocess.Popen)(
-                cmd, stdout=fh, stderr=subprocess.STDOUT, env=env,
-                start_new_session=True)
-    except (*PROC_ERRORS, ValueError) as e:
-        return 500, {"error": f"{type(e).__name__}: {e}"}
-    rec = {"job": spec["job"], "rank": spec["rank"], "world": spec["world"],
-           "pid": proc.pid, "artifact": path, "log": str(log),
-           # the model by identity: each rank's folder name may differ
-           "identity": spec.get("identity") or "",
-           "split": spec["split"], "link": spec["link"],
-           "machines": [n.get("name") for n in spec["nodes"]],
-           # the machine THIS rank runs on, so a stop reason names it --
-           # the reason is propagated to every page of the job
-           "machine": spec["nodes"][spec["rank"]].get("name")
-           if spec["rank"] < len(spec["nodes"]) else None,
-           "leader": spec["nodes"][0].get("name"),
-           # every machine of the job by id, so the watcher can ask their
-           # pages -- after a page restart too (SPECS is in memory)
-           "nodes": [{"rank": n.get("rank"), "id": n.get("id"),
-                      "name": n.get("name")} for n in spec["nodes"]],
-           # measured once at launch: the page's polls read this, not
-           # the model folder
-           "bytes": bytes_on_disk(path),
-           "started": time.strftime("%Y-%m-%d %H:%M:%S"), "t": time.time()}
-    if spec.get("port") and spec["rank"] == 0:
-        rec["port"] = int(spec["port"])
-    try:
-        rec["ring_port"] = int(spec["hosts"][spec["rank"]].rsplit(":", 1)[1])
-    except (IndexError, ValueError, TypeError, AttributeError):
-        pass
-    with _LOCK:
-        _PROCS[(spec["job"], spec["rank"])] = proc
-        SPECS[spec["job"]] = spec
-        J.update_registry(lambda reg: reg.update(
-            {f"{spec['job']}/{spec['rank']}": rec}))
-        if "port" in rec:
-            served = {"pid": proc.pid, "artifact": path, "log": str(log),
-                      "job": spec["job"], "bytes": rec["bytes"],
-                      "started": rec["started"], "t": rec["t"]}
-            servers.update_registry(lambda sreg: sreg.update(
-                {rec["port"]: served}))
-    if "port" in rec:
-        # this job's recovery row (a relaunch carries it; a launch by
-        # somebody clears it), for rank 0's own /v1/residency
-        recovery.write_port(rec["port"], spec.get("recovery"))
-    _ensure_watcher()
-    return 200, typed(Started(job=spec["job"], rank=spec["rank"],
-                              pid=proc.pid, log=str(log)))
-
-
-def _alive(job: str, pid: int) -> bool:
-    proc = next((p for (j, _), p in _PROCS.items()
-                 if j == job and p.pid == pid), None)
-    if proc is not None:
-        # poll() answers None while another thread waits on the process
-        # (Popen's wait lock), dead or not; a zombie is dead
-        return proc.poll() is None and processes.running(pid)
-    return J.is_rank(pid, job)
-
-
-def stop(job: str, reason: str = "unloaded", propagate: bool = True,
-         post=None, grace: float = J.GRACE_S,
-         reap: float = J.REAP_S, kind: str | None = None,
-         wait: bool = True) -> dict:
-    """Stop every rank of `job` on this machine (SIGTERM, then SIGKILL
-    after `grace`), forget it, and -- when `propagate` -- tell every other
-    page of the job to do the same.
-
-    `wait` False (another page's Stop) answers once the ranks here are
-    marked stopping and ends them on a thread: a follower leaves only on
-    rank 0's `stop`, and rank 0's page sends its own SIGTERM only after
-    every page has answered -- waiting here held an idle job's unload for
-    the whole grace, and then SIGKILLed the follower."""
-    job = str(job or "")
-    cleared: list = []
-    if recovery.kind(reason, kind) == "requested":
-        cleared = recovery.cancel_job(job)   # asked for: never recovered
-    # an unload carries no kind of its own: say "requested" from the start,
-    # so a page polling while the ranks exit never shows it as a failure
-    stop_kind = kind or ("requested" if recovery.kind(reason) == "requested"
-                         else None)
-    with _LOCK:
-        PREPARED.pop(job, None)
-        spec = SPECS.pop(job, None)
-        ending = job in _STOPPING       # another stop is ending it already
-        _STOPPING.add(job)
-        mine: dict = {}
-
-        def mark(reg: dict) -> None:
-            # marked first: a start on this page waits for these to be
-            # gone, and a prepare does not count them as staying
-            for k, v in reg.items():
-                if v.get("job") == job:
-                    reg[k] = mine[k] = dict(
-                        v, stopping=v.get("stopping") or time.time(),
-                        stop_reason=v.get("stop_reason") or reason,
-                        stop_kind=v.get("stop_kind") or stop_kind)
-        if any(v.get("job") == job for v in J.registry().values()):
-            J.update_registry(mark)
-    # the job's machines: its spec, or -- after a page restart, SPECS being
-    # in memory -- the ids its rank records here keep
-    nodes: list = (spec or {}).get("nodes") or next(
-        (v["nodes"] for v in mine.values() if v.get("nodes")), [])
-    if propagate and not nodes and not mine and not spec:
-        # nothing of it here (a failed job, its ranks gone and recovery's
-        # record all that is left): every peer page hears the stop, so the
-        # record goes on whichever Mac holds it
-        nodes = [{"id": i} for i in _peer_pages()]
-    if not wait:
-        if not ending:
-            threading.Thread(target=_end_stop, daemon=True,
-                             name=f"knurlogic-stop-{job}",
-                             args=(job, mine, spec, reason, stop_kind,
-                                   grace, reap)).start()
-        return typed(Stopped(
-            job=job, ranks_here=sorted(v["rank"] for v in mine.values()),
-            exiting=[int(v["pid"]) for v in mine.values()
-                     if _alive(job, int(v["pid"]))],
-            reason=reason, cleared=cleared))
-    # the other pages first: a rank stopped here before its peers hear of
-    # it fails their ranks' ring ("[ring] connection to a peer was lost"),
-    # and their pages would record a crash -- and recover it -- where the
-    # job was asked to stop. Each answers once its ranks are marked
-    # (wait=False), so this waits for no rank to leave
-    told: list = []
-    if propagate and nodes:
-        told, more = _tell_peers(job, nodes, reason, kind, post)
-        cleared += [c for c in more if c not in cleared]
-    killed, left = _end_stop(job, mine, spec, reason, stop_kind, grace,
-                             reap)
-    return typed(Stopped(job=job, ranks_here=sorted(v["rank"] for v in
-                                                    mine.values()),
-                         killed=killed, exiting=left, told=told,
-                         reason=reason, cleared=cleared))
-
-
-def _end_stop(job: str, mine: dict, spec: dict | None, reason: str,
-              stop_kind: str | None, grace: float, reap: float) -> tuple:
-    """`stop`'s second half, after the ranks here are marked: end them
-    (J.terminate) and forget the job once they are gone. (killed pids,
-    pids still exiting). The job stays in `_STOPPING` until its records
-    are gone too: the watcher, which skips it while there, would else
-    start another stop of it from its "all stopping" records."""
-    try:
-        killed, left = _end_ranks(job, mine, grace, reap)
-        with _LOCK:
-            _forget_job(job, mine, spec, left, reason, stop_kind)
-    finally:
-        with _LOCK:
-            _STOPPING.discard(job)
-    return killed, left
-
-
-def _end_ranks(job: str, mine: dict, grace: float, reap: float) -> tuple:
-    """SIGTERM this page's ranks of `job`, SIGKILL what outlives `grace`
-    (one mid-step is spared): (killed pids, pids still exiting)."""
-    pids = [int(v["pid"]) for v in mine.values()
-            if _alive(job, int(v["pid"]))]
-
-    def alive(p):
-        return _alive(job, p)
-    rank_of = {int(v["pid"]): int(v["rank"]) for v in mine.values()}
-
-    def spare(p):
-        return J.mid_step(job, rank_of[p], p)
-
-    killed = J.terminate(pids, grace=grace, alive=alive,
-                         reap=reap, spare=spare) if pids else []
-    return killed, [p for p in pids if alive(p)]
-
-
-def _forget_job(job: str, mine: dict, spec: dict | None, left: list,
-                reason: str, stop_kind: str | None) -> None:
-    """Drop what this page holds of `job` but the ranks in `left`, still
-    exiting (their records stay, phase "stopping", for the watcher to
-    finish); once none is left, record how it ended (`ENDED`). Under
-    _LOCK."""
-    for (j, r) in [k for k in _PROCS if k[0] == job]:
-        if _PROCS[(j, r)].pid in left:
-            continue
-        try:
-            _PROCS.pop((j, r)).wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            pass                        # not gone yet; the watcher reaps it
-    gone = [k for k, v in mine.items() if int(v["pid"]) not in left]
-    if gone:
-        J.update_registry(lambda reg: _drop(reg, gone))
-    if any(v.get("job") == job for v in servers.registry().values()):
-        servers.update_registry(lambda sreg: _drop(sreg, [
-            p for p, v in sreg.items()
-            if v.get("job") == job and int(v["pid"]) not in left]))
-    _WATCH.forget(job)
-    for state in (_PEER_BOOT, _PEER_SILENT):
-        for k in [k for k in state if k[0] == job]:
-            state.pop(k)
-    _PEER_SLOW.difference_update({k for k in _PEER_SLOW if k[0] == job})
-    # stopped means gone: a rank still exiting keeps its record
-    # (phase "stopping"), and the watcher finishes the stop
-    if (mine or spec) and not left:
-        any_rec: dict = next(iter(mine.values()), {})
-        port = next((int(v["port"]) for v in mine.values()
-                     if v.get("port")), None) or (
-            int((spec or {}).get("port") or 0) or None)
-        # a failover that already moved the job keeps saying where it
-        # went: the failing rank's stop can land after it
-        moved = ENDED.get(job) if (ENDED.get(job) or {}).get(
-            "relaunched") else None
-        # an unload says so, so the page drops its card instead of
-        # showing "failed" (picker.js followLaunch)
-        ENDED[job] = {"reason": reason, "kind": stop_kind,
-                      "t": time.time(), "port": port,
-                      "split": any_rec.get("split")
-                      or (spec or {}).get("split"),
-                      "link": link_name(any_rec.get("link")
-                                        or (spec or {}).get("link")),
-                      "machines": any_rec.get("machines")
-                      or [n.get("name") for n in (spec or {}).get(
-                          "nodes") or []]}
-        if moved:
-            ENDED[job].update(reason=moved["reason"],
-                              relaunched=moved["relaunched"])
-
-
-def _drop(reg: dict, keys: list) -> None:
-    for k in keys:
-        reg.pop(k, None)
-
-
-def _tell_peers(job: str, nodes: list, reason: str, kind: str | None,
-                post=None) -> tuple[list, list]:
-    """Stop to every other page of the job (each answers once its ranks
-    are marked stopping): (who was told, what their recovery cleared).
-
-    Followers' pages first, all at once, then rank 0's: its rank 0 is what
-    makes the followers leave, so every page has marked its follower by
-    then, and none reads its follower's exit as a crash -- wherever the
-    stop began (a follower's page, with three machines or more, once told
-    rank 0's page first)."""
-    from knurlogic.machine import identity
-    me = identity.identity().get("id")
-    known = _peer_pages()
-    # the address is this page's own record of that peer, never the spec's:
-    # a prepare body cannot aim this page's stop elsewhere
-    targets = [(n, known[str(n.get("id") or "")]) for n in nodes
-               if n.get("id") != me and known.get(str(n.get("id") or ""))]
-    body = {"job": job, "reason": reason, **({"kind": kind} if kind else {})}
-
-    def tell(target):
-        n, page = target
-        return n, (post or transport.send)(page, "Stop", body)
-    told: list = []
-    cleared: list = []
-    for wave in ([t for t in targets if t[0].get("rank") != 0],
-                 [t for t in targets if t[0].get("rank") == 0]):
-        for got in transport.parallel(tell, wave):
-            if not isinstance(got, tuple):
-                logger.debug("could not tell a page to stop job %s: %s",
-                             job, got)
-                continue
-            n, ans = got
-            told.append(n.get("name") or n.get("id"))
-            # what that Mac's recovery cleared (a failed job's record lives
-            # on whichever page started it)
-            if isinstance(ans, dict):
-                cleared += [c for c in ans.get("cleared") or []
-                            if c not in cleared]
-    return told, cleared
-
-
-def _peer_pages() -> dict:
-    """{peer id: page address} from this page's PEERS store (an answering
-    record first)."""
-    out = {}
-    peers: list = peers_fn()
-    for p in sorted(peers, key=lambda p: p.state == "answering"):
-        if getattr(p, "id", ""):
-            out[p.id] = p.key
-    return out
-
-
-def watch_once(now: float | None = None) -> list:
-    """Check every job with a rank on this machine; stop the failed ones.
-    -> [(job, reason)] stopped."""
-    out = []
-    for job, recs in J.by_job().items():
-        if job in _STOPPING:
-            continue
-        if all(r.get("stopping") for r in recs):
-            live = [r for r in recs if _alive(job, int(r["pid"]))]
-            if live and all(J.mid_step(job, int(r["rank"]), int(r["pid"]))
-                            for r in live):
-                continue                  # spared mid-step: nothing to do
-            # stopped, and a rank was still exiting: finish it
-            stop(job, reason=recs[0].get("stop_reason") or "stopped",
-                 propagate=False)
-            continue
-        why, fkind = _WATCH.check(job, recs,
-                                  lambda pid, j=job: _alive(j, pid), now=now)
-        if not why:
-            why, fkind = peer_verdict(job, recs)
-        elif " exited" in why:
-            why, fkind = exit_reason(why, recs, fkind)
-        if why:
-            stop(job, reason=why, kind=fkind)
-            out.append((job, why))
-    return out
-
-
-def exit_reason(why: str, recs: list, kind: str | None = None
-                ) -> tuple[str, str | None]:
-    """`why` (a rank "exited") with what the ranks' logs say, and its
-    recovery kind: a link init failure, a refusal to start (the job fails
-    with its words), out of memory -- else `why` and `kind` as given."""
-    line = next((x for x in (link_init_failure(J.log_tail(r.get("log")))
-                             for r in recs) if x), "")
-    if line:
-        return f"{why}: link init failed: {line}"[:300], kind
-    tails = [J.log_tail(r.get("log")) for r in recs]
-    ref = next((x for x in map(recovery.refusal_line, tails) if x), "")
-    if ref:
-        return f"{why}: {ref}"[:700], "refusal"
-    mem = next((x for x in map(recovery.memory_line, tails) if x), "")
-    if mem:
-        return f"{why}: out of memory: {mem}"[:300], "memory"
-    if any(RING_LOST in t for t in tails):
-        # its ring lost a peer: a machine of the job went away (or its
-        # rank did) -- recovery waits until every machine answers again
-        return f"{why}: its ring lost a peer ({RING_LOST})"[:300], "machine"
-    return why, kind
-
-
-def job_state(job: str) -> dict:
-    """JobState: whether this page still runs its ranks of `job`; a rank
-    whose process exited before this page's watcher stopped the job is
-    `exited`, with that watcher's own reason."""
-    # one snapshot: start() saves a record, then unprepares, and stop()
-    # drops the records and writes ENDED, each under _LOCK -- read apart, a
-    # peer could see neither and stop a healthy job
-    with _LOCK:
-        prepared = job in PREPARED
-        recs = J.by_job().get(job, [])
-        ended = dict(ENDED.get(job) or {})
-    live = sorted(int(r["rank"]) for r in recs if not r.get("stopping")
-                  and _alive(job, int(r["pid"])))
-    dead = [r for r in recs if not r.get("stopping")
-            and int(r["rank"]) not in live]
-    exited, exited_kind = (exit_reason(
-        f"rank {dead[0]['rank']} on {dead[0].get('machine') or 'its machine'}"
-        f" (pid {dead[0]['pid']}) exited", dead) if dead else (None, None))
-    stopping = [r for r in recs if r.get("stopping")]
-    return typed(JobState(
-        job=job, ranks_here=live, prepared=prepared,
-        exited=exited, exited_kind=exited_kind,
-        stopping=bool(stopping),
-        phase=J.phase_of(job, [r for r in recs if not r.get("stopping")])
-        if live else None,
-        # by process, records or not: a relaunch waits for none left
-        processes=J.pids_of_job(job),
-        ended=ended.get("reason") or (
-            stopping[0].get("stop_reason") if stopping else None),
-        ended_kind=ended.get("kind") or (
-            stopping[0].get("stop_kind") if stopping else None)))
-
-
-def _ask_job(page: str, job: str) -> dict:
-    return transport.send(page, "JobState", {"job": job})
-
-
-def _record_of(nid: str):
-    """This page's peer record of machine `nid` (an answering one first)."""
-    recs = [p for p in peers_fn() if getattr(p, "id", "") == nid]
-    return sorted(recs, key=lambda p: p.state != "answering")[0] \
-        if recs else None
-
-
-#: (job, peer id) pages that did not answer, warned once per episode
-_PEER_SLOW: set = set()
-#: (job, peer id) -> when that machine's kernel was first found silent
-#: while the job was still joining (`_silent_while_joining`)
-_PEER_SILENT: dict = {}
-
-
-def peer_verdict(job: str, recs: list, ask=None, pages=None,
-                 me=None, probe=None,
-                 now: float | None = None) -> tuple[str, str | None]:
-    """("", None) while every other machine of the job still runs its rank,
-    else (why not, recovery kind), from what that machine's page says: the
-    job ended there; a rank of it exited there (with that page's reason);
-    it restarted (a new boot_id) holding no rank; it holds no rank and is
-    not preparing one. A page that does not answer says nothing: a page
-    is not its rank (ranks outlive a page restart), so its silence never
-    stops a job. A peer MACHINE that goes silent is caught by the ranks'
-    own bell watchers (engine/split/liveness, docs/design/liveness.md) --
-    once they are armed; while the job is still joining, by its kernel
-    (`_silent_while_joining`)."""
-    nodes = next((r.get("nodes") for r in recs if r.get("nodes")), None) \
-        or (SPECS.get(job) or {}).get("nodes") or []
-    if not nodes:
-        return "", None
-    if me is None:
-        from knurlogic.machine import identity
-        me = identity.identity().get("id")
-    pages = _peer_pages() if pages is None else pages
-    ask = ask or _ask_job
-    for n in nodes:
-        nid = str(n.get("id") or "")
-        if not nid or nid == me:
-            continue
-        name = n.get("name") or nid
-        key = (job, nid)
-        page = pages.get(nid)
-        try:
-            if not page:
-                raise ConnectionError("not a peer this page knows")
-            doc = ask(page, job)
-        except (*transport.NO_ANSWER, AttributeError) as e:
-            if key not in _PEER_SLOW:
-                _PEER_SLOW.add(key)
-                logger.warning("cluster job %s: %s's page has not answered "
-                               "(%s); a page's silence is not evidence, the "
-                               "job is kept", job, name, type(e).__name__)
-            why = _silent_while_joining(job, recs, key, name, page, probe,
-                                        now)
-            if why:
-                return why, "machine"
-            continue
-        _PEER_SILENT.pop(key, None)         # the machine answered
-        if not transport.is_answer(doc):
-            # its handler failed or refused: an answer about nothing, so
-            # no evidence either way (transport.answer)
-            if key not in _PEER_SLOW:
-                _PEER_SLOW.add(key)
-                logger.warning("cluster job %s: %s's page could not say "
-                               "(%s); the job is kept", job, name,
-                               (doc or {}).get("error"))
-            continue
-        _PEER_SLOW.discard(key)
-        why, kind = _page_says(key, name, doc)
-        if why:
-            return why, kind
-    return "", None
-
-
-def _page_says(key: tuple, name: str, doc: dict) -> tuple[str, str | None]:
-    """`peer_verdict` for one machine whose page answered JobState with
-    `doc`: ("", None) while it still runs its rank of the job (key: (job,
-    its id)), else (why not, recovery kind)."""
-    if doc.get("ended"):
-        return (f"{name} stopped the job: {doc['ended']}"[:300],
-                doc.get("ended_kind"))
-    if doc.get("exited"):
-        return (f"{name}: {doc['exited']}"[:700],
-                doc.get("exited_kind") or "machine")
-    rec = _record_of(key[1])
-    boot = getattr(rec, "boot_id", "") or ""
-    if doc.get("ranks_here") or doc.get("prepared"):
-        # ranks run in their own session and outlive a restarted page:
-        # one still holding its rank is believed, new process or not (a
-        # page redeploy used to stop a healthy job here)
-        if boot:
-            _PEER_BOOT[key] = boot
-        return "", None
-    if boot and _PEER_BOOT.get(key, boot) != boot:
-        return (f"{name} restarted (a new knurlogic process); its rank of "
-                f"the job is gone", "machine")
-    return f"{name} no longer runs its rank of the job", "machine"
-
-
-def _silent_while_joining(job: str, recs: list, key: tuple, name: str,
-                          page, probe=None, now: float | None = None) -> str:
-    """Why the machine behind a page that did not answer is gone, or "".
-
-    Before the bell watchers are armed -- every rank of the job here still
-    joining (its marker phase): rank 0 waiting at the bell for a rank that
-    never dials, or any rank in mlx's ring init, which accepts with no
-    timeout -- a machine that dies leaves no connection to watch, and the
-    job would wait out the bell (link.BELL_EARLY_S) or forever. So its
-    kernel is asked instead, on the page's own address (a Thunderbolt
-    address: cluster peers are gated to the cable): accepted or refused
-    is a machine that is there (a page restarting); only silence --
-    liveness.SILENT_S of it, keepalive's own window -- is evidence."""
-    from knurlogic.engine.split import liveness
-    if not page or J.phase_of(job, recs) != "joining":
-        _PEER_SILENT.pop(key, None)
-        return ""
-    host, _, port = str(page).rpartition(":")
-    try:
-        answers = (probe or liveness.kernel_answers)(host, int(port))
-    except ValueError:
-        return ""
-    now = time.monotonic() if now is None else now
-    if answers is not False:
-        _PEER_SILENT.pop(key, None)
-        return ""
-    since = _PEER_SILENT.setdefault(key, now)
-    if now - since < liveness.SILENT_S:
-        return ""
-    return (f"the machine holding {name}'s rank stopped answering on the "
-            f"job's link while the job was joining ({liveness.SILENT_S} s "
-            f"of silence)")
-
-
-def _ensure_watcher() -> None:
-    """The page's watcher, started once per process: `watch_once` every
-    WATCH_S. A test sets _WATCHER and drives watch_once by hand."""
-    with _LOCK:
-        if _WATCHER.is_set():
-            return
-        _WATCHER.set()
-    every(WATCH_S, watch_once, "knurlogic-cluster-watch")
-
-
-def start_watching_existing() -> None:
-    """At page start: ranks from an earlier page process are watched too,
-    and the models an earlier page process was recovering are again."""
-    if J.registry():
-        _ensure_watcher()
-    recovery.restore()
-
-
-def jobs_document() -> list:
-    """The jobs with a rank on this machine, and the ones that ended
-    lately with why, for /loaded.json."""
-    out = []
-    for job, recs in J.by_job().items():
-        r0 = min(recs, key=lambda r: r["rank"])
-        phase = J.phase_of(job, recs)
-        # a rank stayed inside a step rather than leave (a stop spares it):
-        # neither stopping forever nor loaded
-        stuck = ({"stuck": servers.stuck_reason(r0.get("machines") or [])}
-                 if phase == "stuck" else {})
-        if all(r.get("stopping") for r in recs):
-            out.append({"job": job, "phase": "stuck" if stuck else "stopping",
-                        **stuck,
-                        "split": r0.get("split"),
-                        "link": link_name(r0.get("link")),
-                        "reason": r0.get("stop_reason"),
-                        "kind": r0.get("stop_kind"),
-                        "machines": r0.get("machines"),
-                        "port": next((r.get("port") for r in recs
-                                      if r.get("port")), None),
-                        "exiting": sorted(int(r["pid"]) for r in recs)})
-            continue
-        out.append({"job": job, "split": r0.get("split"),
-                    "link": link_name(r0.get("link")),
-                    "machines": r0.get("machines"),
-                    "leader": r0.get("leader"), "world": r0.get("world"),
-                    "ranks_here": sorted(r["rank"] for r in recs),
-                    "port": next((r.get("port") for r in recs
-                                  if r.get("port")), None),
-                    "artifact": Path(r0.get("artifact") or "").name,
-                    "identity": r0.get("identity") or "",
-                    "phase": phase, **stuck,
-                    **{k: (SPECS.get(job) or {}).get(k) for k in
-                       ("cable", "cable_note")
-                       if (SPECS.get(job) or {}).get(k)},
-                    **({"url": leader_url(dict(SPECS[job], port=next(
-                        (r.get("port") for r in recs if r.get("port")),
-                        None)))} if SPECS.get(job) else {})})
-    now = time.time()
-    for job, e in list(ENDED.items()):
-        if now - e["t"] > 600:
-            ENDED.pop(job, None)
-        else:
-            out.append({"job": job, "phase": "stopped", **e})
-    return out
-
-
-def failure_of_port(port) -> str:
-    """Why the cluster job whose rank 0 serves on `port` here cannot
-    answer -- "" when no job of this machine's serves there. A dropped
-    connection to a live job's rank 0 has the watcher look at once, so the
-    answer carries the job's real stop reason, not a guess."""
-    try:
-        port = int(port or 0)
-    except (TypeError, ValueError):
-        return ""
-    if not port:
-        return ""
-    job = job_of_port(port)
-    if job:
-        try:
-            watch_once()
-        except Exception:  # an HTTP request must still answer; logged
-            logger.debug("watch_once failed while reading job %s", job, exc_info=True)
-    for j, e in sorted(ENDED.items(), key=lambda kv: -kv[1]["t"]):
-        if (job and j == job) or (not job and e.get("port") == port):
-            return e.get("reason") or "stopped"
-    if job:
-        return (f"rank 0 of cluster job {job} dropped the connection; the "
-                f"job is failing")
-    return ""
-
-
-def job_of_port(port: int) -> str:
-    for job, recs in J.by_job().items():
-        if any(r.get("port") == port for r in recs):
-            return job
-    return ""
 
 
 # ------------------------------------------------------------ coordinator
@@ -1588,7 +62,7 @@ RDMA_N_NOTE = "RDMA across more than two Macs is experimental and untested"
 CABLE_RX = re.compile(r"(\d{1,3}\.\d{1,3}\.\d{1,3})(?:\.(?:\d{1,3}|x|0/24))?")
 
 
-def refresh_memory(infos: list, post, wait_s: float = EXIT_WAIT_S,
+def refresh_memory(infos: list, post, wait_s: float = tables.EXIT_WAIT_S,
                    sleep=time.sleep) -> bool:
     """Re-read every machine's memory now (a Survey to each peer, this
     machine directly), first waiting up to `wait_s` for ranks still exiting
@@ -1600,7 +74,7 @@ def refresh_memory(infos: list, post, wait_s: float = EXIT_WAIT_S,
         busy = False
         for m in infos:
             if m.get("page") is None:
-                av, going = available_now(), len(exiting(J.registry()))
+                av, going = available_now(), len(here.exiting(J.registry()))
             else:
                 try:
                     doc = post(m["page"], "Survey", {})
@@ -1678,7 +152,7 @@ def _launch_request(req: dict) -> tuple:
     if not isinstance(ids, list) or len(ids) < 2 or \
             len(set(map(str, ids))) != len(ids):
         raise _Refused({"error": "a cluster launch names two or more machines"})
-    split = req.get("split") if req.get("split") in SPLITS else None
+    split = req.get("split") if req.get("split") in tables.SPLITS else None
     link = backend(req.get("link"))
     unnamed = req.get("link") in (None, "")
     if not split or not (link or unnamed):
@@ -1744,7 +218,7 @@ def _launch_model(req: dict, infos: list, split: str, ident: str,
     if alert:
         logger.warning("cluster launch: %s", alert)
         req = dict(req, identity=ident)
-    path = _resolve(ident, aname)
+    path = here.resolve(ident, aname)
     sets, bad = clean_sets(req.get("sets") or {})
     if bad:
         raise _Refused({"error": f"not a launch setting: {', '.join(bad)}"})
@@ -1752,7 +226,7 @@ def _launch_model(req: dict, infos: list, split: str, ident: str,
         # "turn MTP off and launch": every rank's settings say so
         sets = dict(sets, KNURLOGIC_MTP="off")
     if path:
-        why = sets_refusal(path, sets, preset_or(req.get("tune"), "default"))
+        why = preparing.sets_refusal(path, sets, preset_or(req.get("tune"), "default"))
         if why:
             raise _Refused({"refused": f"nothing started: {why}"})
     world = len(infos)
@@ -1939,13 +413,13 @@ def _ring_layout(order: list, link, net: str, job: str, plan: dict) -> tuple:
     world = len(order)
     try:
         ips = links.ring_ips(order, rdma=link == "jaccl", net=net)
-        slot = _slot(job)
+        slot = tables.slot(job)
     except ValueError as e:
         raise _Refused({"refused": str(e), "placement": plan}) from e
-    hosts = [f"{ip}:{ring_port(slot, r)}" for r, ip in enumerate(ips)]
+    hosts = [f"{ip}:{tables.ring_port(slot, r)}" for r, ip in enumerate(ips)]
     if link != "jaccl":
         return ips, hosts, None, ""
-    coord = f"{ips[0]}:{ring_port(slot, COORDINATOR_OFFSET)}"
+    coord = f"{ips[0]}:{tables.ring_port(slot, tables.COORDINATOR_OFFSET)}"
     if world > 2:
         return ips, hosts, [[None if i == j else
                              links.rdma_device(order[i], order[j])
@@ -1969,11 +443,11 @@ def _saved_chunk(sets: dict) -> int:
     (ring_chunk, once Prepare has answered; PREFILL_CHUNK until then).
     serve puts the ring's value over any --set, so the saved one must be
     resolved here or it is shown and never runs."""
-    saved = canonical_sets(sets).get(PREFILL_KNOB)
+    saved = canonical_sets(sets).get(tables.PREFILL_KNOB)
     if saved is None:
-        return PREFILL_CHUNK
+        return tables.PREFILL_CHUNK
     from knurlogic.tuning.checks import check_knob
-    why = check_knob(PREFILL_KNOB, saved)
+    why = check_knob(tables.PREFILL_KNOB, saved)
     if why:
         raise _Refused({"error": why})
     return int(saved)
@@ -2110,7 +584,7 @@ def _launch(req: dict, *, me: dict, peers: list, local_info: dict,
             "identity": ident, "name": aname, "hosts": hosts, "ibv_devices": ibv,
             # the bell's nonce: random, in the spec the pages share, never
             # shown (the job id is on the page)
-            "bell_nonce": _bell_nonce(),
+            "bell_nonce": starting.bell_nonce(),
             "coordinator": coord, "layers": plan["layers"],
             "prefill_chunk": _saved_chunk(sets),
             "tune": preset_or(req.get("tune"), "default"),
@@ -2140,7 +614,7 @@ def _launch(req: dict, *, me: dict, peers: list, local_info: dict,
         g["alert"] for g in got if isinstance(g, dict) and g.get("alert")]
     for a in alerts[1 if alert else 0:]:
         logger.warning("cluster job %s: %s", job, a)
-    chunk, chunk_why = ring_chunk(sets, got)
+    chunk, chunk_why = preparing.ring_chunk(sets, got)
     base["prefill_chunk"] = chunk
     # who reads from whose disk, and in what order: a rank on a network
     # mount fetches its share from a machine with a local copy, over the
@@ -2173,7 +647,7 @@ def _launch(req: dict, *, me: dict, peers: list, local_info: dict,
             args=dict(args), order=order, port=port,
             leader_here=order[0]["page"] is None,
             previous=(moved or {}).get("job"))
-    url = leader_url(base | {"port": port})
+    url = tables.leader_url(base | {"port": port})
     return {"job": job, "starting": ident, "placement": plan,
             "leader": plan["leader"], "port": port,
             "link": link_name(link), "url": url,
@@ -2187,7 +661,7 @@ def _launch(req: dict, *, me: dict, peers: list, local_info: dict,
 def job_end(job: str, order: list, post):
     """None while `job` runs (or loads) on every page, else why it ended:
     this page's record, or a page of the job saying it ended there."""
-    e = ENDED.get(job)
+    e = tables.ENDED.get(job)
     if e:
         return e.get("reason") or "stopped"
     for m in order:
@@ -2203,7 +677,7 @@ def failover(job: str, ctx: dict, reason: str):
     """`job` ended for `reason`: when that is a rank's link init failing,
     remember the cable as failing for the pair and relaunch on the next
     one (-> the relaunch's answer); else None."""
-    line = link_init_failure(reason)
+    line = tables.link_init_failure(reason)
     if not line:
         return None
     order = ctx["order"]
@@ -2222,8 +696,8 @@ def failover(job: str, ctx: dict, reason: str):
     to = out.get("job")
     msg = (f"; relaunched on cable {out.get('cable')} as job {to}" if to
            else f"; not relaunched: {out.get('refused') or out.get('error')}")
-    with _LOCK:
-        e = ENDED.setdefault(job, {"reason": reason, "t": time.time(),
+    with tables.LOCK:
+        e = tables.ENDED.setdefault(job, {"reason": reason, "t": time.time(),
                                    "port": None, "machines": [
                                        m.get("name") for m in ctx["order"]]})
         e["reason"] = (str(e.get("reason") or reason) + msg)[:600]
@@ -2238,7 +712,7 @@ def _follow(job: str, ctx: dict, clock=time.time, sleep=time.sleep):
     """The coordinator's watch on a job it launched, until it is serving
     (ready here) or FAILOVER_S: a link-init failure moves it to the next
     cable (`failover`)."""
-    FOLLOWING.add(job)
+    tables.FOLLOWING.add(job)
     try:
         end = clock() + FAILOVER_S
         while clock() < end:
@@ -2251,7 +725,7 @@ def _follow(job: str, ctx: dict, clock=time.time, sleep=time.sleep):
                 return None
         return None
     finally:
-        FOLLOWING.discard(job)
+        tables.FOLLOWING.discard(job)
 
 
 def _follow_thread(job: str, ctx: dict) -> None:
@@ -2265,7 +739,7 @@ def _abandon(job: str, order: list, post, reason: str = "refused") -> None:
     for m in order:
         try:
             if m["page"] is None:
-                stop(job, reason=reason, propagate=False)
+                stopping.stop(job, reason=reason, propagate=False)
             else:
                 post(m["page"], "Stop", {"job": job, "reason": reason})
         except NET_ERRORS:
@@ -2289,27 +763,27 @@ def peer_step(kind: str, req: dict) -> tuple:
         return 400, {"error": "a cluster job names its model by identity, "
                               "never by a path"}
     if kind == "Prepare":
-        return prepare(req)
+        return preparing.prepare(req)
     if kind == "Start":
-        return start(req.get("job"), ring=req)
+        return starting.start(req.get("job"), ring=req)
     if kind == "Stop":
         if not J.JOB_RX.fullmatch(str(req.get("job") or "")):
             return 400, {"error": "job is a hex nonce"}
         reason = str(req.get("reason") or "stopped by another machine")[:300]
         k = req.get("kind")
-        return 200, stop(req["job"], reason=reason, propagate=False,
+        return 200, stopping.stop(req["job"], reason=reason, propagate=False,
                          kind=k if k in (*FAILURE_KINDS, "requested")
                          else None, wait=False)
     if kind == "JobState":
         if not J.JOB_RX.fullmatch(str(req.get("job") or "")):
             return 400, {"error": "job is a hex nonce"}
-        return 200, job_state(req["job"])
+        return 200, watching.job_state(req["job"])
     if kind == "Shape":
-        p = _resolve(req.get("identity"), str(req.get("name") or ""))
+        p = here.resolve(req.get("identity"), str(req.get("name") or ""))
         if not p:
             return 404, {"error": "no artifact with that identity here"}
         w, s = req.get("world"), req.get("split")
-        if not isinstance(w, int) or s not in SPLITS:
+        if not isinstance(w, int) or s not in tables.SPLITS:
             return 400, {"error": "world and split"}
         return 200, shape_of(p, w, s, req.get("vision") is not False,
                              req.get("mtp") is not False)

@@ -146,7 +146,7 @@ from test_cluster_jobs import cache  # noqa: F401
 def test_a_cluster_job_runs_the_saved_prompt_chunk(cache, monkeypatch):
     """The ring's chunk was 512 whatever was saved, and serve puts the
     ring's over any --set: a saved launch setting shown, never run."""
-    from test_cluster_jobs import C, jaccl_launch, links
+    from test_cluster_jobs import jaccl_launch, links, tables
     monkeypatch.setattr(links, "BAD_CABLES", {})
     out, got = jaccl_launch(monkeypatch, {
         "cable": "127.0.1.x", "sets": {"KNURLOGIC_PREFILL_CHUNK": "2048"}})
@@ -154,7 +154,7 @@ def test_a_cluster_job_runs_the_saved_prompt_chunk(cache, monkeypatch):
     assert spec["prefill_chunk"] == 2048, out
     out, got = jaccl_launch(monkeypatch, {"cable": "127.0.1.x"})
     spec = next(d for k, d in got if k == "Prepare")
-    assert spec["prefill_chunk"] == C.PREFILL_CHUNK
+    assert spec["prefill_chunk"] == tables.PREFILL_CHUNK
     out, _ = jaccl_launch(monkeypatch, {
         "cable": "127.0.1.x", "sets": {"KNURLOGIC_PREFILL_CHUNK": "9999"}})
     assert "between" in out.get("error", ""), out

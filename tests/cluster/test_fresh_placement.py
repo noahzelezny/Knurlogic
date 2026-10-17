@@ -6,8 +6,8 @@ from types import SimpleNamespace
 import pytest
 from test_cluster_nmachines import GIB, SHAPE, mesh_infos
 
+from knurlogic.cluster import here, links, preparing, starting
 from knurlogic.cluster import launch as C
-from knurlogic.cluster import links
 
 
 @pytest.fixture
@@ -20,11 +20,12 @@ def _stale_launch(monkeypatch, fresh, exiting=()):
     """Two Macs; the peer's last status says 1 GiB available. `fresh`: what
     its Survey answers now (GiB, one per call); `exiting`: its exiting count
     per call."""
-    monkeypatch.setattr(C, "_resolve", lambda i, name="": "/m/x")
-    monkeypatch.setattr(C, "shape_of", lambda p, w, s, vision=True, mtp=True: SHAPE)
+    monkeypatch.setattr(here, "resolve", lambda i, name="": "/m/x")
+    for m in (C, preparing):
+        monkeypatch.setattr(m, "shape_of", lambda p, w, s, vision=True, mtp=True: SHAPE)
     monkeypatch.setattr(links, "BAD_CABLES", {})
-    monkeypatch.setattr(C, "prepare", lambda spec: (200, {"ok": True}))
-    monkeypatch.setattr(C, "start", lambda job, **k: (200, {"started": job}))
+    monkeypatch.setattr(preparing, "prepare", lambda spec: (200, {"ok": True}))
+    monkeypatch.setattr(starting, "start", lambda job, **k: (200, {"started": job}))
     monkeypatch.setattr(C, "available_now", lambda: 64 * GIB)
     monkeypatch.setattr(C.time, "sleep", lambda s: None)
     infos = mesh_infos(2)

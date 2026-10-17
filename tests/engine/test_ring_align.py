@@ -12,25 +12,25 @@ import time
 
 import pytest
 
-from knurlogic.cluster import launch
+from knurlogic.cluster import preparing, starting
 from knurlogic.engine.split import link as split_link
 
 
 def test_the_launcher_says_where_the_bell_is():
     spec = {"job": "1001be732c9d0cde", "world": 2, "bell_nonce": 4242,
             "hosts": ["198.51.100.2:47460", "198.51.100.1:47461"]}
-    assert launch.bell_address(spec) == "198.51.100.2:47478:4242:2"
+    assert starting.bell_address(spec) == "198.51.100.2:47478:4242:2"
     # the nonce is random per job, not read off the job id (shown on the
     # page); a spec without one (an older page) keeps the old way
-    assert "bell_nonce" in launch.SPEC_KEYS
-    assert launch.bell_address({**spec, "bell_nonce": None}) == ""
-    env = launch.rank_env({**spec, "rank": 1, "link": "ring"},
+    assert "bell_nonce" in preparing.SPEC_KEYS
+    assert starting.bell_address({**spec, "bell_nonce": None}) == ""
+    env = starting.rank_env({**spec, "rank": 1, "link": "ring"},
                           {"hostfile": "/x"}, False)
-    assert env["KNURLOGIC_BELL"] == launch.bell_address(spec)
+    assert env["KNURLOGIC_BELL"] == starting.bell_address(spec)
     # no room in the slot, or nothing to ring: the old way
-    assert launch.bell_address({**spec, "world": 19,
+    assert starting.bell_address({**spec, "world": 19,
                                 "hosts": spec["hosts"] * 10}) == ""
-    assert launch.bell_address({"job": "ab" * 8, "hosts": []}) == ""
+    assert starting.bell_address({"job": "ab" * 8, "hosts": []}) == ""
 
 
 class _G:

@@ -1067,20 +1067,20 @@ def _two(ws0, ws1):
 
 
 def test_tensor_placement_puts_the_head_on_rank_0_alone():
-    from knurlogic.cluster import launch as C
+    from knurlogic.tuning import placement
     gib = 1 << 30
     shape = {"tensor_per_rank_bytes": 10 * gib, "leader_bytes": 5 * gib,
              "refusals": []}
-    p = C.placement(_two(64, 64), shape, "tensor")
+    p = placement.placement(_two(64, 64), shape, "tensor")
     assert [s["bytes"] for s in p["shares"]] == [15 * gib, 10 * gib]
     assert "rank 0 5.0 GiB more" in p["reason"]
     # no head bytes: every rank the same share, as before
-    p = C.placement(_two(64, 64), dict(shape, leader_bytes=0), "tensor")
+    p = placement.placement(_two(64, 64), dict(shape, leader_bytes=0), "tensor")
     assert [s["bytes"] for s in p["shares"]] == [10 * gib] * 2
 
 
 def test_a_head_that_does_not_fit_rank_0_is_refused_with_the_arithmetic():
-    from knurlogic.cluster import launch as C
+    from knurlogic.tuning import placement
     gib = 1 << 30
     shape = {"tensor_per_rank_bytes": 10 * gib, "leader_bytes": 5 * gib,
              "refusals": []}
@@ -1088,16 +1088,16 @@ def test_a_head_that_does_not_fit_rank_0_is_refused_with_the_arithmetic():
     with pytest.raises(ValueError, match=r"A: its tensor share 10.0 GiB "
                        r"\+ 5.0 GiB rank 0 alone holds .*working set "
                        r"18.0 GiB less the 4.0 GiB step margin"):
-        C.placement(_two(18, 18), shape, "tensor")
-    C.placement(_two(19, 18), shape, "tensor")
+        placement.placement(_two(18, 18), shape, "tensor")
+    placement.placement(_two(19, 18), shape, "tensor")
 
 
 def test_tensor_shape_carries_rank_0s_head_bytes(tmp_path, monkeypatch):
     import json
     import struct
 
-    from knurlogic.cluster import launch as C
     from knurlogic.machine import artifact
+    from knurlogic.tuning import placement
 
     def shard(path, tensors):
         header, at = {}, 0
@@ -1117,8 +1117,8 @@ def test_tensor_shape_carries_rank_0s_head_bytes(tmp_path, monkeypatch):
         raw_config = {"text_config": {"num_hidden_layers": 1}}
     monkeypatch.setattr(artifact.Artifact, "load", staticmethod(lambda p: A))
     monkeypatch.setattr(tensor_split, "tensor_split_refusals", lambda *a: [])
-    assert C.shape_of(str(tmp_path), 2, "tensor")["leader_bytes"] == 50 + 30
-    assert C.shape_of(str(tmp_path), 2, "tensor",
+    assert placement.shape_of(str(tmp_path), 2, "tensor")["leader_bytes"] == 50 + 30
+    assert placement.shape_of(str(tmp_path), 2, "tensor",
                       vision=False)["leader_bytes"] == 50
 
 

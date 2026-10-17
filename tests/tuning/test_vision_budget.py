@@ -312,13 +312,13 @@ def test_rank_0_holds_no_head_with_mtp_off(tmp_path):
 
 
 def test_a_cluster_launchs_mtp_off_reaches_its_shape(tmp_path, monkeypatch):
-    from knurlogic.cluster import launch as C
+    from knurlogic.tuning import placement
     d = _rung(tmp_path / "m", vision=False)
     _safetensors(d / "mtp-head-q6.safetensors", {"mtp.fc.weight": TEXT})
     for split in ("pipeline", "tensor"):
-        assert C.shape_of(str(d), 2, split, vision=False,
+        assert placement.shape_of(str(d), 2, split, vision=False,
                           mtp=False)["leader_bytes"] == 0
-        assert C.shape_of(str(d), 2, split, vision=False)["leader_bytes"] > 0
+        assert placement.shape_of(str(d), 2, split, vision=False)["leader_bytes"] > 0
 
 
 def test_the_picked_models_preview_carries_its_tensor_bytes(tmp_path):

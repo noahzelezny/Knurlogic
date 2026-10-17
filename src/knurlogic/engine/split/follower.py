@@ -132,7 +132,6 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
     a third item, when given, is this rank's per-layer store."""
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
     from knurlogic.engine.prompt_cache.memory import PromptCache
-    from knurlogic.engine.runtime.control_tokens import control_machine
 
     from . import marker
     stream = mx.default_stream(mx.default_device())
@@ -204,35 +203,8 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
             if kind == "park":
                 park = halt = True
             elif kind == "admit":
-                prompt = op["prompt"]
-                if op["images"]:
-                    if vision is None:
-                        raise Desync("rank 0 admitted a prompt with images; "
-                                     "this rank bound no vision family")
-                    vision.add_refs(op["refs"])
-                    prompt = P.key_from_wire(prompt, op["images"],
-                                             op["refs"])
-                    at, segs = op["hit"], []
-                    for sg in op["segs"]:
-                        segs.append(prompt[at:at + len(sg)])
-                        at += len(sg)
-                    op = dict(op, segs=segs)
-                c, rest = cache.fetch(model_key, prompt)
-                if len(prompt) - len(rest) != op["hit"]:
-                    raise Desync(f"prompt cache hit {len(prompt) - len(rest)} "
-                                 f"here, {op['hit']} on rank 0")
-                procs = []
-                if op["penalties"]:
-                    from mlx_lm.sample_utils import make_logits_processors
-                    procs = make_logits_processors(**op["penalties"])
-                sm, _ = control_machine(tokenizer, op["initial"])
-                uid = executor().insert(Admission(
-                    segments=op["segs"], max_tokens=op["max_tokens"],
-                    cache=c, prefix=prompt[:op["hit"]],
-                    sampling=op["sampling"], processors=procs,
-                    state_machine=sm))
-                if uid != op["uid"]:
-                    raise Desync(f"admitted as {uid}, rank 0 has {op['uid']}")
+                uid = _admit(op, cache, model_key, tokenizer, vision,
+                             executor)
                 chunks[uid] = int(op["chunk"])
             elif kind == "chunk":
                 chunks[op["uid"]] = int(op["chunk"])
@@ -277,21 +249,8 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
             continue
         e = executor()
         b = e.gen._batch
-        toks = plan.get("tokens") or []
-        if [int(u) for u in b.uids] != [u for u, _ in toks]:
-            raise Desync(f"batch rows {list(b.uids)} here, "
-                         f"{[u for u, _ in toks]} on rank 0")
-        if toks and split == "pipeline":
-            b.t1 = mx.array([t for _, t in toks], dtype=mx.int32)
-        elif toks:
-            mine = b.t1.tolist()
-            theirs = [t for _, t in toks]
-            if mine != theirs:
-                mismatches += sum(a != c for a, c in zip(mine, theirs))
-                logger.warning("rank %d: %d token(s) differ from rank 0's; "
-                               "rank 0's are used", link.rank,
-                               sum(a != c for a, c in zip(mine, theirs)))
-            b.t1 = mx.array(theirs, dtype=mx.int32)
+        mismatches += _take_rank_0_tokens(b, plan.get("tokens") or [],
+                                          split, link.rank)
         nxt = e.next_admission()
         if nxt is not None:
             e.set_chunk(chunks.pop(nxt, prefill_step_size))
@@ -304,6 +263,62 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
                 last[("checkpoint", ev.uid)] = (ev.tokens, ev.cache)
             elif isinstance(ev, Finished):
                 last[("finished", ev.uid)] = (ev.tokens, ev.cache)
+
+
+def _admit(op: dict, cache, model_key, tokenizer, vision, executor) -> int:
+    """Admit rank 0's prompt here as rank 0 did -- the same prompt cache
+    hit, the same uid -- and return the uid. A difference is a Desync."""
+    from knurlogic.engine.runtime.control_tokens import control_machine
+    prompt = op["prompt"]
+    if op["images"]:
+        if vision is None:
+            raise Desync("rank 0 admitted a prompt with images; "
+                         "this rank bound no vision family")
+        vision.add_refs(op["refs"])
+        prompt = P.key_from_wire(prompt, op["images"], op["refs"])
+        at, segs = op["hit"], []
+        for sg in op["segs"]:
+            segs.append(prompt[at:at + len(sg)])
+            at += len(sg)
+        op = dict(op, segs=segs)
+    c, rest = cache.fetch(model_key, prompt)
+    if len(prompt) - len(rest) != op["hit"]:
+        raise Desync(f"prompt cache hit {len(prompt) - len(rest)} "
+                     f"here, {op['hit']} on rank 0")
+    procs = []
+    if op["penalties"]:
+        from mlx_lm.sample_utils import make_logits_processors
+        procs = make_logits_processors(**op["penalties"])
+    sm, _ = control_machine(tokenizer, op["initial"])
+    uid = executor().insert(Admission(
+        segments=op["segs"], max_tokens=op["max_tokens"],
+        cache=c, prefix=prompt[:op["hit"]],
+        sampling=op["sampling"], processors=procs,
+        state_machine=sm))
+    if uid != op["uid"]:
+        raise Desync(f"admitted as {uid}, rank 0 has {op['uid']}")
+    return uid
+
+
+def _take_rank_0_tokens(b, toks: list, split: str, rank: int) -> int:
+    """Set the batch's next tokens to rank 0's (`toks`: [(uid, token)]);
+    the rows must be the same. Returns how many of this rank's own differed
+    (a pipeline rank samples nothing of its own, so none)."""
+    if [int(u) for u in b.uids] != [u for u, _ in toks]:
+        raise Desync(f"batch rows {list(b.uids)} here, "
+                     f"{[u for u, _ in toks]} on rank 0")
+    if not toks:
+        return 0
+    theirs = [t for _, t in toks]
+    differ = 0
+    if split != "pipeline":
+        mine = b.t1.tolist()
+        differ = sum(a != c for a, c in zip(mine, theirs))
+        if differ:
+            logger.warning("rank %d: %d token(s) differ from rank 0's; "
+                           "rank 0's are used", rank, differ)
+    b.t1 = mx.array(theirs, dtype=mx.int32)
+    return differ
 
 
 def serve_follower(path: str, *, link_kind: str, working_set: int,

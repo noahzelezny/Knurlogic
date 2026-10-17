@@ -8,6 +8,7 @@ import socket
 import pytest
 
 from knurlogic.cluster import launch as C
+from knurlogic.cluster import preparing, starting, tables
 from knurlogic.interfaces.http import lifecycle as H
 from knurlogic.interfaces.http.guard import browser_refusal
 
@@ -20,25 +21,25 @@ def _spec(rank, link="ring", **kw):
 
 
 def test_the_leader_binds_loopback_and_its_link_address_only():
-    a0 = C.rank_argv("/m", _spec(0), {})
+    a0 = starting.rank_argv("/m", _spec(0), {})
     assert a0[a0.index("--host") + 1] == "127.0.0.1,192.0.2.2"
     assert "0.0.0.0" not in a0
     # the other ranks serve no API: no --host
-    assert "--host" not in C.rank_argv("/m", _spec(1), {})
+    assert "--host" not in starting.rank_argv("/m", _spec(1), {})
 
 
 def test_the_leader_url_is_its_link_address():
-    assert C.leader_url(_spec(0)) == "http://192.0.2.2:8080/v1"
-    assert C.leader_url({"serve_hosts": ["127.0.0.1"], "port": 8080}) == ""
-    assert C.leader_url({}) == ""
+    assert tables.leader_url(_spec(0)) == "http://192.0.2.2:8080/v1"
+    assert tables.leader_url({"serve_hosts": ["127.0.0.1"], "port": 8080}) == ""
+    assert tables.leader_url({}) == ""
 
 
 def test_a_prepare_refuses_serve_hosts_that_are_not_addresses():
     base = dict(_spec(0), job="ab" * 8, identity="x",
                 nodes=[{"name": "A"}, {"name": "B"}])
-    assert "serve_hosts" not in (C.check_spec(base) or "")
+    assert "serve_hosts" not in (preparing.check_spec(base) or "")
     for bad in (["0.0.0.0 --evil"], "127.0.0.1", [], ["host.example"]):
-        why = C.check_spec(dict(base, serve_hosts=bad))
+        why = preparing.check_spec(dict(base, serve_hosts=bad))
         assert why == "serve_hosts is a list of IP addresses", bad
 
 

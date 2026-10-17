@@ -41,6 +41,7 @@ from fixtures_thunderbolt import (
     SP_THUNDERBOLT_M4,
 )
 
+from knurlogic.cluster import here, preparing
 from knurlogic.cluster import launch as C
 
 
@@ -159,8 +160,9 @@ def test_no_thunderbolt_5_cable_greys_rdma_with_the_reason(monkeypatch):
 def test_the_cable_note_says_which_cable_and_why(monkeypatch):
     monkeypatch.setattr(links, "BAD_CABLES", {})
     m3, m4 = rig()
-    monkeypatch.setattr(C, "_resolve", lambda i, name="": "/m/x")
-    monkeypatch.setattr(C, "shape_of", lambda p, w, s, vision=True, mtp=True: {
+    monkeypatch.setattr(here, "resolve", lambda i, name="": "/m/x")
+    for m in (C, preparing):
+        monkeypatch.setattr(m, "shape_of", lambda p, w, s, vision=True, mtp=True: {
         "layers": 8, "layer_bytes": [1 << 30] * 8, "other_bytes": 0,
         "kv_bytes_per_token": 0})
     monkeypatch.setattr(C, "placement", lambda infos, shape, split, order: {
@@ -175,7 +177,7 @@ def test_the_cable_note_says_which_cable_and_why(monkeypatch):
     def post(page, kind, doc, **kw):
         got.append((kind, doc))
         return {"refused": "stop here"}
-    monkeypatch.setattr(C, "prepare", lambda spec: (200, {"ok": True}))
+    monkeypatch.setattr(preparing, "prepare", lambda spec: (200, {"ok": True}))
     for link in ("jaccl", "ring"):
         got.clear()
         C.launch({"action": "load", "identity": "abc",

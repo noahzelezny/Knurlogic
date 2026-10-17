@@ -151,24 +151,7 @@ class CompactingChat:
                 return
             run2[0] = box["run"]
             if out.pause:
-                doc = pause_doc()
-                msg = doc["choices"][0]["message"]
-                base = {"id": doc["id"], "object": "chat.completion.chunk",
-                        "created": doc["created"], "model": doc["model"]}
-                yield O.sse_data(dict(base, choices=[{
-                    "index": 0, "finish_reason": None,
-                    "delta": {"role": "assistant",
-                              "compaction": msg["compaction"]}}]))
-                yield O.sse_data(dict(base, choices=[],
-                                   context_management=doc[
-                                       "context_management"]))
-                yield O.sse_data(dict(base, choices=[{
-                    "index": 0, "finish_reason": "compaction",
-                    "delta": {}}]))
-                if (body.get("stream_options") or {}).get("include_usage"):
-                    yield O.sse_data(dict(base, choices=[],
-                                       usage=doc["usage"]))
-                yield b"data: [DONE]\n\n"
+                yield from _pause_events(pause_doc(), body)
                 return
             try:
                 job, reply = self.submit(run2[0], chat=True, extra=extra())
@@ -186,3 +169,22 @@ class CompactingChat:
             finally:
                 job.cancel()
         return "stream", summarized()
+
+
+def _pause_events(doc: dict, body: dict):
+    """A compaction pause (C.paused's document) as the SSE chunks a
+    streaming client reads: the compaction delta, the context_management
+    block, the "compaction" finish, usage when asked for, [DONE]."""
+    msg = doc["choices"][0]["message"]
+    base = {"id": doc["id"], "object": "chat.completion.chunk",
+            "created": doc["created"], "model": doc["model"]}
+    yield O.sse_data(dict(base, choices=[{
+        "index": 0, "finish_reason": None,
+        "delta": {"role": "assistant", "compaction": msg["compaction"]}}]))
+    yield O.sse_data(dict(base, choices=[],
+                          context_management=doc["context_management"]))
+    yield O.sse_data(dict(base, choices=[{
+        "index": 0, "finish_reason": "compaction", "delta": {}}]))
+    if (body.get("stream_options") or {}).get("include_usage"):
+        yield O.sse_data(dict(base, choices=[], usage=doc["usage"]))
+    yield b"data: [DONE]\n\n"

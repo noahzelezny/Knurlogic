@@ -4,7 +4,14 @@ across them.
   peers.py      named, remembered and introduced peers, each with a
                 reachability state.
   discovery/    `_knurlogic._tcp`, advertised and browsed: Bonjour, Avahi.
-  launch.py     a cluster job, page to page: prepare, start, watch, stop.
+  launch.py     the coordinator: place a job, pick its cable, run the
+                Prepare and Start rounds, follow it; peer_step answers.
+  preparing.py  one page checks a rank of a job against itself.
+  starting.py   one page starts the ranks it prepared.
+  watching.py   whether each job this page runs is still healthy.
+  stopping.py   a job's ranks end here and the other pages are told.
+  here.py       this machine for a job: what it offers and holds.
+  tables.py     the page's jobs in memory, their locks and ports.
   jobs.py       a job's files, rank progress markers and health verdict.
   recovery.py   a model that died unasked is relaunched, bounded.
   links.py      which link a peer is reached over and a page answers on,
@@ -15,7 +22,7 @@ across them.
   checks.py     `knurlogic doctor --cluster`: what stops Macs finding each
                 other, each with the fix.
 
-launch.py and recovery.py never import interfaces/: the page injects its
+cluster/ never imports interfaces/: the page injects its
 status, peers, children and load at startup (interfaces/page/server.py
 wire, called by make_handler). Nothing here imports mlx. Below: what a
 call to another page can raise, serve's refusal exit status, and `every`,

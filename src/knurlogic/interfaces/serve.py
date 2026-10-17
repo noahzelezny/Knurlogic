@@ -377,64 +377,165 @@ def serve_launch(L: Launch, host: str, port: int,
     """Serve the launch: the status, settings and load routes, the prompt
     cache's size, and the HTTP server (lifecycle.serve) -- or, on a rank
     of a split past 0, follow rank 0."""
-    a, r, ring, world, share = L.a, L.r, L.ring, L.world, L.share
-    tune, profile, launch, draft = L.tune, L.profile, L.launch, L.draft
-    kv_bits, long_context, vision = L.kv_bits, L.long_context, L.vision
-    rounding, ws, adv, forced = L.rounding, L.ws, L.adv, L.forced
-    working_set_gib = L.working_set_gib
-    from knurlogic.engine import matmul_padding
-    rows = arch.check(a.model_type)
+    serving = _prompt_cache_serving(L, serving)
+    if L.world > 1 and int(L.ring["rank"]) > 0:
+        return _follow_rank_0(L, serving)
+    _print_endpoints(L, host, port)
+    routes = _routes(L)
+    _print_features(L)
+    eng = _engine_settings(L)
+    guard = _guard_bytes(L)
+    from knurlogic.interfaces.http import lifecycle
+    return lifecycle.serve(L.a, host, port, routes=routes,
+                           settings={**eng, "rounding": L.rounding, **serving,
+                                     **({"working_set_bytes": guard}
+                                        if guard else {})}, draft=L.draft,
+                           ring=L.ring if L.world > 1 else None)
 
-    def _resolve_for(ws_bytes, tune_name):
-        return resolve(a, ws_bytes, profile=profile, tune=tune_name,
-                       holds_bytes=share, kv_bits=kv_bits,
-                       long_context=long_context, vision=vision)
 
-    # `top` plus `ps` costs about a third of a second, and the page polls
-    # status every two. Cached just long enough that a poll is free and a
-    # model load still shows up on the next one.
-    _mm: dict = {"at": 0.0, "doc": None}
+def _prompt_cache_serving(L: Launch, serving: dict | None) -> dict:
+    """`serving` with the prompt cache's size and byte budget for this
+    launch (fit.prompt_cache_policy); installs the fetcher that brings a
+    saved entry's pieces this machine lacks from the page's peers."""
+    serving = dict(serving or {})
+    pc_size, pc_bytes, pc_why = fit.prompt_cache_policy(
+        serving, L.world, L.ws,
+        L.share if L.share is not None else L.a.bytes_on_disk)
+    serving["prompt_cache_size"] = pc_size
+    serving.pop("prompt_cache_bytes", None)
+    if pc_bytes:
+        serving["prompt_cache_bytes"] = pc_bytes
+    print(f"prompt cache  {pc_why}")
+    from knurlogic.interfaces.page import prompt_cache as page_prompt_cache
+    page_prompt_cache.install_fetcher()
+    return serving
 
-    def _memory_map():
-        import time
 
-        from knurlogic.machine.memory import footprint
+def _follow_rank_0(L: Launch, serving: dict) -> int:
+    """A follower rank: no HTTP, no scheduler -- rank 0's plans, until it
+    stops."""
+    from knurlogic.engine.split import follower as split_follower
+    ring = L.ring
+    print(f"\nrank {ring['rank']}: following rank 0 (no HTTP here)",
+          flush=True)
+    split_follower.serve_follower(
+        str(L.a.path), link_kind=ring["link"],
+        working_set=int(L.working_set_gib * GIB),
+        prompt_cache_size=int(serving.get("prompt_cache_size", 10)),
+        completion_batch_size=int(serving.get("decode_concurrency", 32)),
+        prefill_step_size=int(ring["prefill_chunk"]),
+        executes_artifact_code=bool(L.a.model_file),
+        split=ring.get("split", "tensor"), pipeline=ring.get("pipeline"),
+        draft=L.draft, kv_bits=L.kv_bits, rounding=L.rounding)
+    return 0
+
+
+def _print_endpoints(L: Launch, host: str, port: int) -> None:
+    """Where the server answers, and how to point a client at it."""
+    shown = host.split(",")[0]
+    print(f"\nserving on http://{shown}:{port}/v1  (ctrl-c to stop)")
+    print(f"open http://{shown}:{port}/ to see what loaded and try it")
+    print("  /status (text) and /status.json for the same thing "
+          "without a browser")
+    print("  /settings.json - every knob, what it would be at another tune, "
+          "and why it exists")
+    from knurlogic.interfaces import connect
+    print("\npoint a Claude-Messages harness at it:\n")
+    print("  " + connect.claude_command(
+        f"http://{shown}:{port}", L.a.path.name).replace("\n", "\n  "))
+    print(f"\n  knurlogic connect --port {port} --model {L.a.path.name}"
+          f"   for the other clients", flush=True)
+
+
+def _resolve_for(L: Launch):
+    """resolve() for this launch's artifact at another working set or tune."""
+    def at(ws_bytes, tune_name):
+        return resolve(L.a, ws_bytes, profile=L.profile, tune=tune_name,
+                       holds_bytes=L.share, kv_bits=L.kv_bits,
+                       long_context=L.long_context, vision=L.vision)
+    return at
+
+
+def _routes(L: Launch) -> dict:
+    """The server's own routes: status, settings, models, loaded, load and
+    the live-settings apply. /v1/messages is served by the server itself
+    (in-process over its OpenAI surface), so it is not one of these."""
+    from knurlogic.interfaces.http import lifecycle
+    # The live environment, kept current as knobs are applied, so the panel
+    # keeps telling the truth about what is RUNNING rather than about what
+    # was resolved at startup.
+    live_env = dict(L.r.env)
+    return documents.routes(
+        status_fn=_status_fn(L),
+        settings_fn=documents.settings_document(
+            L.a, live_env=live_env, live_tune=L.tune, live_working_set=L.ws,
+            resolve_fn=_resolve_for(L), wired_advice=L.adv,
+            live_knobs=LIVE_KNOBS),
+        models_fn=documents.models_document(serving=L.a.path.name),
+        loaded_fn=documents.loaded_document(),
+        load_fn=documents.load_action(
+            artifact_for=lambda p: Artifact.load(p),
+            resolve_fn=lambda art: resolve(art, L.ws, profile=L.profile,
+                                           tune=L.tune),
+            live_knobs=LIVE_KNOBS,
+            switch_fn=lifecycle.switch, unload_fn=lifecycle.unload),
+        apply_fn=_apply_fn(L, live_env))
+
+
+def _cached_memory_map(ttl_s: float = 4.0):
+    """footprint.memory_map, cached for `ttl_s`: `top` plus `ps` costs about
+    a third of a second and the page polls status every two, so a poll is
+    free and a model load still shows up on the next one."""
+    import time
+
+    from knurlogic.machine.memory import footprint
+    memo: dict = {"at": 0.0, "doc": None}
+
+    def memory_map():
         now = time.time()
-        if _mm["doc"] is None or now - _mm["at"] > 4.0:
+        if memo["doc"] is None or now - memo["at"] > ttl_s:
             try:
-                _mm["doc"] = footprint.memory_map()
+                memo["doc"] = footprint.memory_map()
             except (*PROC_ERRORS, ValueError, KeyError, AttributeError):
-                _mm["doc"] = None
-            _mm["at"] = now
-        return _mm["doc"]
+                memo["doc"] = None
+            memo["at"] = now
+        return memo["doc"]
+    return memory_map
 
-    def _status(requests):
+
+def _status_fn(L: Launch):
+    """The /status.json document for this server: (snapshot, text)."""
+    from knurlogic.engine import matmul_padding
+    from knurlogic.engine.model import state as served
+    from knurlogic.interfaces.http import lifecycle
+    rows = arch.check(L.a.model_type)
+    memory_map = _cached_memory_map()
+
+    def status_doc(requests):
         # Served through `aggregate` even though there is exactly one node:
         # /status.json is the contract, and a client that learns the cluster
         # shape now does not get rewritten when a second node shows up.
         snap = status.aggregate([status.snapshot(
-            artifact=a, arch_rows=rows, env=r.env, requests=requests,
-            node="local", memory_map=_memory_map(),
+            artifact=L.a, arch_rows=rows, env=L.r.env, requests=requests,
+            node="local", memory_map=memory_map(),
             memory_fn=engine.process_memory)])
         # The wired limit belongs here because this is where somebody looks
         # when a model will not load. Advice only -- knurlogic never sets it.
-        snap["wired"] = wired.advise(a.bytes_on_disk)
+        snap["wired"] = wired.advise(L.a.bytes_on_disk)
         snap["drafting"] = binding.drafting_status()
-        from knurlogic.engine.model import state as _st
         snap["per_chip_rounding"] = dict(
-            _st.SERVED.get("per_chip_rounding")
-            or matmul_padding.public(rounding))
+            served.SERVED.get("per_chip_rounding")
+            or matmul_padding.public(L.rounding))
         # 8-bit KV decode kernel: hits vs fallbacks, so an A/B of
         # KNURLOGIC_KV_KERNEL can see which path actually ran
-        if _st.SERVED.get("kv_kernel") is not None:
-            snap["kv_kernel"] = dict(_st.SERVED["kv_kernel"])
+        if served.SERVED.get("kv_kernel") is not None:
+            snap["kv_kernel"] = dict(served.SERVED["kv_kernel"])
         # a split's every rank, from the per-step control exchange: the
         # followers serve no status of their own
-        if _st.SERVED.get("ranks"):
-            snap["ranks"] = [dict(x) for x in _st.SERVED["ranks"]]
-        snap["preset"] = dict(r.preset)
+        if served.SERVED.get("ranks"):
+            snap["ranks"] = [dict(x) for x in served.SERVED["ranks"]]
+        snap["preset"] = dict(L.r.preset)
         # what is running and what is waiting (scheduler.requests)
-        from knurlogic.interfaces.http import lifecycle
         snap["requests"] = lifecycle.requests_now()
         # the host's own state: /status.json answers (with the artifact)
         # from the moment the server starts, long before the weights are in
@@ -446,111 +547,59 @@ def serve_launch(L: Launch, host: str, port: int,
         # the status document must still answer; the error is in it
         except Exception as e:
             snap["thinking"] = {"error": f"{type(e).__name__}: {e}"}
-        # Vision on the same contract page as drafting: spec, image store
-        # size, encodes and pins -- the numbers that say whether images are
-        # being reused or re-encoded.
-        try:
-            snap["vision"] = engine.vision_status()
-        # the status document must still answer; the error is in it
-        except Exception as e:
-            snap["vision"] = {"error": f"{type(e).__name__}: {e}"}
-        # `served_vision()` is the P0-frozen way to say whether the served
-        # model sees images at all; the image store's own
-        # size is P4's to expose (P4 owns the load path that creates it, and
-        # the contract carries no accessor for a live store instance).
-        # `engine.vision.store` is read defensively, by attribute, so this
-        # keeps working -- reporting no size rather than crashing status --
-        # whichever way P4 lands the accessor, or if it has not yet.
-        from knurlogic.engine import vision as _vision
-        spec = _vision.served_vision()
-        image_store = None
-        get_store = getattr(_vision, "served_image_store", None)
-        if callable(get_store):
-            try:
-                store = get_store()
-                if store is not None:
-                    image_store = store.stats()
-            except (AttributeError, TypeError, OSError, ValueError, RuntimeError):
-                image_store = None
-        snap["vision"] = {"served": spec.to_json() if spec else None,
-                          "image_store": image_store}
+        snap["vision"] = _vision_status()
         text = status.render_cluster(snap)
         if snap["wired"].get("known"):
             text += "\n\n" + wired.render(snap["wired"])
         return snap, text
+    return status_doc
 
-    serving = dict(serving or {})
-    pc_size, pc_bytes, pc_why = fit.prompt_cache_policy(
-        serving, world, ws, share if share is not None else a.bytes_on_disk)
-    serving["prompt_cache_size"] = pc_size
-    serving.pop("prompt_cache_bytes", None)
-    if pc_bytes:
-        serving["prompt_cache_bytes"] = pc_bytes
-    print(f"prompt cache  {pc_why}")
-    # a server a page started: saved entries' pieces this machine lacks
-    # are fetched from that page's peers (machines without shared storage)
-    from knurlogic.interfaces.page import prompt_cache as page_prompt_cache
-    page_prompt_cache.install_fetcher()
 
-    if world > 1 and int(ring["rank"]) > 0:
-        # a follower: no HTTP, no scheduler -- rank 0's plans, until it stops
-        from knurlogic.engine.split import follower as split_follower
-        print(f"\nrank {ring['rank']}: following rank 0 (no HTTP here)",
-              flush=True)
-        split_follower.serve_follower(
-            str(a.path), link_kind=ring["link"],
-            working_set=int(working_set_gib * GIB),
-            prompt_cache_size=int((serving or {}).get("prompt_cache_size",
-                                                      10)),
-            completion_batch_size=int((serving or {}).get(
-                "decode_concurrency", 32)),
-            prefill_step_size=int(ring["prefill_chunk"]),
-            executes_artifact_code=bool(a.model_file),
-            split=ring.get("split", "tensor"), pipeline=ring.get("pipeline"),
-            draft=draft, kv_bits=kv_bits, rounding=rounding)
-        return 0
+def _vision_status() -> dict:
+    """Whether the served model sees images (`served`: its VisionSpec, the
+    key the page and clients read) and its image store, encodes and pins:
+    the numbers that say whether images are reused or re-encoded."""
+    from knurlogic.engine import vision
+    spec = vision.served_vision()
+    try:
+        live = engine.vision_status()
+    # the status document must still answer; the error is in it
+    except Exception as e:
+        live = {"error": f"{type(e).__name__}: {e}"}
+    return {"served": spec.to_json() if spec else None,
+            "image_store": live.get("store"),
+            **{k: live[k] for k in ("encodes", "pinned", "error") if k in live}}
 
-    shown = host.split(",")[0]
-    print(f"\nserving on http://{shown}:{port}/v1  (ctrl-c to stop)")
-    print(f"open http://{shown}:{port}/ to see what loaded and try it")
-    print("  /status (text) and /status.json for the same thing "
-          "without a browser")
-    print("  /settings.json - every knob, what it would be at another tune, "
-          "and why it exists")
-    from knurlogic.interfaces import connect
-    print("\npoint a Claude-Messages harness at it:\n")
-    print("  " + connect.claude_command(
-        f"http://{shown}:{port}", a.path.name).replace("\n", "\n  "))
-    print(f"\n  knurlogic connect --port {port} --model {a.path.name}"
-          f"   for the other clients", flush=True)
-    # The live environment, kept current as knobs are applied, so the panel
-    # keeps telling the truth about what is RUNNING rather than about what
-    # was resolved at startup.
-    live_env = dict(r.env)
 
-    def _apply(query, body):
-        import json as _json
+def _apply_fn(L: Launch, live_env: dict):
+    """The live-settings route: apply what can change without a restart,
+    keeping `live_env` the running truth."""
+    import json
 
+    from knurlogic.interfaces.http import lifecycle
+    from knurlogic.tuning import preferences
+    from knurlogic.tuning.groups import COMPACT_KNOBS, PROMPT_CACHE_KNOBS
+    resolve_for = _resolve_for(L)
+
+    def apply(query, body):
         try:
-            want = _json.loads(body or b"{}")
+            want = json.loads(body or b"{}")
         except ValueError:
             return {"error": "body must be JSON"}
         tune_name = want.get("tune")
         if tune_name:
-            want = {k: v for k, v in _resolve_for(ws, tune_name).env.items()}
+            want = dict(resolve_for(L.ws, tune_name).env)
         # compaction's knobs are read per request by this server's HTTP
         # side (context_management/compaction): the environment is the setting
         # -- and they are knurlogic-wide (tuning/preferences): a change
         # here is saved for every server on this machine, not this one's
-        from knurlogic.tuning import preferences
-        from knurlogic.tuning.groups import COMPACT_KNOBS, PROMPT_CACHE_KNOBS
         cur = preferences.compaction_env(preferences.prompt_cache_env())
         wide = {**COMPACT_KNOBS, **PROMPT_CACHE_KNOBS}
         compact = {k: str(v) for k, v in want.items()
                    if k in wide and str(v) != cur.get(k, wide[k][0])}
         want = {k: str(v) for k, v in want.items()
                 if k in LIVE_KNOBS and str(v) != live_env.get(k)}
-        why = refuse_sets(a, {**want, **compact})
+        why = refuse_sets(L.a, {**want, **compact})
         if why:
             return {"error": why}
         if not want and not compact:
@@ -575,70 +624,61 @@ def serve_launch(L: Launch, host: str, port: int,
             sched.share_live({k: v for k, v in want.items()
                               if live_env.get(k) == v})
         return {"applied": done, "running": dict(live_env)}
+    return apply
 
-    from knurlogic.interfaces.http import lifecycle
 
-    # /v1/messages is served by the server itself (in-process over its
-    # OpenAI surface), so it is not one of these routes.
-    routes = documents.routes(
-        status_fn=_status,
-        settings_fn=documents.settings_document(
-            a, live_env=live_env, live_tune=tune, live_working_set=ws,
-            resolve_fn=_resolve_for, wired_advice=adv,
-            live_knobs=LIVE_KNOBS),
-        models_fn=documents.models_document(serving=a.path.name),
-        loaded_fn=documents.loaded_document(),
-        load_fn=documents.load_action(
-            artifact_for=lambda p: Artifact.load(p),
-            resolve_fn=lambda art: resolve(art, ws, profile=profile, tune=tune),
-            live_knobs=LIVE_KNOBS,
-            switch_fn=lifecycle.switch, unload_fn=lifecycle.unload),
-        apply_fn=_apply)
+def _print_features(L: Launch) -> None:
+    """What this launch runs beyond the weights: drafting, KV precision,
+    vision off, per-chip rounding."""
+    from knurlogic.engine import matmul_padding
     # A packed head is used because it is there. Nobody should have to know
     # an environment variable exists to run weights they already downloaded.
-    head = mtp.find_head(a.path)
-    if head is not None and draft:
+    head = mtp.find_head(L.a.path)
+    if head is not None and L.draft:
         print(f"\ndrafting   {head.describe()}")
         print( "           multi-token prediction on"
               + ("; dynamic (drafts when it measures cheaper)"
-                 if launch.get("mtp_dynamic", True) else
+                 if L.launch.get("mtp_dynamic", True) else
                  "; every step drafts (KNURLOGIC_MTP_DYNAMIC=off)")
               + "; KNURLOGIC_MTP=off turns it off")
     elif head is not None:
         print("\ndrafting   head present, off (KNURLOGIC_MTP=off or "
               "--no-draft)")
-    if kv_bits is not None:
-        print(f"kv cache   attention K/V stored at {kv_bits} bits")
-    if not vision:
+    if L.kv_bits is not None:
+        print(f"kv cache   attention K/V stored at {L.kv_bits} bits")
+    if not L.vision:
         from knurlogic.tuning.fit import vision_freed_bytes
-        freed = vision_freed_bytes(a, kv_bits)
+        freed = vision_freed_bytes(L.a, L.kv_bits)
         if freed:
             print(f"vision     off (KNURLOGIC_VISION=off): no tower, image "
                   f"store or image KV, {gib(freed)} not held; "
                   f"image requests get a 400")
-    print(f"per-chip rounding: {matmul_padding.describe(rounding)}")
+    print(f"per-chip rounding: {matmul_padding.describe(L.rounding)}")
 
-    # The knobs the ENGINE reads -- argv and a process-global mlx call --
-    # from the environment as it finally stands, overrides included.
+
+def _engine_settings(L: Launch) -> dict:
+    """The knobs the ENGINE reads -- argv and a process-global mlx call --
+    from the environment as it finally stands, overrides included."""
     from knurlogic.tuning.knobs import engine_settings
-    eng = engine_settings({**r.env, **forced})
+    eng = engine_settings({**L.r.env, **L.forced})
     if eng:
         print("engine    " + "  ".join(f"{k}={v}" for k, v in sorted(eng.items())))
+    return eng
 
+
+def _guard_bytes(L: Launch) -> int:
+    """The working set the scheduler guards: --working-set-gib, else the
+    knurlogic allowance's cap, else 0 (none)."""
     from knurlogic.machine.memory import allowance
-    guard = int(working_set_gib * GIB) or (
+    guard = int(L.working_set_gib * GIB) or (
         allowance.cap(wired.detected_working_set_bytes(
             engine.memory().get("working_set_bytes") or 0))
         if allowance.get() else 0)
     if guard:
         print(f"memory    the scheduler guards {gib(guard)} ("
-              + ("--working-set-gib" if working_set_gib else
+              + ("--working-set-gib" if L.working_set_gib else
                  f"the knurlogic allowance, {allowance.path()}") + ")")
-    return lifecycle.serve(a, host, port, routes=routes,
-                      settings={**eng, "rounding": rounding, **(serving or {}),
-                                **({"working_set_bytes": guard}
-                                   if guard else {})}, draft=draft,
-                      ring=ring if world > 1 else None)
+    return guard
 
 
 def _ring_chips(text: str) -> list | None:
@@ -712,7 +752,8 @@ def _parse_sets(pairs) -> dict:
     return out
 
 
-def main(argv=None) -> int:
+def _parser() -> argparse.ArgumentParser:
+    """`knurlogic serve`'s flags (the hidden ones are a cluster rank's)."""
     from knurlogic.tuning import presets
     p = argparse.ArgumentParser(prog="knurlogic serve",
                                description=__doc__.split("\n")[0])
@@ -816,7 +857,13 @@ def main(argv=None) -> int:
     p.add_argument("--bandwidth-gbs", type=float, default=0.0, help=hide)
     # every rank's {name, arch} as JSON: named when per-chip rounding is off
     p.add_argument("--ring-chips", default="", help=hide)
-    a = p.parse_args(argv)
+    return p
+
+
+def main(argv=None) -> int:
+    """`knurlogic serve` from its command line: the ring, serving and
+    launch settings the flags name, then run."""
+    a = _parser().parse_args(argv)
     ring = None
     if a.world > 1:
         hosts = [h for h in a.hosts.split(",") if h]

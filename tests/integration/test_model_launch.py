@@ -208,7 +208,7 @@ def test_serve_counts_the_bits_it_launches_with(tmp_path, monkeypatch):
 def test_a_cluster_job_passes_the_same_sets_to_every_rank():
     """Ring-wide: one `sets` dict in the job's base spec, the same --set
     flags on every rank's argv."""
-    from knurlogic.cluster.launch import rank_argv
+    from knurlogic.cluster.starting import rank_argv
     sets = {"KNURLOGIC_KV_BITS": "8", "KNURLOGIC_MTP_DYNAMIC": "off"}
     argvs = [rank_argv("/m", {"rank": r, "world": 2, "split": "pipeline",
                               "link": "ring", "job": "ab", "hosts": ["a", "b"],

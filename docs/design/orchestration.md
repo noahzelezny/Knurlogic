@@ -79,7 +79,7 @@ required fields raise `ProtocolError` (plain message). Size cap stays
 
 | Kind | Body | Replaces |
 |---|---|---|
-| `Hello` / `NodeInfo` | node id, name, build hash, knurlogic + mlx versions, protocol version, machine facts (chip, working set, bandwidth, Thunderbolt, RDMA, selfheal), addresses, `boot_id` | status `nodes[]` own entry + `launch.node_info` + `X-Knurlogic-Peer` |
+| `Hello` / `NodeInfo` | node id, name, build hash, knurlogic + mlx versions, protocol version, machine facts (chip, working set, bandwidth, Thunderbolt, RDMA, selfheal), addresses, `boot_id` | status `nodes[]` own entry + `here.node_info` + `X-Knurlogic-Peer` |
 | `Heartbeat` | `boot_id`, resident summary hash, jobs here `[{job, phase}]` | the `Peers._one` status poll (the heavy status stays for the browser) |
 | `Survey` / `Residency` | request: empty. reply: resident models (`where`, identity, port, job), recovery rows | `peer_residency`, `/loaded.json` |
 | `Prepare` | the job's fixed spec (`SPEC_KEYS` as typed fields; `nodes[]` of any length) | `/peer/cluster/prepare` |
@@ -117,7 +117,7 @@ compatibility is not build compatibility.
   one machine with several addresses stays one node. `boot_id` (random per
   process start) in `Hello` and `Heartbeat` lets a peer see "same id, new
   process": a restarted page. Ranks run in their own session and outlive it
-  (the new page adopts them, `launch.start_watching_existing`), so only a new
+  (the new page adopts them, `watching.start_watching_existing`), so only a new
   boot holding no rank counts as lost ranks.
 - **Liveness.** Every node asks every known peer for its light status each
   2 s (one thread, parallel, timeout 1.5 s; the `Heartbeat` kind's content
@@ -158,7 +158,7 @@ status timeout 1.5 s; `answering` is `peers.ANSWERING_S` = 6 s.
   the failing pair only, for any world size.
 - **Coordinator's page dies, its rank runs on**: nothing stops. The rank, in
   its own session, outlives the page, and a restarted page adopts it
-  (`launch.start_watching_existing`); a page's silence is not evidence
+  (`watching.start_watching_existing`); a page's silence is not evidence
   (docs/design/liveness.md).
 - **Coordinator's machine dies**: the job stops. Its rank's death -- or its
   kernel's silence on the bell -- fails every other rank over the ring, and

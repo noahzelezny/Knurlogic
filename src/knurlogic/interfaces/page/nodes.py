@@ -79,8 +79,8 @@ def status_fn(_n=0):
                 "problem": p.problem, "address": p.key})
     # what a coordinator page needs of this machine to place a rank on it
     try:
-        from knurlogic.cluster import launch
-        snaps[0]["cluster"] = launch.node_info(
+        from knurlogic.cluster import here
+        snaps[0]["cluster"] = here.node_info(
             (snaps[0].get("memory") or {}).get("working_set_bytes") or 0)
     except (OSError, ValueError, AttributeError, KeyError, TypeError) as e:
         snaps[0]["cluster"] = {"error": f"{type(e).__name__}: {e}"}
@@ -160,8 +160,8 @@ def _build_light(now: float) -> None:
     own = status.snapshot(node=me["name"], role="local",
                           memory_map=_MM["doc"], memory_fn=process_memory)
     try:
-        from knurlogic.cluster import launch
-        own["cluster"] = launch.node_info(
+        from knurlogic.cluster import here
+        own["cluster"] = here.node_info(
             (own.get("memory") or {}).get("working_set_bytes") or 0)
     except (OSError, ValueError, AttributeError, KeyError, TypeError) as e:
         own["cluster"] = {"error": f"{type(e).__name__}: {e}"}

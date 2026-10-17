@@ -80,8 +80,8 @@ def cluster_failure(base: str) -> str:
         return (f"rank 0 of cluster job {job} on {t.get('machine')} "
                 f"dropped the connection; the job is failing")
     try:
-        from knurlogic.cluster import launch
-        return launch.failure_of_port(urlparse(base).port)
+        from knurlogic.cluster import watching
+        return watching.failure_of_port(urlparse(base).port)
     except (OSError, ValueError, TypeError, AttributeError):
         return ""
 
@@ -348,8 +348,8 @@ def _starting_jobs() -> tuple:
     """(any job joining or loading, any job loaded) among the split jobs
     with a rank here."""
     try:
-        from knurlogic.cluster import launch
-        js = launch.jobs_document()
+        from knurlogic.cluster import watching
+        js = watching.jobs_document()
     except (OSError, ValueError, KeyError, AttributeError, TypeError):
         return False, False
     ph = {j.get("phase") for j in js if isinstance(j, dict)}

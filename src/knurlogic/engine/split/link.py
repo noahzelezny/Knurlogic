@@ -455,7 +455,7 @@ ALIGN_S = 600.0
 
 
 def bell_early():
-    """KNURLOGIC_BELL ("host:port:nonce:world", cluster/launch.bell_address)
+    """KNURLOGIC_BELL ("host:port:nonce:world", cluster/starting.bell_address)
     set: connect the bell before the ring exists -- rank 0 listens on
     host:port, the others dial it -- and return this rank's sockets. None
     without it (the port then comes over the ring: Link.bell)."""

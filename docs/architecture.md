@@ -64,7 +64,7 @@ page / MCP / CLI  ->  tuning.resolve  ->  interfaces.serve  ->  engine
    `load` tool. The page you pressed Launch on is the coordinator.
 2. The coordinator places the model (`tuning/placement.py`) and picks the
    cable (`cluster/links.py`); every machine's page checks the request
-   against its own disk, memory, software and links (`cluster/launch.py`,
+   against its own disk, memory, software and links (`cluster/preparing.py`,
    `cluster/checks.py`). Nothing starts unless every machine can.
 3. Each page starts its own ranks. Pipeline or tensor parallelism runs in
    `engine/`; ranks talk over the link found by `cluster/links.py`.

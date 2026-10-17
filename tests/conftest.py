@@ -14,26 +14,27 @@ def _started() -> threading.Event:
 
 @pytest.fixture(autouse=True)
 def _no_cluster_watcher_thread(monkeypatch):
-    """A test that starts a rank (launch.start) would start the
+    """A test that starts a rank (starting.start) would start the
     page's watcher thread, which outlives the test and its XDG_CACHE_HOME:
     would read the REAL ~/.cache/knurlogic/jobs registry, find a real
     job's peer page unknown for 20 s, and stop that job. Tests call
     watch_once by hand; no thread is started."""
-    from knurlogic.cluster import launch
-    monkeypatch.setattr(launch, "_WATCHER", _started())
+    from knurlogic.cluster import tables
+    monkeypatch.setattr(tables, "WATCHER", _started())
 
 
 @pytest.fixture(autouse=True)
 def _own_job_state(monkeypatch):
-    """Every test gets its own copy of launch's in-memory job state
+    """Every test gets its own copy of the page's in-memory job tables
     (prepared ranks, ended jobs, the peer watcher's records): what one test
     leaves behind -- an assertion failing before its cleanup -- is
     otherwise seen by whichever test the same worker runs next."""
-    from knurlogic.cluster import launch
-    for name in ("PREPARED", "ENDED", "SPECS", "_PROCS", "_PEER_BOOT"):
-        monkeypatch.setattr(launch, name, {})
-    for name in ("_STOPPING", "FOLLOWING", "_PEER_SLOW"):
-        monkeypatch.setattr(launch, name, set())
+    from knurlogic.cluster import tables
+    for name in ("PREPARED", "ENDED", "SPECS", "PROCS", "PEER_BOOT",
+                 "PEER_SILENT"):
+        monkeypatch.setattr(tables, name, {})
+    for name in ("STOPPING", "FOLLOWING", "PEER_SLOW"):
+        monkeypatch.setattr(tables, name, set())
 
 
 @pytest.fixture(autouse=True)

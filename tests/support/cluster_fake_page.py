@@ -50,8 +50,8 @@ def fast():
 def main():
     port, nid, name, info = (int(sys.argv[1]), sys.argv[2], sys.argv[3],
                              json.loads(sys.argv[4]))
+    from knurlogic.cluster import here, preparing, protocol, starting, watching
     from knurlogic.cluster import launch as C
-    from knurlogic.cluster import protocol
     from knurlogic.interfaces import documents, spawn
     from knurlogic.interfaces.page import loads as page_loads
     from knurlogic.interfaces.page import nodes as page_nodes
@@ -68,12 +68,13 @@ def main():
             randbits=secrets.randbits)
     if os.environ.get("FAKE_PROTOCOL_MAJOR"):
         protocol.VERSION = (int(os.environ["FAKE_PROTOCOL_MAJOR"]), 0)
-    C._resolve = lambda ident, name="": "/fake/artifact" if ident == "abc" else None
-    C.shape_of = lambda path, world, split, vision=True, mtp=True: SHAPE
-    C._local_info = lambda: info
-    C.node_info = lambda working_set_bytes=0, ttl=30.0: info
-    C.RANK_ARGV[0] = fake_argv
-    C.WATCH_S = 0.3
+    here.resolve = lambda ident, name="": "/fake/artifact" if ident == "abc" else None
+    C.shape_of = preparing.shape_of = (
+        lambda path, world, split, vision=True, mtp=True: SHAPE)
+    here.local_info = lambda: info
+    here.node_info = lambda working_set_bytes=0, ttl=30.0: info
+    starting.RANK_ARGV[0] = fake_argv
+    watching.WATCH_S = 0.3
     if os.environ.get("FAKE_PEERS"):
         from knurlogic.cluster.peers import Peers
         manual = []
@@ -103,7 +104,7 @@ def main():
             documents.json_reply(page_nodes.status_light())
             if (q.get("light") or [""])[0] else full(q, _n))
         spawn.SERVE_PORT["ui"] = port
-        C.start_watching_existing()
+        watching.start_watching_existing()
     else:
         routes = documents.routes(
             status_fn=page_nodes.status_fn,

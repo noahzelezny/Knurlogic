@@ -8,7 +8,7 @@ from http.server import ThreadingHTTPServer
 
 import pytest
 
-from knurlogic.cluster import launch
+from knurlogic.cluster import starting, tables
 from knurlogic.cluster import transport as TR
 from knurlogic.cluster import weights as CW
 from knurlogic.machine import artifact as A
@@ -41,23 +41,23 @@ def test_no_order_unless_both_kinds_of_rank(local):
 def test_the_plan_reaches_the_rank_environment():
     spec = {"rank": 1, "link": "ring", "hosts": [], "read": {
         "from": PAGES[0], "source": "holder", "turn": 0, "ordered": True}}
-    env = launch.rank_env(spec, {"hostfile": "h"}, False)
+    env = starting.rank_env(spec, {"hostfile": "h"}, False)
     from knurlogic.engine.split import weights as W
     plan, page, source = W.plan_from_env(env)
     assert (page, source, plan.turn, plan.ordered) == (
         PAGES[0], "holder", 0, True)
-    assert "KNURLOGIC_WEIGHTS" not in launch.rank_env(
+    assert "KNURLOGIC_WEIGHTS" not in starting.rank_env(
         dict(spec, read=None), {"hostfile": "h"}, False)
 
 
 def test_a_start_carries_this_ranks_entry(monkeypatch):
     seen = {}
-    monkeypatch.setattr(launch, "_start", lambda prep, spawn, wait_s:
+    monkeypatch.setattr(starting, "_start", lambda prep, spawn, wait_s:
                         seen.update(prep["spec"]) or (200, {}))
-    launch.PREPARED["ab" * 8] = {"spec": {"job": "ab" * 8, "rank": 1,
+    tables.PREPARED["ab" * 8] = {"spec": {"job": "ab" * 8, "rank": 1,
                                           "world": 2}, "path": "/x", "t": 9e9}
     reads = CW.read_plan(["a", "b"], [True, False], PAGES[:2])
-    launch.start("ab" * 8, ring={"job": "ab" * 8, "reads": reads})
+    starting.start("ab" * 8, ring={"job": "ab" * 8, "reads": reads})
     assert seen["read"] == reads[1]
 
 

@@ -16,6 +16,7 @@ from test_cluster_jobs import alive, two_pages, wait  # noqa: F401
 from knurlogic.cluster import jobs as J
 from knurlogic.cluster import launch as C
 from knurlogic.cluster import recovery as R
+from knurlogic.cluster import stopping, tables, watching
 from knurlogic.interfaces import spawn
 from knurlogic.interfaces.page import loads as page_loads
 from knurlogic.interfaces.page import server as page_server
@@ -40,7 +41,7 @@ def test_a_killed_rank_comes_back(two_pages, monkeypatch):
     monkeypatch.setattr(R, "BACKOFF_S", (0.0, 0.0, 0.0))
     assert R.for_job(p.job) is None       # nothing to report yet
     os.kill(p.rank1["pid"], 9)            # B's page stops the job, tells A
-    assert wait(lambda: p.job in C.ENDED, 30)
+    assert wait(lambda: p.job in tables.ENDED, 30)
     new = None
     try:
         what = ticks_until(lambda w: w.startswith("relaunch 1"))
@@ -75,7 +76,7 @@ def test_a_killed_rank_comes_back(two_pages, monkeypatch):
         assert [m["recovery"]["state"] for m in ms] == ["recovered"]
     finally:
         if new:
-            C.stop(new, grace=1)
+            stopping.stop(new, grace=1)
 
 
 def test_an_unload_is_not_recovered(two_pages, monkeypatch):
@@ -98,8 +99,8 @@ def test_an_unload_from_the_other_page_is_not_recovered(two_pages,
     transport.send(f"127.0.0.1:{p.ui_b}", "Stop",
                    {"job": p.job, "reason": "unloaded"})
     # A's watcher asks B, and stops the job for B's reason
-    assert wait(lambda: C.watch_once() or p.job in C.ENDED, 30)
-    assert "unloaded" in C.ENDED[p.job]["reason"]
+    assert wait(lambda: watching.watch_once() or p.job in tables.ENDED, 30)
+    assert "unloaded" in tables.ENDED[p.job]["reason"]
     assert R.tick() == [] and not R.MODELS
 
 
@@ -111,7 +112,7 @@ def test_out_of_memory_is_failed_not_relaunched(two_pages, monkeypatch):
                         or {"job": "f" * 16})
     why = ("rank 1 on B (pid 1) exited: out of memory: [METAL] Command "
            "buffer execution failed: Insufficient Memory")
-    C.stop(p.job, reason=why)
+    stopping.stop(p.job, reason=why)
     assert wait(lambda: not alive(p.rank1["pid"]), 20)
     what = ticks_until(lambda w: w.startswith("failed"), 10)
     assert what and "Insufficient Memory" in what
@@ -138,7 +139,7 @@ def test_a_rank_log_saying_out_of_memory_names_it_in_the_reason(
                  "allocate 8589934592 bytes\n")
     os.kill(p.rank0["pid"], 9)
     assert wait(lambda: not alive(p.rank0["pid"]), 5)
-    stopped = C.watch_once()
+    stopped = watching.watch_once()
     assert stopped and "out of memory" in stopped[0][1]
     assert R.kind(stopped[0][1]) == "memory"
 
@@ -353,8 +354,8 @@ def _restart_page():
     """What a page restart leaves: the files, not this process's memory."""
     R.MODELS.clear()
     R._SAVED.clear()
-    C.ENDED.clear()
-    C.SPECS.clear()
+    tables.ENDED.clear()
+    tables.SPECS.clear()
 
 
 def test_a_page_restarted_mid_recovery_still_relaunches(two_pages,
@@ -365,13 +366,13 @@ def test_a_page_restarted_mid_recovery_still_relaunches(two_pages,
     p = two_pages
     monkeypatch.setattr(R, "BACKOFF_S", (0.5, 0.5, 0.5))
     os.kill(p.rank1["pid"], 9)
-    assert wait(lambda: p.job in C.ENDED, 30)
+    assert wait(lambda: p.job in tables.ENDED, 30)
     what = ticks_until(lambda w: w.startswith("down"))
     assert what and "relaunch 1 in" in what
     before = next(iter(R.MODELS.values()))
     _restart_page()
     assert R.for_job(p.job) is None             # nothing in memory
-    C.start_watching_existing()                 # the page's start
+    watching.start_watching_existing()                 # the page's start
     assert list(R.MODELS) == [before["key"]]
     assert R.for_job(p.job)["state"] == "recovering"
     new = None
@@ -387,7 +388,7 @@ def test_a_page_restarted_mid_recovery_still_relaunches(two_pages,
         assert R.for_job(new)["attempts"] == 1
     finally:
         if new:
-            C.stop(new, grace=1)
+            stopping.stop(new, grace=1)
 
 
 def test_a_restored_model_keeps_its_attempts_and_limits(faked):
@@ -436,7 +437,7 @@ def test_a_rank_that_refused_to_start_fails_the_job_with_its_words(
         fh.write("artifact  x\n" + REFUSAL + "\n")
     os.kill(p.rank0["pid"], 9)
     assert wait(lambda: not alive(p.rank0["pid"]), 5)
-    stopped = C.watch_once()
+    stopped = watching.watch_once()
     assert stopped and REFUSAL in stopped[0][1]
     assert R.kind(stopped[0][1]) == "refusal"
     what = ticks_until(lambda w: w.startswith("failed"), 10)
@@ -548,8 +549,8 @@ def test_an_unload_of_a_job_with_nothing_here_tells_every_peer(monkeypatch):
     """A failed job's ranks are gone and recovery's record may be on the
     other Mac: the stop goes to every peer page, so it is cleared there."""
     told = []
-    monkeypatch.setattr(C, "_peer_pages", lambda: {"bbbb": "b:1"})
-    out = C.stop("f" * 16, reason="unloaded",
+    monkeypatch.setattr(stopping, "peer_pages", lambda: {"bbbb": "b:1"})
+    out = stopping.stop("f" * 16, reason="unloaded",
                  post=lambda page, kind, doc: told.append((page, kind, doc)))
     assert told == [("b:1", "Stop", {"job": "f" * 16, "reason": "unloaded"})]
     assert out["told"] == ["bbbb"]
@@ -558,8 +559,8 @@ def test_an_unload_of_a_job_with_nothing_here_tells_every_peer(monkeypatch):
 def test_an_unload_says_what_a_peer_cleared(monkeypatch):
     """The record of a failed job lives on the page that started it: the
     answer carries what the peer's stop cleared, not only this Mac's."""
-    monkeypatch.setattr(C, "_peer_pages", lambda: {"bbbb": "b:1"})
-    out = C.stop("f" * 16, reason="unloaded",
+    monkeypatch.setattr(stopping, "peer_pages", lambda: {"bbbb": "b:1"})
+    out = stopping.stop("f" * 16, reason="unloaded",
                  post=lambda page, kind, doc: {"stopped": doc["job"],
                                                "cleared": ["e" * 16]})
     assert out["cleared"] == ["e" * 16]
@@ -570,7 +571,7 @@ def test_an_unload_during_a_relaunch_stops_the_new_job(faked, monkeypatch):
     drops the record, so the job the relaunch then answers is stopped,
     not left running untracked."""
     stopped = []
-    monkeypatch.setattr(C, "stop", lambda job, reason="unloaded", **k:
+    monkeypatch.setattr(stopping, "stop", lambda job, reason="unloaded", **k:
                         stopped.append((job, reason)) or {})
 
     def launch(req, **k):

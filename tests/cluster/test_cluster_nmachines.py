@@ -6,8 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from knurlogic.cluster import here, links, preparing, starting
 from knurlogic.cluster import launch as C
-from knurlogic.cluster import links
 
 GIB = 1 << 30
 SHAPE = {"layer_bytes": [GIB] * 8, "other_bytes": GIB,
@@ -45,11 +45,12 @@ def mesh_infos(n, missing=()):
 
 
 def n_launch(monkeypatch, infos, link, split="pipeline", req=None):
-    monkeypatch.setattr(C, "_resolve", lambda i, name="": "/m/x")
-    monkeypatch.setattr(C, "shape_of", lambda p, w, s, vision=True, mtp=True: SHAPE)
+    monkeypatch.setattr(here, "resolve", lambda i, name="": "/m/x")
+    for m in (C, preparing):
+        monkeypatch.setattr(m, "shape_of", lambda p, w, s, vision=True, mtp=True: SHAPE)
     monkeypatch.setattr(links, "BAD_CABLES", {})
-    monkeypatch.setattr(C, "prepare", lambda spec: (200, {"ok": True}))
-    monkeypatch.setattr(C, "start", lambda job, **k: (200, {"started": job}))
+    monkeypatch.setattr(preparing, "prepare", lambda spec: (200, {"ok": True}))
+    monkeypatch.setattr(starting, "start", lambda job, **k: (200, {"started": job}))
     peers = [SimpleNamespace(id=f"m{i}", name=f"M{i}", host=f"127.0.0.{i}",
                              key=f"127.0.0.{i}:8765", state="answering",
                              link="thunderbolt", node={"cluster": m})
@@ -136,11 +137,12 @@ def _busy_leader(busy, free):
 def _port_launch(monkeypatch, prep, req=None):
     from knurlogic.machine import servers
     monkeypatch.setattr(servers, "free_port", lambda start, taken=(): start)
-    monkeypatch.setattr(C, "_resolve", lambda i, name="": "/m/x")
-    monkeypatch.setattr(C, "shape_of", lambda p, w, s, vision=True, mtp=True: SHAPE)
+    monkeypatch.setattr(here, "resolve", lambda i, name="": "/m/x")
+    for m in (C, preparing):
+        monkeypatch.setattr(m, "shape_of", lambda p, w, s, vision=True, mtp=True: SHAPE)
     monkeypatch.setattr(links, "BAD_CABLES", {})
-    monkeypatch.setattr(C, "prepare", prep)
-    monkeypatch.setattr(C, "start", lambda job, **k: (200, {"started": job}))
+    monkeypatch.setattr(preparing, "prepare", prep)
+    monkeypatch.setattr(starting, "start", lambda job, **k: (200, {"started": job}))
     infos = mesh_infos(2)
     peers = [SimpleNamespace(id="m1", name="M1", host="127.0.0.1",
                              key="127.0.0.1:8765", state="answering",

@@ -6,7 +6,7 @@ import json
 import os
 import struct
 
-from knurlogic.cluster import launch
+from knurlogic.cluster import here, preparing
 from knurlogic.machine import artifact as A
 
 
@@ -88,8 +88,8 @@ def test_rank_prepare_takes_either_copy_of_the_same_weights(tmp_path,
     monkeypatch.setattr(A, "resolve_identity",
                         lambda i, paths=None, name="", _r=A.resolve_identity:
                         _r(i, [a, b], name=name))
-    assert launch._resolve(A.identity(a), "two") == str(b)
-    assert launch._resolve(A.identity(a), "") == str(a)
+    assert here.resolve(A.identity(a), "two") == str(b)
+    assert here.resolve(A.identity(a), "") == str(a)
 
 
 def test_model_py_is_part_of_the_identity(tmp_path):
@@ -144,7 +144,7 @@ def test_network_mounts_are_read_from_mount(monkeypatch):
 
 
 def test_spec_name_is_never_a_path():
-    assert "name" in launch.check_spec({"name": "/etc/x", "job": "ab12cd34ef56ab12",
+    assert "name" in preparing.check_spec({"name": "/etc/x", "job": "ab12cd34ef56ab12",
                                         "rank": 0, "world": 2, "prefill_chunk": 0,
                                         "split": "pipeline", "link": "ring",
                                         "hosts": []})

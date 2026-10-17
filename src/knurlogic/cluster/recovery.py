@@ -546,11 +546,12 @@ def _defer(rec: dict, now: float, why: str) -> str:
 
 def _tick_cluster(rec: dict, now: float) -> str:
     from knurlogic.cluster import launch as C
+    from knurlogic.cluster import stopping, tables
     if rec.get("state") == "failed" or rec.get("cancelled"):
         return ""
     if not rec.get("pending"):
         job = rec["job"]
-        e = C.ENDED.get(job) or {}
+        e = tables.ENDED.get(job) or {}
         if e.get("relaunched"):           # the cable failover moved it
             _set_job(rec, e["relaunched"])
             return f"followed the cable failover to job {e['relaunched']}"
@@ -565,14 +566,14 @@ def _tick_cluster(rec: dict, now: float) -> str:
                     now - float(rec.get("last_at") or now) > RECOVERED_S:
                 rec.update(state=None, last_reason=None)
             return ""
-        if C.link_init_failure(why) and job in C.FOLLOWING:
+        if tables.link_init_failure(why) and job in tables.FOLLOWING:
             return ""                     # the cable failover has it
         rec["ended_job"] = job
         return _schedule(rec, now, why, e.get("kind"))
     if now < float(rec.get("next_at") or 0):
         return ""
     old = rec.get("ended_job")
-    e = C.ENDED.get(old) or {}
+    e = tables.ENDED.get(old) or {}
     if e.get("relaunched"):
         _set_job(rec, e["relaunched"])
         rec.update(pending=False, ended_job=None)
@@ -599,7 +600,7 @@ def _tick_cluster(rec: dict, now: float) -> str:
     if gone:
         # unloaded while it launched: its job is stopped, never tracked
         if out.get("job"):
-            C.stop(out["job"], reason="unloaded")
+            stopping.stop(out["job"], reason="unloaded")
         return f"unloaded during relaunch {n}; job {out.get('job')} stopped"
     if out.get("job"):
         _set_job(rec, out["job"])

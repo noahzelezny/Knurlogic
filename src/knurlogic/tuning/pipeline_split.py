@@ -278,7 +278,7 @@ def leader_bytes(artifact: Artifact, vision: bool = True,
 def pipeline_share_bytes(per: list, other: int, rank: int, world: int,
                          counts=None, leader: int = 0) -> int:
     """What pipeline rank `rank` holds: its layers (rank 0 the LAST
-    `counts[0]`, as launch.prepare places them) plus what every rank
+    `counts[0]`, as preparing.prepare places them) plus what every rank
     holds, plus `leader` (the head and tower) on rank 0. Counts not given
     yet (the resolver's split is made once the ring is up): an even share
     of the layers."""

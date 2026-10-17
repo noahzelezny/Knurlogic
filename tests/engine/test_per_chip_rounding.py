@@ -123,7 +123,8 @@ def test_it_is_a_model_launch_setting():
 
 
 def test_every_rank_gets_the_setting_and_the_chips():
-    from knurlogic.cluster.launch import check_spec, rank_argv
+    from knurlogic.cluster.preparing import check_spec
+    from knurlogic.cluster.starting import rank_argv
     chips = [M3, M4]
     for r in (0, 1):
         spec = {"rank": r, "world": 2, "split": "tensor", "link": "ring",
@@ -141,7 +142,7 @@ def test_every_rank_gets_the_setting_and_the_chips():
 def test_each_rank_resolves_the_setting_with_the_ring_chips(monkeypatch):
     """A rank's argv -> serve.main -> run(ring=...) carries the chips and
     the setting; every rank resolves them to the same answer."""
-    from knurlogic.cluster.launch import rank_argv
+    from knurlogic.cluster.starting import rank_argv
     from knurlogic.interfaces import serve
     got = []
     monkeypatch.setattr(serve, "run", lambda *a, **k: got.append((a, k)) or 0)

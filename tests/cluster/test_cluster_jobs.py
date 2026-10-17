@@ -25,9 +25,18 @@ from types import SimpleNamespace
 import pytest
 from procs import reap_registries
 
+from knurlogic.cluster import (
+    here,
+    links,
+    preparing,
+    starting,
+    stopping,
+    tables,
+    transport,
+    watching,
+)
 from knurlogic.cluster import jobs as J
 from knurlogic.cluster import launch as C
-from knurlogic.cluster import links
 from knurlogic.cluster import protocol as P
 from knurlogic.engine.split import marker
 from knurlogic.interfaces import spawn
@@ -38,7 +47,7 @@ from knurlogic.interfaces.page import router as page_router
 from knurlogic.interfaces.page import server as page_server
 from knurlogic.machine import identity
 from knurlogic.machine.files import write_json
-from knurlogic.tuning import checks
+from knurlogic.tuning import checks, placement
 
 
 def _started() -> threading.Event:
@@ -75,16 +84,16 @@ SHAPE = {"layer_bytes": [GIB] * 8, "other_bytes": GIB,
 def test_placement_leader_is_the_newest_chip_and_it_is_deterministic():
     ms = [{"name": "M3", **info("Apple M3 Ultra", "192.0.2.1")},
           {"name": "M4", **info("Apple M4 Max", "192.0.2.2")}]
-    a = C.placement(ms, SHAPE, "tensor")
+    a = placement.placement(ms, SHAPE, "tensor")
     assert a["order"] == ["M4", "M3"] and a["leader"] == "M4"
     assert [s["bytes"] for s in a["shares"]] == [4 * GIB] * 2
-    assert C.placement(list(reversed(ms)), SHAPE, "tensor") == a
+    assert placement.placement(list(reversed(ms)), SHAPE, "tensor") == a
 
 
 def test_pipeline_placement_gives_rank_0_the_last_layers():
     ms = [{"name": "A", **info("Apple M4 Max", "192.0.2.1", ws=20 * GIB)},
           {"name": "B", **info("Apple M3 Ultra", "192.0.2.2", ws=9 * GIB)}]
-    p = C.placement(ms, SHAPE, "pipeline")
+    p = placement.placement(ms, SHAPE, "pipeline")
     assert p["order"] == ["A", "B"] and sum(p["layers"]) == 8
     assert p["shares"][0]["bounds"][1] == 8          # rank 0 ends the model
     assert p["layers"][0] > p["layers"][1]           # more room, more layers
@@ -95,7 +104,7 @@ def test_placement_refuses_a_share_that_does_not_fit():
     ms = [{"name": "A", **info("Apple M4 Max", "192.0.2.1", ws=2 * GIB)},
           {"name": "B", **info("Apple M3 Ultra", "192.0.2.2")}]
     with pytest.raises(ValueError, match="A: its tensor share"):
-        C.placement(ms, SHAPE, "tensor")
+        placement.placement(ms, SHAPE, "tensor")
 
 
 def test_placement_leaves_the_step_margin():
@@ -104,15 +113,15 @@ def test_placement_leaves_the_step_margin():
     ms = [{"name": "A", **info("Apple M4 Max", "192.0.2.1", ws=7 * GIB)},
           {"name": "B", **info("Apple M3 Ultra", "192.0.2.2")}]
     with pytest.raises(ValueError, match=r"4\.0 GiB step margin"):
-        C.placement(ms, SHAPE, "tensor")              # 4 of 7 GiB: 3 left
+        placement.placement(ms, SHAPE, "tensor")              # 4 of 7 GiB: 3 left
     ms[0]["working_set_bytes"] = 8 * GIB
-    t = C.placement(ms, SHAPE, "tensor")
+    t = placement.placement(ms, SHAPE, "tensor")
     assert "A leaves 4.0 GiB" in t["reason"]
     # pipeline: 8 x 1 GiB layers + 1 GiB each; after the 4 GiB margins
     # 12 and 6 GiB hold 7 and 1 layers (the bare working sets would 11 + 5)
     ms = [{"name": "A", **info("Apple M4 Max", "192.0.2.1", ws=12 * GIB)},
           {"name": "B", **info("Apple M3 Ultra", "192.0.2.2", ws=6 * GIB)}]
-    p = C.placement(ms, SHAPE, "pipeline")
+    p = placement.placement(ms, SHAPE, "pipeline")
     assert p["layers"] == [7, 1]
     assert all(s["bytes"] <= m - 4 * GIB for s, m in
                zip(p["shares"], [12 * GIB, 6 * GIB]))
@@ -215,7 +224,7 @@ def spec(**kw):
 
 
 def prep(s, **kw):
-    return C.prepare(s, resolve=kw.get("resolve", lambda i: "/m/x"),
+    return preparing.prepare(s, resolve=kw.get("resolve", lambda i: "/m/x"),
                      info=kw.get("info", info("Apple M3 Ultra", "192.0.2.2")),
                      shape=lambda p, w, sp, vision=True, mtp=True:
                      kw.get("shape", SHAPE),
@@ -231,7 +240,7 @@ def cache(tmp_path, monkeypatch):
 def test_prepare_accepts_and_remembers(cache):
     code, doc = prep(spec())
     assert code == 200 and doc["ok"]
-    assert "ab12cd34ef567890" in C.PREPARED
+    assert "ab12cd34ef567890" in tables.PREPARED
 
 
 @pytest.mark.parametrize("change,why", [
@@ -272,27 +281,27 @@ def test_build_fingerprint_hashes_the_source_and_names_mlx(tmp_path,
     (pkg / "sub").mkdir(parents=True)
     (pkg / "a.py").write_text("x = 1\n")
     (pkg / "sub" / "b.py").write_text("y = 2\n")
-    monkeypatch.setattr(C, "_mlx_version", lambda: "0.31.2")
-    one = C.build_fingerprint(root=pkg, cache={})
-    assert one == C.build_fingerprint(root=pkg, cache={})
+    monkeypatch.setattr(here, "_mlx_version", lambda: "0.31.2")
+    one = here.build_fingerprint(root=pkg, cache={})
+    assert one == here.build_fingerprint(root=pkg, cache={})
     assert one.endswith("+mlx0.31.2")
     (pkg / "sub" / "b.py").write_text("y = 3\n")
-    assert C.build_fingerprint(root=pkg, cache={}) != one
+    assert here.build_fingerprint(root=pkg, cache={}) != one
     # cached per process: a second call does not re-read
     memo = {}
-    first = C.build_fingerprint(root=pkg, cache=memo)
+    first = here.build_fingerprint(root=pkg, cache=memo)
     (pkg / "a.py").write_text("x = 9\n")
-    assert C.build_fingerprint(root=pkg, cache=memo) == first
+    assert here.build_fingerprint(root=pkg, cache=memo) == first
 
 
 def test_the_cluster_block_carries_the_build(monkeypatch):
-    monkeypatch.setattr(C, "_INFO", {"doc": None, "at": 0.0})
-    monkeypatch.setattr(C.identity, "chip", lambda: "Apple M4 Max")
-    monkeypatch.setattr(C, "_selfheal", lambda: False)
+    monkeypatch.setattr(here, "_INFO", {"doc": None, "at": 0.0})
+    monkeypatch.setattr(identity, "chip", lambda: "Apple M4 Max")
+    monkeypatch.setattr(here, "_selfheal", lambda: False)
     monkeypatch.setattr(links, "thunderbolt", list)
     monkeypatch.setattr(links, "rdma", lambda: {"available": False})
-    v = C.node_info(0)["versions"]
-    assert v["build"] == C.build_fingerprint()
+    v = here.node_info(0)["versions"]
+    assert v["build"] == here.build_fingerprint()
     assert v["build"].endswith("+mlx" + (v["mlx"] or "none"))
 
 
@@ -359,7 +368,7 @@ def test_prepare_refuses_unknown_sets_and_stores_only_clean_ones(
     assert not doc["ok"] and "kv_bits" in doc["refused"]
     code, doc = prep(spec(sets={"kv_bits": "8"}))
     assert doc["ok"]
-    assert C.PREPARED["ab12cd34ef567890"]["spec"]["sets"] == {"kv_bits": "8"}
+    assert tables.PREPARED["ab12cd34ef567890"]["spec"]["sets"] == {"kv_bits": "8"}
 
 
 def test_stop_tells_only_pages_this_page_knows(cache, monkeypatch):
@@ -374,14 +383,14 @@ def test_stop_tells_only_pages_this_page_knows(cache, monkeypatch):
     peers = [Peer(host="192.0.2.2", port=8765, id="b", name="B",
                   state="answering")]
     monkeypatch.setattr(page_nodes, "PEERS", SimpleNamespace(all=lambda: peers))
-    C.SPECS["ab12cd34ef567890"] = s
+    tables.SPECS["ab12cd34ef567890"] = s
     posted = []
-    out = C.stop("ab12cd34ef567890",
+    out = stopping.stop("ab12cd34ef567890",
                  post=lambda page, kind, d: posted.append((page, kind)),
                  grace=0)
     assert posted == [("192.0.2.2:8765", "Stop")]
     assert out["told"] == ["B"]
-    C.ENDED.pop("ab12cd34ef567890", None)
+    tables.ENDED.pop("ab12cd34ef567890", None)
 
 
 def test_a_follower_page_tells_the_other_followers_before_rank_0(
@@ -400,7 +409,7 @@ def test_a_follower_page_tells_the_other_followers_before_rank_0(
              state="answering"),
         Peer(host="192.0.2.4", port=8765, id="d", name="D",
              state="answering")]))
-    C.SPECS[job] = spec(nodes=[{"rank": 0, "id": "a", "name": "A"},
+    tables.SPECS[job] = spec(nodes=[{"rank": 0, "id": "a", "name": "A"},
                                {"rank": 1, "id": "b", "name": "B"},
                                {"rank": 2, "id": "c", "name": "C"},
                                {"rank": 3, "id": "d", "name": "D"}])
@@ -410,11 +419,11 @@ def test_a_follower_page_tells_the_other_followers_before_rank_0(
         with lock:
             told.append(page)
         return {"stopped": job}
-    out = C.stop(job, post=post, grace=0)
+    out = stopping.stop(job, post=post, grace=0)
     assert told[-1] == "192.0.2.1:8765"             # rank 0's page last
     assert sorted(told[:2]) == ["192.0.2.3:8765", "192.0.2.4:8765"]
     assert sorted(out["told"]) == ["A", "C", "D"]
-    C.ENDED.pop(job, None)
+    tables.ENDED.pop(job, None)
 
 
 def test_stop_tells_the_other_pages_before_it_stops_its_own_ranks(
@@ -428,16 +437,16 @@ def test_stop_tells_the_other_pages_before_it_stops_its_own_ranks(
     monkeypatch.setattr(page_nodes, "PEERS", SimpleNamespace(all=lambda: [
         Peer(host="192.0.2.2", port=8765, id="b", name="B",
              state="answering")]))
-    C.SPECS[job] = spec(nodes=[{"rank": 0, "id": "me", "name": "A"},
+    tables.SPECS[job] = spec(nodes=[{"rank": 0, "id": "me", "name": "A"},
                                {"rank": 1, "id": "b", "name": "B"}])
     J.save_registry({f"{job}/0": {"job": job, "rank": 0, "pid": 4242}})
-    monkeypatch.setattr(C, "_alive", lambda j, pid: True)
+    monkeypatch.setattr(here, "alive", lambda j, pid: True)
     order = []
     monkeypatch.setattr(J, "terminate", lambda pids, **kw: order.append(
         "own ranks") or [])
-    C.stop(job, post=lambda page, kind, d: order.append(kind), grace=0)
+    stopping.stop(job, post=lambda page, kind, d: order.append(kind), grace=0)
     assert order == ["Stop", "own ranks"]
-    C.ENDED.pop(job, None)
+    tables.ENDED.pop(job, None)
     J.save_registry({})
 
 
@@ -452,7 +461,7 @@ def test_another_pages_stop_answers_once_its_ranks_are_marked(
     job = "ab12cd34ef567890"
     J.save_registry({f"{job}/1": {"job": job, "rank": 1, "pid": 4242}})
     ended = threading.Event()
-    monkeypatch.setattr(C, "_alive", lambda j, pid: not ended.is_set())
+    monkeypatch.setattr(here, "alive", lambda j, pid: not ended.is_set())
     release = threading.Event()
 
     calls = []
@@ -477,8 +486,8 @@ def test_another_pages_stop_answers_once_its_ranks_are_marked(
         if t.name == f"knurlogic-stop-{job}":
             t.join(5)
     assert f"{job}/1" not in J.registry() and calls == [[4242]]
-    assert job not in C._STOPPING
-    C.ENDED.pop(job, None)
+    assert job not in tables.STOPPING
+    tables.ENDED.pop(job, None)
     J.save_registry({})
 
 
@@ -598,13 +607,13 @@ def test_after_load_arms_the_jaccl_deadline(monkeypatch):
 
 def test_rank_env_sets_the_timeout_to_zero_for_the_load_only_with_the_fork():
     s = spec(link="jaccl", jaccl_timeout_ms=60000, coordinator="192.0.2.1:9")
-    e = C.rank_env(s, {"ibv": "/j/ibv.json", "hostfile": ""}, selfheal=True)
+    e = starting.rank_env(s, {"ibv": "/j/ibv.json", "hostfile": ""}, selfheal=True)
     assert e["JACCL_COLLECTIVE_TIMEOUT_MS"] == "0"
     assert e["KNURLOGIC_JACCL_TIMEOUT_MS"] == "60000"
     assert e["MLX_IBV_DEVICES"] == "/j/ibv.json" and e["MLX_RANK"] == "1"
-    e = C.rank_env(s, {"ibv": "/j/ibv.json", "hostfile": ""}, selfheal=False)
+    e = starting.rank_env(s, {"ibv": "/j/ibv.json", "hostfile": ""}, selfheal=False)
     assert "JACCL_COLLECTIVE_TIMEOUT_MS" not in e
-    e = C.rank_env(spec(), {"hostfile": "/j/h.json"}, selfheal=True)
+    e = starting.rank_env(spec(), {"hostfile": "/j/h.json"}, selfheal=True)
     assert e["MLX_HOSTFILE"] == "/j/h.json"
 
 
@@ -654,16 +663,17 @@ def two_pages(tmp_path, monkeypatch, owned_procs):
                        + os.environ.get("PYTHONPATH", ""))
     monkeypatch.setitem(identity._ID, "id", "aaaa")
     monkeypatch.setitem(identity._ID, "name", "A")
-    monkeypatch.setattr(C, "_resolve",
+    monkeypatch.setattr(here, "resolve",
                         lambda i, name="": "/fake/artifact" if i == "abc" else None)
-    monkeypatch.setattr(C, "shape_of", lambda p, w, s, vision=True, mtp=True: SHAPE)
+    for m in (C, preparing):
+        monkeypatch.setattr(m, "shape_of", lambda p, w, s, vision=True, mtp=True: SHAPE)
     info_a = info("Apple M4 Max", "127.0.0.1")
     info_b = info("Apple M3 Ultra", "127.0.0.1")
-    monkeypatch.setattr(C, "_local_info", lambda: info_a)
+    monkeypatch.setattr(here, "local_info", lambda: info_a)
     sys.path.insert(0, str(HERE))
     import cluster_fake_page
-    monkeypatch.setattr(C, "RANK_ARGV", [cluster_fake_page.fake_argv])
-    monkeypatch.setattr(C, "_WATCHER", _started())        # A is watched by hand
+    monkeypatch.setattr(starting, "RANK_ARGV", [cluster_fake_page.fake_argv])
+    monkeypatch.setattr(tables, "WATCHER", _started())        # A is watched by hand
     ui_a, ui_b = free_port(), free_port()
     srv = ThreadingHTTPServer(("127.0.0.1", ui_a), page_server.make_handler({}))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
@@ -706,11 +716,11 @@ def two_pages(tmp_path, monkeypatch, owned_procs):
                               port=serve_port, page_b=page_b, b_dir=b_dir,
                               ui_b=ui_b)
     finally:
-        for job in list(C.SPECS):
-            C.stop(job, propagate=False, grace=1)
+        for job in list(tables.SPECS):
+            stopping.stop(job, propagate=False, grace=1)
         reap_registries(tmp_path / "A", tmp_path / "B")
         srv.shutdown()
-        C.ENDED.clear()
+        tables.ENDED.clear()
 
 
 def in_flight(port):
@@ -740,7 +750,7 @@ def test_launch_shows_placement_and_lists_the_job_once(two_pages):
     p = two_pages
     assert p.out["placement"]["order"] == ["A", "B"]
     assert "tensor split 2 ways" in p.out["placement"]["reason"]
-    docs = C.jobs_document()
+    docs = watching.jobs_document()
     assert [d["job"] for d in docs] == [p.job]
     assert docs[0]["machines"] == ["A", "B"] and docs[0]["port"] == p.port
     # the page merges its launch card with the job card by job id, else by
@@ -759,7 +769,7 @@ def test_kill_rank_1_stops_the_job_and_rank_0_answers_503(two_pages):
     assert res.get("code") == 503, res
     assert res["body"]["error"]["code"] == "cluster_failed"
     assert wait(lambda: not alive(p.rank0["pid"]), 20)
-    assert wait(lambda: p.job not in {d["job"] for d in C.jobs_document()
+    assert wait(lambda: p.job not in {d["job"] for d in watching.jobs_document()
                                       if d.get("phase") != "stopped"}, 10)
 
 
@@ -767,14 +777,14 @@ def test_kill_rank_0_and_its_page_has_rank_1_killed(two_pages):
     p = two_pages
     os.kill(p.rank0["pid"], 9)
     assert wait(lambda: not alive(p.rank0["pid"]), 5)
-    stopped = C.watch_once()
+    stopped = watching.watch_once()
     assert stopped and stopped[0][0] == p.job and "exited" in stopped[0][1]
     # the reason names the machine rank 0 ran on, not "this machine":
     # stop() sends these same words to B's page
     assert p.rank0["machine"] == "A" and p.rank1["machine"] == "B"
     assert "rank 0 on A " in stopped[0][1], stopped
     assert wait(lambda: not alive(p.rank1["pid"]), 20)
-    ended = [d for d in C.jobs_document() if d["job"] == p.job]
+    ended = [d for d in watching.jobs_document() if d["job"] == p.job]
     assert ended and ended[0]["phase"] == "stopped"
     # an ended job still says how it was split (a card must never read "null")
     assert ended[0]["split"] == "tensor" and ended[0]["link"]
@@ -792,9 +802,9 @@ def test_a_stalled_ring_is_torn_down(two_pages, monkeypatch):
     p = two_pages
     monkeypatch.setattr(J, "STALL_S", 1.0)
     t, res = in_flight(p.port)          # busy, and the step never moves
-    assert C.watch_once() == []         # first sight of the step
+    assert watching.watch_once() == []         # first sight of the step
     time.sleep(1.5)
-    stopped = C.watch_once()
+    stopped = watching.watch_once()
     assert stopped and "stalled" in stopped[0][1]
     t.join(20)
     assert res.get("code") == 503
@@ -842,7 +852,7 @@ def test_every_rank_syncs_the_gpu_fast():
     for link, files in (("ring", {"hostfile": "/j/h.json"}),
                         ("jaccl", {"ibv": "/j/ibv.json", "hostfile": ""})):
         s = {**spec(), "link": link}
-        assert C.rank_env(s, files, selfheal=False)[
+        assert starting.rank_env(s, files, selfheal=False)[
             "MLX_METAL_FAST_SYNCH"] == "1"
 
 
@@ -990,25 +1000,26 @@ def test_a_cut_stream_that_is_no_cluster_job_just_ends(monkeypatch):
 
 def test_slot_skips_the_ring_ports_of_live_jobs(monkeypatch):
     job = "0005" + "0" * 12                      # its own slot is 5
-    assert C._slot(job, used=set()) == 5
-    assert C._slot(job, used={5, 6}) == 7
-    assert C._slot("0063" + "0" * 12, used={99}) == 0    # wraps
+    assert tables.slot(job, used=set()) == 5
+    assert tables.slot(job, used={5, 6}) == 7
+    assert tables.slot("0063" + "0" * 12, used={99}) == 0    # wraps
     with pytest.raises(ValueError, match="every ring-port slot"):
-        C._slot(job, used=set(range(100)))
+        tables.slot(job, used=set(range(100)))
     # the registry's live jobs: a recorded ring port, else the nonce's slot
     monkeypatch.setattr(J, "by_job", lambda: {
-        "aaaa000000000000": [{"ring_port": C.RING_PORT + 5 * 20 + 1}],
+        "aaaa000000000000": [{"ring_port": tables.RING_PORT + 5 * 20 + 1}],
         "0006000000000000": [{"rank": 0}]})
-    assert C._used_slots() == {5, 6}
-    assert C._slot(job) == 7
+    assert tables._used_slots() == {5, 6}
+    assert tables.slot(job) == 7
 
 
 def test_jaccl_without_an_rdma_subnet_is_refused_not_rerouted(cache,
                                                              monkeypatch):
     """RDMA up on both Macs, but on different cables: refused, with each
     Mac's active devices -- never jaccl over some other device."""
-    monkeypatch.setattr(C, "_resolve", lambda i, name="": "/m/x")
-    monkeypatch.setattr(C, "shape_of", lambda p, w, s, vision=True, mtp=True: SHAPE)
+    monkeypatch.setattr(here, "resolve", lambda i, name="": "/m/x")
+    for m in (C, preparing):
+        monkeypatch.setattr(m, "shape_of", lambda p, w, s, vision=True, mtp=True: SHAPE)
     rd = lambda dev: {"available": True, "reason": "", "devices": [dev],
                       "active": [dev]}
     ia = {**info("Apple M4 Max", "192.0.2.1", rdma=rd("rdma_en4")),
@@ -1040,7 +1051,7 @@ def test_prepare_refuses_a_share_beside_what_another_job_holds(cache):
     big = dict(SHAPE, tensor_per_rank_bytes=50 * GIB)
     ws = info("Apple M3 Ultra", "192.0.2.2", ws=84 * GIB)
     held = [("job 41648583878fcdfc rank 1", 54699, int(49.5 * GIB))]
-    code, doc = C.prepare(spec(), resolve=lambda i: "/m/x", info=ws,
+    code, doc = preparing.prepare(spec(), resolve=lambda i: "/m/x", info=ws,
                           shape=lambda p, w, s, vision=True, mtp=True: big,
                           registry=dict,
                           held=lambda job: held)
@@ -1048,7 +1059,7 @@ def test_prepare_refuses_a_share_beside_what_another_job_holds(cache):
     r = doc["refused"]
     assert "50.0 GiB" in r and "84.0 GiB" in r and "49.5 GiB of it held now" in r
     assert "pid 54699" in r and "41648583878fcdfc" in r
-    code, doc = C.prepare(spec(), resolve=lambda i: "/m/x", info=ws,
+    code, doc = preparing.prepare(spec(), resolve=lambda i: "/m/x", info=ws,
                           shape=lambda p, w, s, vision=True, mtp=True: big,
                           registry=dict,
                           held=lambda job: [])
@@ -1064,7 +1075,7 @@ def test_prepare_counts_what_another_job_holds_once(cache):
     held = [("job 416d59fd3aa52908 rank 0", 51487, int(79.4 * GIB))]
 
     def go(need):
-        return C.prepare(spec(), resolve=lambda i: "/m/x", info=m,
+        return preparing.prepare(spec(), resolve=lambda i: "/m/x", info=m,
                          shape=lambda p, w, s, vision=True, mtp=True:
                          dict(SHAPE, tensor_per_rank_bytes=need),
                          registry=dict, held=lambda job: held)[1]
@@ -1077,7 +1088,7 @@ def test_prepare_counts_what_another_job_holds_once(cache):
 def test_what_is_held_counts_live_ranks_and_servers_not_the_stopping(
         cache, monkeypatch):
     from knurlogic.machine import servers
-    monkeypatch.setattr(C, "_alive", lambda job, pid: pid != 4)
+    monkeypatch.setattr(here, "alive", lambda job, pid: pid != 4)
     monkeypatch.setattr(servers, "is_our_server", lambda pid: True)
     reg = {"aaaa0000/1": {"job": "aaaa0000", "rank": 1, "pid": 1},
            "bbbb0000/0": {"job": "bbbb0000", "rank": 0, "pid": 2,
@@ -1085,7 +1096,7 @@ def test_what_is_held_counts_live_ranks_and_servers_not_the_stopping(
            "cccc0000/1": {"job": "cccc0000", "rank": 1, "pid": 3},
            "dddd0000/1": {"job": "dddd0000", "rank": 1, "pid": 4}}
     sreg = {8080: {"pid": 5}, 8081: {"pid": 1, "job": "aaaa0000"}}
-    got = C.held_here("cccc0000", reg=reg, sreg=sreg,
+    got = here.held_here("cccc0000", reg=reg, sreg=sreg,
                       rss=lambda pid: pid * GIB)
     assert sorted(p for _, p, _ in got) == [1, 5]
     assert ("the server on port 8080", 5, 5 * GIB) in got
@@ -1095,14 +1106,14 @@ def test_prepare_refuses_while_another_jobs_rank_is_loading(cache):
     other = "0123456789abcdef"
     reg = {f"{other}/1": {"job": other, "rank": 1, "pid": 1}}
     write_json(J.marker_path(other, 1), {"phase": "loading"})
-    code, doc = C.prepare(spec(), resolve=lambda i: "/m/x",
+    code, doc = preparing.prepare(spec(), resolve=lambda i: "/m/x",
                           info=info("Apple M3 Ultra", "192.0.2.2"),
                           shape=lambda p, w, s, vision=True, mtp=True: SHAPE,
                           registry=lambda: reg,
                           held=lambda job: [])
     assert not doc["ok"] and "one load at a time" in doc["refused"]
     write_json(J.marker_path(other, 1), {"phase": "ready"})
-    code, doc = C.prepare(spec(), resolve=lambda i: "/m/x",
+    code, doc = preparing.prepare(spec(), resolve=lambda i: "/m/x",
                           info=info("Apple M3 Ultra", "192.0.2.2"),
                           shape=lambda p, w, s, vision=True, mtp=True: SHAPE,
                           registry=lambda: reg,
@@ -1125,7 +1136,7 @@ def slow_rank(job, rank, exit_s):
     p = subprocess.Popen([sys.executable, "-c", SLOW, str(exit_s),
                           "--job", job], stdout=subprocess.PIPE, text=True)
     assert p.stdout.readline().strip() == "up"
-    C._PROCS[(job, rank)] = p
+    tables.PROCS[(job, rank)] = p
     reg = J.registry()
     reg[f"{job}/{rank}"] = {"job": job, "rank": rank, "world": 2,
                             "pid": p.pid, "machines": ["A", "B"],
@@ -1139,17 +1150,17 @@ def test_stop_then_immediately_launch_waits_for_the_old_rank_to_be_gone(
     """The smoke test's sequence: stop a job and launch the next at once.
     The old rank takes a while to exit; the new rank must not be spawned
     (nor the old job reported stopped) while it is still there."""
-    monkeypatch.setattr(C, "_local_info",
+    monkeypatch.setattr(here, "local_info",
                         lambda: info("Apple M3 Ultra", "192.0.2.2"))
     old, new = "41648583878fcdfc", "db0cb292aefeba55"
     p = slow_rank(old, 1, 1.5)
     stopper = threading.Thread(
-        target=lambda: C.stop(old, propagate=False, grace=5), daemon=True)
+        target=lambda: stopping.stop(old, propagate=False, grace=5), daemon=True)
     stopper.start()
     assert wait(lambda: J.registry().get(f"{old}/1", {}).get("stopping"), 5)
     # while it exits: "stopping", never "stopped", and its memory is not
     # counted as staying (start waits for it instead)
-    doc = {d["job"]: d for d in C.jobs_document()}
+    doc = {d["job"]: d for d in watching.jobs_document()}
     assert doc[old]["phase"] == "stopping" and doc[old]["exiting"] == [p.pid]
     code, got = prep(spec(job=new))
     assert got["ok"], got
@@ -1160,14 +1171,14 @@ def test_stop_then_immediately_launch_waits_for_the_old_rank_to_be_gone(
         return subprocess.Popen([sys.executable, "-c",
                                  "import time; time.sleep(60)",
                                  "--job", new], **kw)
-    code, out = C.start(new, spawn=spawn)
+    code, out = starting.start(new, spawn=spawn)
     assert code == 200, out
     assert seen == {"old_alive": False}
     stopper.join(10)
-    assert [d["phase"] for d in C.jobs_document() if d["job"] == old] \
+    assert [d["phase"] for d in watching.jobs_document() if d["job"] == old] \
         == ["stopped"]
-    C.stop(new, propagate=False, grace=1)
-    C.ENDED.clear()
+    stopping.stop(new, propagate=False, grace=1)
+    tables.ENDED.clear()
 
 
 def test_prepare_waits_for_a_stopping_rank_then_goes(cache, monkeypatch):
@@ -1175,31 +1186,31 @@ def test_prepare_waits_for_a_stopping_rank_then_goes(cache, monkeypatch):
     is still exiting: it waits, bounded, instead of granting the new job a
     share -- and a ring port -- the old rank still holds, then goes once
     the old rank is gone."""
-    monkeypatch.setattr(C, "EXIT_WAIT_S", 3.0)
+    monkeypatch.setattr(tables, "EXIT_WAIT_S", 3.0)
     old, new = "41648583878fcdfc", "db0cb292aefeba55"
     p = slow_rank(old, 1, 0.3)
     reg = J.registry()
     reg[f"{old}/1"]["stopping"] = time.time()
     J.save_registry(reg)
     p.send_signal(signal.SIGTERM)          # its bye handler exits in 0.3s
-    code, doc = C.prepare(spec(job=new), resolve=lambda i: "/m/x",
+    code, doc = preparing.prepare(spec(job=new), resolve=lambda i: "/m/x",
                          info=info("Apple M3 Ultra", "192.0.2.2"),
                          shape=lambda p, w, s, vision=True, mtp=True: SHAPE,
                          held=lambda job: [])
     assert doc["ok"], doc
     p.wait(timeout=5)
-    C._PROCS.clear()
+    tables.PROCS.clear()
     J.save_registry({})
 
 
 def test_prepare_names_a_stuck_old_rank_in_its_refusal(cache, monkeypatch):
-    monkeypatch.setattr(C, "EXIT_WAIT_S", 0.3)
+    monkeypatch.setattr(tables, "EXIT_WAIT_S", 0.3)
     old, new = "41648583878fcdfc", "db0cb292aefeba55"
     p = slow_rank(old, 1, 60)
     reg = J.registry()
     reg[f"{old}/1"]["stopping"] = time.time()
     J.save_registry(reg)
-    code, doc = C.prepare(spec(job=new), resolve=lambda i: "/m/x",
+    code, doc = preparing.prepare(spec(job=new), resolve=lambda i: "/m/x",
                          info=info("Apple M3 Ultra", "192.0.2.2"),
                          shape=lambda p, w, s, vision=True, mtp=True: SHAPE,
                          held=lambda job: [])
@@ -1207,7 +1218,7 @@ def test_prepare_names_a_stuck_old_rank_in_its_refusal(cache, monkeypatch):
     assert old in doc["refused"] and "still exiting" in doc["refused"]
     p.kill()
     p.wait()
-    C._PROCS.clear()
+    tables.PROCS.clear()
     J.save_registry({})
 
 
@@ -1221,19 +1232,19 @@ def test_slot_conflict_finds_an_alive_rank_of_another_job_on_the_port(
              hosts=["192.0.2.1:47201", "192.0.2.2:47202"])
     reg = {"old/1": {"job": "41648583878fcdfc", "rank": 1, "pid": 999,
                      "ring_port": 47202}}
-    monkeypatch.setattr(C, "_alive", lambda job, pid: True)
-    assert C._slot_conflict(s, reg) == ("41648583878fcdfc", 1, 999)
-    monkeypatch.setattr(C, "_alive", lambda job, pid: False)
-    assert C._slot_conflict(s, reg) is None
-    assert C._slot_conflict(s, {}) is None
+    monkeypatch.setattr(here, "alive", lambda job, pid: True)
+    assert here.slot_conflict(s, reg) == ("41648583878fcdfc", 1, 999)
+    monkeypatch.setattr(here, "alive", lambda job, pid: False)
+    assert here.slot_conflict(s, reg) is None
+    assert here.slot_conflict(s, {}) is None
     # a different slot never conflicts
     other = dict(reg, **{"old/1": {**reg["old/1"], "ring_port": 47222}})
-    monkeypatch.setattr(C, "_alive", lambda job, pid: True)
-    assert C._slot_conflict(s, other) is None
+    monkeypatch.setattr(here, "alive", lambda job, pid: True)
+    assert here.slot_conflict(s, other) is None
 
 
 def test_start_refuses_when_a_stopped_rank_will_not_go(cache, monkeypatch):
-    monkeypatch.setattr(C, "_local_info",
+    monkeypatch.setattr(here, "local_info",
                         lambda: info("Apple M3 Ultra", "192.0.2.2"))
     old, new = "41648583878fcdfc", "db0cb292aefeba55"
     p = slow_rank(old, 1, 60)
@@ -1243,31 +1254,31 @@ def test_start_refuses_when_a_stopped_rank_will_not_go(cache, monkeypatch):
     code, got = prep(spec(job=new))
     assert got["ok"], got
     spawned = []
-    code, out = C.start(new, spawn=lambda *a, **k: spawned.append(a),
+    code, out = starting.start(new, spawn=lambda *a, **k: spawned.append(a),
                         wait_s=0.5)
     assert code == 409 and not spawned
     assert f"pid {p.pid}" in out["error"] and "still exiting" in out["error"]
     p.kill()
     p.wait()
-    C._PROCS.clear()
+    tables.PROCS.clear()
     J.save_registry({})
 
 
 def test_a_stop_whose_rank_outlives_the_reap_is_finished_by_the_watcher(
         cache, monkeypatch):
     job = "41648583878fcdfc"
-    monkeypatch.setattr(C, "_peer_pages", dict)
+    monkeypatch.setattr(stopping, "peer_pages", dict)
     p = slow_rank(job, 1, 3)
-    out = C.stop(job, propagate=False, grace=0.2, reap=0.1)
+    out = stopping.stop(job, propagate=False, grace=0.2, reap=0.1)
     # SIGKILL takes a Popen at once; a slow reaper is modelled by the
     # record: still exiting means still recorded, and not "stopped"
     if out["exiting"]:
-        assert [d["phase"] for d in C.jobs_document()] == ["stopping"]
+        assert [d["phase"] for d in watching.jobs_document()] == ["stopping"]
         assert wait(lambda: not alive(p.pid), 10)
-        C.watch_once()
+        watching.watch_once()
     assert J.registry() == {}
-    assert [d["phase"] for d in C.jobs_document()] == ["stopped"]
-    C.ENDED.clear()
+    assert [d["phase"] for d in watching.jobs_document()] == ["stopped"]
+    tables.ENDED.clear()
 
 
 # --- a peer's page: what it says is evidence, its silence is not ------------
@@ -1287,18 +1298,18 @@ PAGES = dict(pages={"b": "192.0.2.1:8765"}, me="a",
 
 
 def _down(page, j):
-    raise C.transport.PeerUnreachable("timed out")
+    raise transport.PeerUnreachable("timed out")
 
 
 def test_a_page_that_does_not_answer_never_stops_a_job(monkeypatch, caplog):
     """2026-10-04: a slow M4 page (28 s) stopped a job whose ranks were
     fine; 2026-10-15: a page redeploy did. However long a page is silent
     -- or unknown to this page -- the job is kept, with one warning."""
-    monkeypatch.setattr(C, "peers_fn", list)
+    monkeypatch.setattr(tables, "peers_fn", list)
     with caplog.at_level("WARNING"):
         for _ in range(5):
-            assert C.peer_verdict(JOB, RECS, ask=_down, **PAGES) == ("", None)
-        assert C.peer_verdict(JOB, RECS, ask=_down, pages={},
+            assert watching.peer_verdict(JOB, RECS, ask=_down, **PAGES) == ("", None)
+        assert watching.peer_verdict(JOB, RECS, ask=_down, pages={},
                               me="a") == ("", None)
     assert sum("is not evidence" in r.message for r in caplog.records) == 1
 
@@ -1309,31 +1320,31 @@ def test_a_page_whose_handler_failed_says_nothing(monkeypatch, caplog):
     preparing": a healthy 8-machine job was stopped twice. A reply that is
     an error is no answer -- and not silence either: the machine
     answered, so it is never probed."""
-    monkeypatch.setattr(C, "peers_fn", list)
+    monkeypatch.setattr(tables, "peers_fn", list)
     probed = []
     failed = {"error": "this machine's handler failed",
               "failure_kind": "failure"}
     with caplog.at_level("WARNING"):
         for _ in range(3):
-            assert C.peer_verdict(
+            assert watching.peer_verdict(
                 JOB, RECS, ask=lambda page, j: failed, pages=PAGES["pages"],
                 me="a", probe=lambda h, p: probed.append(h)) == ("", None)
     assert probed == []
     assert sum("could not say" in r.message for r in caplog.records) == 1
-    C._PEER_SLOW.clear()
+    tables.PEER_SLOW.clear()
 
 
 def test_a_page_of_another_protocol_is_no_answer(monkeypatch):
     """A ProtocolError from a peer's JobState aborted the watcher's whole
     tick, for every job; it is no answer, as silence is."""
-    monkeypatch.setattr(C, "peers_fn", list)
+    monkeypatch.setattr(tables, "peers_fn", list)
 
     def other(page, j):
         raise P.VersionMismatch("another protocol")
     try:
-        assert C.peer_verdict(JOB, RECS, ask=other, **PAGES) == ("", None)
+        assert watching.peer_verdict(JOB, RECS, ask=other, **PAGES) == ("", None)
     finally:
-        C._PEER_SLOW.clear()
+        tables.PEER_SLOW.clear()
 
 
 def test_a_machine_silent_while_the_job_joins_stops_it(monkeypatch):
@@ -1345,7 +1356,7 @@ def test_a_machine_silent_while_the_job_joins_stops_it(monkeypatch):
     that answers, even once, is a page restarting; and once the job has
     joined, the bell watchers decide, never this."""
     from knurlogic.engine.split import liveness
-    monkeypatch.setattr(C, "peers_fn", list)
+    monkeypatch.setattr(tables, "peers_fn", list)
     phase = {"now": "joining"}
     monkeypatch.setattr(J, "phase_of", lambda job, recs: phase["now"])
     probed = []
@@ -1357,64 +1368,64 @@ def test_a_machine_silent_while_the_job_joins_stops_it(monkeypatch):
     kw = {"pages": {"b": "192.0.2.1:8765"}, "me": "a", "probe": probe}
     try:
         for t in (0.0, 10.0, liveness.SILENT_S - 1):
-            assert C.peer_verdict(JOB, RECS, ask=_down, now=t, **kw) == \
+            assert watching.peer_verdict(JOB, RECS, ask=_down, now=t, **kw) == \
                 ("", None)
         assert probed[0] == ("192.0.2.1", 8765)   # the page's own address
-        why, kind = C.peer_verdict(JOB, RECS, ask=_down,
+        why, kind = watching.peer_verdict(JOB, RECS, ask=_down,
                                    now=liveness.SILENT_S, **kw)
         assert kind == "machine" and "M3" in why and "joining" in why
         # one answer and the silence starts over
         kernel["answers"] = True
-        assert C.peer_verdict(JOB, RECS, ask=_down, now=40.0, **kw) == \
+        assert watching.peer_verdict(JOB, RECS, ask=_down, now=40.0, **kw) == \
             ("", None)
         kernel["answers"] = False
-        assert C.peer_verdict(JOB, RECS, ask=_down, now=41.0, **kw) == \
+        assert watching.peer_verdict(JOB, RECS, ask=_down, now=41.0, **kw) == \
             ("", None)
-        assert C.peer_verdict(JOB, RECS, ask=_down,
+        assert watching.peer_verdict(JOB, RECS, ask=_down,
                               now=41.0 + liveness.SILENT_S - 1, **kw) == \
             ("", None)
         # joined: the machine is the bell watchers' to judge; not probed
         phase["now"] = "loading"
         probed.clear()
-        assert C.peer_verdict(JOB, RECS, ask=_down, now=500.0, **kw) == \
+        assert watching.peer_verdict(JOB, RECS, ask=_down, now=500.0, **kw) == \
             ("", None)
         assert probed == []
         # an unknown answer (an errno outside SILENCE) is not evidence
         phase["now"] = "joining"
         kernel["answers"] = None
         for t in (600.0, 700.0):
-            assert C.peer_verdict(JOB, RECS, ask=_down, now=t, **kw) == \
+            assert watching.peer_verdict(JOB, RECS, ask=_down, now=t, **kw) == \
                 ("", None)
     finally:
-        C._PEER_SILENT.clear()
-        C._PEER_SLOW.clear()
+        tables.PEER_SILENT.clear()
+        tables.PEER_SLOW.clear()
 
 
 def test_peer_verdict_acts_at_once_on_what_a_page_says(monkeypatch):
-    monkeypatch.setattr(C, "peers_fn", list)
+    monkeypatch.setattr(tables, "peers_fn", list)
 
     def says(doc):
         return lambda page, j: doc
-    assert C.peer_verdict(JOB, RECS, ask=says({"ranks_here": [1]}),
+    assert watching.peer_verdict(JOB, RECS, ask=says({"ranks_here": [1]}),
                           **PAGES) == ("", None)
     # preparing (from Prepare until its registry record exists): held
-    assert C.peer_verdict(JOB, RECS, ask=says({"ranks_here": [],
+    assert watching.peer_verdict(JOB, RECS, ask=says({"ranks_here": [],
                                                "prepared": True}),
                           **PAGES) == ("", None)
-    why, kind = C.peer_verdict(JOB, RECS, ask=says(
+    why, kind = watching.peer_verdict(JOB, RECS, ask=says(
         {"ranks_here": [], "prepared": False}), **PAGES)
     assert "M3 no longer runs its rank" in why and kind == "machine"
     # a rank that exited there: that page's own reason and kind
-    why, kind = C.peer_verdict(JOB, RECS, ask=says(
+    why, kind = watching.peer_verdict(JOB, RECS, ask=says(
         {"ranks_here": [], "exited": "rank 1 on M3 (pid 9) exited: out of "
          "memory: OOM", "exited_kind": "memory"}), **PAGES)
     assert why.startswith("M3: rank 1 on M3") and kind == "memory"
     # the job ended there: its reason
-    assert C.peer_verdict(JOB, RECS, ask=says(
+    assert watching.peer_verdict(JOB, RECS, ask=says(
         {"ranks_here": [], "ended": "rank 1 exited"}), **PAGES) \
         == ("M3 stopped the job: rank 1 exited", None)
     # with the kind that page recorded: recovery treats it the same here
-    assert C.peer_verdict(JOB, RECS, ask=says(
+    assert watching.peer_verdict(JOB, RECS, ask=says(
         {"ranks_here": [], "ended": "rank 1 exited: its ring lost a peer",
          "ended_kind": "machine"}), **PAGES)[1] == "machine"
 
@@ -1426,21 +1437,21 @@ def test_watch_keeps_a_job_whose_peer_page_is_silent(monkeypatch):
     from knurlogic.cluster import recovery as R
     recs = [dict(RECS[0], pid=4242, t=990.0)]
     monkeypatch.setattr(J, "by_job", lambda: {JOB: recs})
-    monkeypatch.setattr(C, "_peer_pages", lambda: {"b": "192.0.2.1:8765"})
-    monkeypatch.setattr(C, "peers_fn", list)
-    monkeypatch.setattr(C, "_ask_job", _down)
+    monkeypatch.setattr(stopping, "peer_pages", lambda: {"b": "192.0.2.1:8765"})
+    monkeypatch.setattr(tables, "peers_fn", list)
+    monkeypatch.setattr(watching, "_ask_job", _down)
     from knurlogic.machine import identity
     monkeypatch.setattr(identity, "identity", lambda: {"id": "a"})
     stops = []
-    monkeypatch.setattr(C, "stop", lambda job, **kw: stops.append(kw))
+    monkeypatch.setattr(stopping, "stop", lambda job, **kw: stops.append(kw))
     alive = {"v": True}
-    monkeypatch.setattr(C, "_alive", lambda j, pid: alive["v"])
+    monkeypatch.setattr(here, "alive", lambda j, pid: alive["v"])
     # (under the join deadline: no marker here, so the rank reads as joining)
     for t in (1000.0, 1010.0, 1000.0 + J.JOIN_S - 20):
-        assert C.watch_once(now=t) == []
+        assert watching.watch_once(now=t) == []
     assert stops == [] and JOB not in R.MODELS
     alive["v"] = False
-    out = C.watch_once(now=1000.0 + J.JOIN_S - 10)
+    out = watching.watch_once(now=1000.0 + J.JOIN_S - 10)
     assert out and out[0][0] == JOB and stops
 
 
@@ -1450,15 +1461,15 @@ def test_peer_verdict_reads_the_peer_lists_boot_id(monkeypatch):
     from knurlogic.cluster.peers import Peer
     rec = Peer(host="192.0.2.1", port=8765, id="b", name="M3",
                state="answering", last_seen=100.0, boot_id="one")
-    monkeypatch.setattr(C, "peers_fn", lambda: [rec])
+    monkeypatch.setattr(tables, "peers_fn", lambda: [rec])
     up = (lambda page, j: {"ranks_here": [1]})
-    assert C.peer_verdict(JOB, RECS, ask=up, **PAGES) == ("", None)
+    assert watching.peer_verdict(JOB, RECS, ask=up, **PAGES) == ("", None)
     rec.boot_id = "two"
     # the page restarted, its rank (its own session) did not: kept
-    assert C.peer_verdict(JOB, RECS, ask=up, **PAGES) == ("", None)
-    assert C._PEER_BOOT[(JOB, "b")] == "two"
+    assert watching.peer_verdict(JOB, RECS, ask=up, **PAGES) == ("", None)
+    assert tables.PEER_BOOT[(JOB, "b")] == "two"
     rec.boot_id = "three"
-    why, _ = C.peer_verdict(JOB, RECS, ask=(
+    why, _ = watching.peer_verdict(JOB, RECS, ask=(
         lambda page, j: {"ranks_here": [], "prepared": False}), **PAGES)
     assert "M3 restarted" in why
 
@@ -1472,11 +1483,11 @@ def test_job_state_says_why_a_rank_here_exited(cache, monkeypatch):
     log.write_text("RuntimeError: [metal::malloc] Resource limit exceeded\n")
     J.save_registry({f"{job}/1": {"job": job, "rank": 1, "pid": 999999,
                                   "machine": "M3", "log": str(log)}})
-    monkeypatch.setattr(C, "_alive", lambda j, pid: False)
-    doc = C.job_state(job)
+    monkeypatch.setattr(here, "alive", lambda j, pid: False)
+    doc = watching.job_state(job)
     assert doc["ranks_here"] == []
     assert doc["exited"].startswith("rank 1 on M3 (pid 999999) exited")
-    assert doc["exited_kind"] == C.exit_reason("x", [{"log": str(log)}])[1]
+    assert doc["exited_kind"] == watching.exit_reason("x", [{"log": str(log)}])[1]
     J.save_registry({})
 
 
@@ -1494,11 +1505,11 @@ def test_a_vanished_peer_page_keeps_the_job(
     own session, runs on: A keeps the job however long B's page is gone. A
     machine that dies is the ranks' bell watchers' to catch."""
     p = two_pages
-    assert C.watch_once() == []                 # B answers: healthy
+    assert watching.watch_once() == []                 # B answers: healthy
     p.page_b.kill()                             # B's page is gone
     p.page_b.wait()
     for _ in range(3):
-        assert C.watch_once() == []
+        assert watching.watch_once() == []
         time.sleep(0.5)
     assert alive(p.rank0["pid"])
 
@@ -1509,7 +1520,7 @@ def test_a_peer_page_that_stopped_the_job_has_this_one_stop_too(
     without telling B is caught from B's side."""
     p = two_pages
     # A drops its ranks without propagating: B must notice by itself
-    C.stop(p.job, reason="rank 0 on A exited", propagate=False, grace=1)
+    stopping.stop(p.job, reason="rank 0 on A exited", propagate=False, grace=1)
     assert wait(lambda: not alive(p.rank1["pid"]), 30)
 
 
@@ -1532,15 +1543,15 @@ def two_cable_infos():
 
 
 def test_link_init_failure_reads_jaccl_and_ring_lines():
-    assert "RTR failed with errno 96" in C.link_init_failure(
+    assert "RTR failed with errno 96" in tables.link_init_failure(
         "loading\nValueError: [jaccl] Changing queue pair to RTR failed "
         "with errno 96\n")
-    assert C.link_init_failure("[ring] Couldn't connect (error: 61)")
-    assert C.link_init_failure("rank 1 exited") == ""
+    assert tables.link_init_failure("[ring] Couldn't connect (error: 61)")
+    assert tables.link_init_failure("rank 1 exited") == ""
     # a running peer that died is not a link that failed to come up: the
     # job must not move to another cable, and recovery waits for machines
     lost = "RuntimeError: [ring] connection to a peer was lost"
-    assert C.link_init_failure(lost) == ""
+    assert tables.link_init_failure(lost) == ""
 
 
 def test_a_failing_cable_goes_last_for_that_pair_only(monkeypatch):
@@ -1558,8 +1569,9 @@ def test_a_failing_cable_goes_last_for_that_pair_only(monkeypatch):
 
 def jaccl_launch(monkeypatch, req, post=None, follow=None):
     a, b = two_cable_infos()
-    monkeypatch.setattr(C, "_resolve", lambda i, name="": "/m/x")
-    monkeypatch.setattr(C, "shape_of", lambda p, w, s, vision=True, mtp=True: SHAPE)
+    monkeypatch.setattr(here, "resolve", lambda i, name="": "/m/x")
+    for m in (C, preparing):
+        monkeypatch.setattr(m, "shape_of", lambda p, w, s, vision=True, mtp=True: SHAPE)
     peer = SimpleNamespace(id="bbbb", name="B", host="127.0.0.2",
                            key="127.0.0.2:8765", state="answering",
                            link="thunderbolt", node={"cluster": b})
@@ -1572,8 +1584,8 @@ def jaccl_launch(monkeypatch, req, post=None, follow=None):
         if kind == "Start":
             return {"started": doc["job"]}
         return {}
-    monkeypatch.setattr(C, "prepare", lambda spec: (200, {"ok": True}))
-    monkeypatch.setattr(C, "start", lambda job, **k: (200, {"started": job}))
+    monkeypatch.setattr(preparing, "prepare", lambda spec: (200, {"ok": True}))
+    monkeypatch.setattr(starting, "start", lambda job, **k: (200, {"started": job}))
     out = C.launch({"action": "load", "identity": "abc",
                     "nodes": ["aaaa", "bbbb"], "split": "pipeline",
                     "link": "jaccl", **req},
@@ -1622,14 +1634,14 @@ def test_a_link_init_failure_relaunches_on_the_next_cable(cache,
     assert C.failover(job, ctx, "rank 1 on B (pid 9) exited") is None
     why = ("rank 1 on B (pid 9) exited: link init failed: ValueError: "
            "[jaccl] Changing queue pair to RTR failed with errno 96")
-    C.ENDED[job] = {"reason": why, "t": time.time(), "port": 2,
+    tables.ENDED[job] = {"reason": why, "t": time.time(), "port": 2,
                     "machines": ["A", "B"]}
     new = C.failover(job, ctx, why)
     assert new["job"] and new["job"] != job and new["cable"] == "127.0.1"
     assert "moved from 127.0.0" in new["cable_note"]
     assert "errno 96" in new["cable_note"]
-    assert C.ENDED[job]["relaunched"] == new["job"]
-    assert "relaunched on cable 127.0.1" in C.ENDED[job]["reason"]
+    assert tables.ENDED[job]["relaunched"] == new["job"]
+    assert "relaunched on cable 127.0.1" in tables.ENDED[job]["reason"]
     assert "127.0.0" in links.BAD_CABLES[frozenset(("aaaa", "bbbb"))]
     # the next launch this session starts on the working cable, and says so
     later, _ = jaccl_launch(monkeypatch, {})
@@ -1639,7 +1651,7 @@ def test_a_link_init_failure_relaunches_on_the_next_cable(cache,
     ctx2 = ctxs[1][1]
     last = C.failover(new["job"], ctx2, why)
     assert "every shared Thunderbolt cable failed" in last["refused"]
-    C.ENDED.clear()
+    tables.ENDED.clear()
 
 
 def test_the_follower_stops_at_a_failure_or_gives_up(cache, monkeypatch):
@@ -1671,17 +1683,18 @@ def test_a_rank_that_fails_jaccl_init_moves_the_job_to_the_next_cable(
     monkeypatch.setenv("FAKE_BAD_CABLE", "127.0.0")
     monkeypatch.setitem(identity._ID, "id", "aaaa")
     monkeypatch.setitem(identity._ID, "name", "A")
-    monkeypatch.setattr(C, "_resolve",
+    monkeypatch.setattr(here, "resolve",
                         lambda i, name="": "/fake/artifact" if i == "abc" else None)
-    monkeypatch.setattr(C, "shape_of", lambda p, w, s, vision=True, mtp=True: SHAPE)
+    for m in (C, preparing):
+        monkeypatch.setattr(m, "shape_of", lambda p, w, s, vision=True, mtp=True: SHAPE)
     monkeypatch.setattr(links, "BAD_CABLES", {})
     monkeypatch.setattr(C, "FAILOVER_POLL_S", 0.2)
     info_a, info_b = two_cable_infos()
-    monkeypatch.setattr(C, "_local_info", lambda: info_a)
+    monkeypatch.setattr(here, "local_info", lambda: info_a)
     sys.path.insert(0, str(HERE))
     import cluster_fake_page
-    monkeypatch.setattr(C, "RANK_ARGV", [cluster_fake_page.fake_argv])
-    monkeypatch.setattr(C, "_WATCHER", _started())
+    monkeypatch.setattr(starting, "RANK_ARGV", [cluster_fake_page.fake_argv])
+    monkeypatch.setattr(tables, "WATCHER", _started())
     ui_a, ui_b = free_port(), free_port()
     srv = ThreadingHTTPServer(("127.0.0.1", ui_a), page_server.make_handler({}))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
@@ -1709,29 +1722,29 @@ def test_a_rank_that_fails_jaccl_init_moves_the_job_to_the_next_cable(
                        serve_port=free_port())
         assert out.get("job") and out["cable"] == "127.0.0", out
         jobs.append(out["job"])
-        moved = wait(lambda: (C.ENDED.get(out["job"]) or {}).get(
+        moved = wait(lambda: (tables.ENDED.get(out["job"]) or {}).get(
             "relaunched"), 40)
-        assert moved, C.ENDED.get(out["job"])
+        assert moved, tables.ENDED.get(out["job"])
         jobs.append(moved)
-        e = C.ENDED[out["job"]]
+        e = tables.ENDED[out["job"]]
         assert "errno 96" in e["reason"] and "127.0.1" in e["reason"]
         assert wait(lambda: (J.read_marker(moved, 0) or {}).get("phase")
                     == "ready", 20)
-        doc = next(d for d in C.jobs_document() if d["job"] == moved)
+        doc = next(d for d in watching.jobs_document() if d["job"] == moved)
         assert doc["cable"] == "127.0.1"
         assert "moved from 127.0.0" in doc["cable_note"]
         assert "127.0.0" in links.BAD_CABLES[frozenset(("aaaa", "bbbb"))]
     finally:
         for j in jobs:
-            C.stop(j, grace=1)
+            stopping.stop(j, grace=1)
         reap_registries(tmp_path / "A", tmp_path / "B")
         srv.shutdown()
-        C.ENDED.clear()
+        tables.ENDED.clear()
 
 
 def test_a_stopped_job_never_claims_the_port_the_next_job_serves_on(monkeypatch):
     # a new job reuses :8080: its card must not say "stopped" while loading
-    monkeypatch.setattr(C, "jobs_document", lambda: [
+    monkeypatch.setattr(watching, "jobs_document", lambda: [
         {"job": "new", "phase": "ready", "port": 8080, "split": "pipeline"},
         {"job": "old", "phase": "stopped", "port": 8080}])
     doc = page_loads.with_jobs({"resident": [
@@ -1744,8 +1757,8 @@ def test_an_unload_after_a_page_restart_still_tells_the_other_pages(
     """SPECS is this page process's memory: after a restart the job's
     machines come from its rank records, so the stop still reaches B."""
     p = two_pages
-    C.SPECS.clear()                             # the page restarted
-    out = C.stop(p.job, grace=1)
+    tables.SPECS.clear()                             # the page restarted
+    out = stopping.stop(p.job, grace=1)
     assert out["told"] == ["B"]
     assert wait(lambda: not alive(p.rank1["pid"]), 30)
 
@@ -1774,9 +1787,9 @@ def test_same_build_different_version_string_is_accepted_with_a_note(cache):
 # --- control-plane contract (docs/design/orchestration.md) --------------------
 
 def test_a_retried_start_answers_started_again(cache, monkeypatch):
-    monkeypatch.setattr(C, "_local_info",
+    monkeypatch.setattr(here, "local_info",
                         lambda: info("Apple M3 Ultra", "192.0.2.2"))
-    monkeypatch.setattr(C, "_ensure_watcher", lambda: None)
+    monkeypatch.setattr(watching, "ensure_watcher", lambda: None)
     job = "db0cb292aefeba55"
     code, got = prep(spec(job=job))
     assert got["ok"] and got["v"] == [1, 0], got
@@ -1786,19 +1799,19 @@ def test_a_retried_start_answers_started_again(cache, monkeypatch):
         procs.append(subprocess.Popen(["sleep", "30"]))
         return procs[0]
     try:
-        code, first = C.start(job, spawn=spawn, wait_s=0.5)
+        code, first = starting.start(job, spawn=spawn, wait_s=0.5)
         assert code == 200 and first["started"] == job, first
-        code, again = C.start(job, spawn=spawn, wait_s=0.5)
+        code, again = starting.start(job, spawn=spawn, wait_s=0.5)
         assert code == 200 and len(procs) == 1
         assert (again["rank"], again["pid"]) == (first["rank"], first["pid"])
         assert again["v"] == [1, 0]
         # an unknown job is still the same 404
-        assert C.start("ffffffffffffffff", spawn=spawn)[0] == 404
+        assert starting.start("ffffffffffffffff", spawn=spawn)[0] == 404
     finally:
         for p in procs:
             p.kill()
             p.wait()
-        C._PROCS.clear()
+        tables.PROCS.clear()
         J.save_registry({})
 
 
@@ -1808,23 +1821,23 @@ def test_a_start_stays_prepared_until_its_rank_is_recorded(cache,
     (waiting on an exiting rank, spawning) must see the job held: with no
     clock in peer_verdict, "not prepared, no rank" stops the job at once
     (docs/design/liveness.md). A Start retried meanwhile spawns nothing."""
-    monkeypatch.setattr(C, "_local_info",
+    monkeypatch.setattr(here, "local_info",
                         lambda: info("Apple M3 Ultra", "192.0.2.2"))
-    monkeypatch.setattr(C, "_ensure_watcher", lambda: None)
+    monkeypatch.setattr(watching, "ensure_watcher", lambda: None)
     job = "db0cb292aefeba55"
     assert prep(spec(job=job))[1]["ok"]
     seen, procs, go = [], [], threading.Event()
 
     def spawn(cmd, **kw):
-        seen.append(C.job_state(job))
+        seen.append(watching.job_state(job))
         go.wait(10)
         procs.append(subprocess.Popen(["sleep", "30"]))
         return procs[-1]
     out: dict = {}
     first = threading.Thread(target=lambda: out.setdefault(
-        "first", C.start(job, spawn=spawn, wait_s=0.5)))
+        "first", starting.start(job, spawn=spawn, wait_s=0.5)))
     retry = threading.Thread(target=lambda: out.setdefault(
-        "retry", C.start(job, spawn=spawn, wait_s=0.5)))
+        "retry", starting.start(job, spawn=spawn, wait_s=0.5)))
     try:
         first.start()
         assert wait(lambda: seen, 10)
@@ -1837,30 +1850,30 @@ def test_a_start_stays_prepared_until_its_rank_is_recorded(cache,
         assert out["first"][0] == 200 and out["retry"][0] == 200
         assert len(procs) == 1
         assert out["retry"][1]["pid"] == out["first"][1]["pid"]
-        doc = C.job_state(job)
+        doc = watching.job_state(job)
         assert not doc["prepared"] and doc["ranks_here"] == [1]
-        assert job not in C.PREPARED
+        assert job not in tables.PREPARED
     finally:
         go.set()
         for p in procs:
             p.kill()
             p.wait()
-        C._PROCS.clear()
+        tables.PROCS.clear()
         J.save_registry({})
 
 
 def test_a_start_that_fails_to_spawn_is_no_longer_prepared(cache,
                                                            monkeypatch):
-    monkeypatch.setattr(C, "_local_info",
+    monkeypatch.setattr(here, "local_info",
                         lambda: info("Apple M3 Ultra", "192.0.2.2"))
     job = "db0cb292aefeba55"
     assert prep(spec(job=job))[1]["ok"]
 
     def spawn(cmd, **kw):
         raise OSError("no such file")
-    code, out = C.start(job, spawn=spawn, wait_s=0.5)
+    code, out = starting.start(job, spawn=spawn, wait_s=0.5)
     assert code == 500 and "no such file" in out["error"]
-    assert job not in C.PREPARED and not C.job_state(job)["prepared"]
+    assert job not in tables.PREPARED and not watching.job_state(job)["prepared"]
 
 
 def test_failure_kind_is_read_before_the_wording():
@@ -1873,17 +1886,17 @@ def test_failure_kind_is_read_before_the_wording():
 
 def test_stop_carries_its_kind_to_the_ended_record_and_the_peers(
         cache, monkeypatch):
-    monkeypatch.setattr(C, "_peer_pages", lambda: {"b": "y:1"})
+    monkeypatch.setattr(stopping, "peer_pages", lambda: {"b": "y:1"})
     job = "41648583878fcdfc"
-    C.SPECS[job] = spec(job=job)
+    tables.SPECS[job] = spec(job=job)
     told = []
-    out = C.stop(job, reason="B went away", kind="machine",
+    out = stopping.stop(job, reason="B went away", kind="machine",
                  post=lambda page, kind, doc, **k: told.append(doc) or {})
     assert out["v"] == [1, 0] and out["exiting"] == []
     assert told[0]["kind"] == "machine"
-    assert C.ENDED[job]["kind"] == "machine"
-    assert C.job_state(job)["ended_kind"] == "machine"
-    C.ENDED.clear()
+    assert tables.ENDED[job]["kind"] == "machine"
+    assert watching.job_state(job)["ended_kind"] == "machine"
+    tables.ENDED.clear()
 
 
 def test_a_rank_whose_poll_cannot_answer_is_judged_by_its_process():
@@ -1892,44 +1905,44 @@ def test_a_rank_whose_poll_cannot_answer_is_judged_by_its_process():
     healthy job (now and then, in a Linux container)."""
     job = "91648583878fcdfc"
     dead = SimpleNamespace(pid=99999999, poll=lambda: None)
-    C._PROCS[(job, 0)] = dead
+    tables.PROCS[(job, 0)] = dead
     try:
-        assert not C._alive(job, dead.pid)
+        assert not here.alive(job, dead.pid)
     finally:
-        C._PROCS.pop((job, 0))
+        tables.PROCS.pop((job, 0))
 
 
 def test_a_late_stop_keeps_the_failovers_relaunch(cache, monkeypatch):
     """The coordinator's failover can move a job to the next cable before
     the failing rank's stop reaches it; that stop must not erase where the
     job went (it did, now and then, in a Linux container)."""
-    monkeypatch.setattr(C, "_peer_pages", dict)
+    monkeypatch.setattr(stopping, "peer_pages", dict)
     job = "81648583878fcdfc"
-    C.SPECS[job] = spec(job=job)
-    C.ENDED[job] = {"reason": "link init failed; relaunched on cable "
+    tables.SPECS[job] = spec(job=job)
+    tables.ENDED[job] = {"reason": "link init failed; relaunched on cable "
                     "127.0.1 as job 9", "relaunched": "9", "t": 1.0}
-    C.stop(job, reason="rank 1 on B (pid 3) exited",
+    stopping.stop(job, reason="rank 1 on B (pid 3) exited",
            post=lambda *a, **k: {})
-    assert C.ENDED[job]["relaunched"] == "9"
-    assert "relaunched on cable" in C.ENDED[job]["reason"]
-    C.ENDED.clear()
+    assert tables.ENDED[job]["relaunched"] == "9"
+    assert "relaunched on cable" in tables.ENDED[job]["reason"]
+    tables.ENDED.clear()
 
 
 def test_an_unload_is_recorded_as_requested(cache, monkeypatch):
     """The page drops a launch's card for a requested stop and shows a
     failure otherwise (picker.js followLaunch reads the ended kind): an
     unload, which carries no kind of its own, is recorded as requested."""
-    monkeypatch.setattr(C, "_peer_pages", dict)
+    monkeypatch.setattr(stopping, "peer_pages", dict)
     job = "51648583878fcdfc"
-    C.SPECS[job] = spec(job=job)
-    C.stop(job, reason="unloaded", post=lambda *a, **k: {})
-    assert C.ENDED[job]["kind"] == "requested"
+    tables.SPECS[job] = spec(job=job)
+    stopping.stop(job, reason="unloaded", post=lambda *a, **k: {})
+    assert tables.ENDED[job]["kind"] == "requested"
     job2 = "61648583878fcdfc"
-    C.SPECS[job2] = spec(job=job2)
-    C.stop(job2, reason="rank 1 on B (pid 3) exited",
+    tables.SPECS[job2] = spec(job=job2)
+    stopping.stop(job2, reason="rank 1 on B (pid 3) exited",
            post=lambda *a, **k: {})
-    assert C.ENDED[job2]["kind"] is None          # a failure stays one
-    C.ENDED.clear()
+    assert tables.ENDED[job2]["kind"] is None          # a failure stays one
+    tables.ENDED.clear()
 
 
 def test_a_job_being_unloaded_is_requested_while_its_ranks_exit(
@@ -1942,9 +1955,9 @@ def test_a_job_being_unloaded_is_requested_while_its_ranks_exit(
                                   "split": "tensor", "link": "ring",
                                   "stopping": 1.0, "stop_reason": "unloaded",
                                   "stop_kind": "requested"}})
-    row = next(r for r in C.jobs_document() if r["job"] == job)
+    row = next(r for r in watching.jobs_document() if r["job"] == job)
     assert row["phase"] == "stopping" and row["kind"] == "requested"
-    assert C.job_state(job)["ended_kind"] == "requested"
+    assert watching.job_state(job)["ended_kind"] == "requested"
     J.save_registry({})
 
 
@@ -1980,13 +1993,13 @@ def test_no_link_is_tcp_over_the_one_shared_cable(cache, monkeypatch):
 def test_ring_chunk_is_the_smallest_ranks_room_and_a_set_wins():
     got = [{"ok": True, "prefill_chunk": 2048},
            {"ok": True, "prefill_chunk": 1024}]
-    assert C.ring_chunk({}, got) == (1024, C.RING_CHUNK_WHY)
-    assert C.ring_chunk({"KNURLOGIC_PREFILL_CHUNK": "256"}, got) == (256, "set")
-    assert C.ring_chunk({}, got + [{"ok": True}])[0] == C.PREFILL_CHUNK
+    assert preparing.ring_chunk({}, got) == (1024, tables.RING_CHUNK_WHY)
+    assert preparing.ring_chunk({"KNURLOGIC_PREFILL_CHUNK": "256"}, got) == (256, "set")
+    assert preparing.ring_chunk({}, got + [{"ok": True}])[0] == tables.PREFILL_CHUNK
 
 
 def test_start_runs_the_rings_chunk_and_says_why(cache, monkeypatch):
-    monkeypatch.setattr(C, "_local_info",
+    monkeypatch.setattr(here, "local_info",
                         lambda: info("Apple M3 Ultra", "192.0.2.2"))
     code, got = prep(spec())
     assert got["ok"], got
@@ -1995,18 +2008,18 @@ def test_start_runs_the_rings_chunk_and_says_why(cache, monkeypatch):
     def spawn(cmd, **k):
         cmds.append(cmd)
         raise OSError("not really")
-    C.start("ab12cd34ef567890", spawn=spawn, wait_s=0.5,
-            ring={"prefill_chunk": 1024, "prefill_why": C.RING_CHUNK_WHY})
+    starting.start("ab12cd34ef567890", spawn=spawn, wait_s=0.5,
+            ring={"prefill_chunk": 1024, "prefill_why": tables.RING_CHUNK_WHY})
     cmd = cmds[0]
     assert cmd[cmd.index("--prefill-chunk") + 1] == "1024"
-    assert cmd[cmd.index("--prefill-why") + 1] == C.RING_CHUNK_WHY
-    C._PROCS.clear()
+    assert cmd[cmd.index("--prefill-why") + 1] == tables.RING_CHUNK_WHY
+    tables.PROCS.clear()
 
 
 def test_a_stopped_job_does_not_claim_the_next_server_on_its_port(monkeypatch):
     # a single-Mac load on 8080 after a stopped cluster job there showed as
     # that job ("pipeline over RDMA · stopped"), beside its own launch card
-    monkeypatch.setattr(C, "jobs_document", lambda: [
+    monkeypatch.setattr(watching, "jobs_document", lambda: [
         {"job": "77865d0000000000", "phase": "stopped", "port": 8080,
          "split": "pipeline", "link": "rdma", "machines": ["A", "B"]}])
     doc = page_loads.with_jobs({"resident": [
@@ -2075,13 +2088,13 @@ def test_the_watcher_leaves_a_job_whose_live_ranks_are_mid_step(
     job = "41648583878fcdfc"
     J.save_registry({f"{job}/1": {"job": job, "rank": 1, "pid": 4321,
                                   "stopping": 1.0}})
-    monkeypatch.setattr(C, "_alive", lambda j, p: True)
+    monkeypatch.setattr(here, "alive", lambda j, p: True)
     monkeypatch.setattr(J, "mid_step", lambda j, r, p: True)
     stops = []
-    monkeypatch.setattr(C, "stop", lambda *a, **k: stops.append(a))
-    assert C.watch_once() == [] and stops == []
+    monkeypatch.setattr(stopping, "stop", lambda *a, **k: stops.append(a))
+    assert watching.watch_once() == [] and stops == []
     monkeypatch.setattr(J, "mid_step", lambda j, r, p: False)
-    C.watch_once()
+    watching.watch_once()
     assert stops == [(job,)]
     J.save_registry({})
 

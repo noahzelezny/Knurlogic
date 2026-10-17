@@ -21,9 +21,10 @@ def survey_here(routes: dict) -> tuple:
     if isinstance(doc, dict):
         # fresh memory and ranks still exiting: what a coordinator placing
         # a launch right after an unload needs, not the last status
-        from knurlogic.cluster import launch
-        doc["available_bytes"] = launch.available_now()
-        doc["exiting"] = len(launch.exiting(launch.J.registry()))
+        from knurlogic.cluster import here, jobs
+        from knurlogic.machine.memory.wired import available_now
+        doc["available_bytes"] = available_now()
+        doc["exiting"] = len(here.exiting(jobs.registry()))
     return 200, doc
 
 

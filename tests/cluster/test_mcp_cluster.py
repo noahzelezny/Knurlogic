@@ -15,6 +15,7 @@ from types import SimpleNamespace
 import pytest
 import test_cluster_jobs as T
 
+from knurlogic.cluster import here, preparing, starting, stopping, tables
 from knurlogic.cluster import launch as C
 from knurlogic.interfaces import documents, mcp, spawn
 from knurlogic.interfaces.mcp import lifecycle, page_client
@@ -207,14 +208,16 @@ def page_a(tmp_path, monkeypatch, owned_procs):
                        + os.environ.get("PYTHONPATH", ""))
     monkeypatch.setitem(identity._ID, "id", "aaaa")
     monkeypatch.setitem(identity._ID, "name", "A")
-    monkeypatch.setattr(C, "_resolve",
+    monkeypatch.setattr(here, "resolve",
                         lambda i, name="": "/fake/artifact" if i == "abc" else None)
-    monkeypatch.setattr(C, "shape_of", lambda p, w, s, vision=True, mtp=True: T.SHAPE)
+    for m in (C, preparing):
+        monkeypatch.setattr(m, "shape_of",
+                            lambda p, w, s, vision=True, mtp=True: T.SHAPE)
     info_a = T.info("Apple M4 Max", "127.0.0.1")
     info_b = T.info("Apple M3 Ultra", "127.0.0.1")
-    monkeypatch.setattr(C, "_local_info", lambda: info_a)
+    monkeypatch.setattr(here, "local_info", lambda: info_a)
     import cluster_fake_page
-    monkeypatch.setattr(C, "RANK_ARGV", [cluster_fake_page.fake_argv])
+    monkeypatch.setattr(starting, "RANK_ARGV", [cluster_fake_page.fake_argv])
     ui_a, ui_b = T.free_port(), T.free_port()
     env = {**os.environ, "XDG_CACHE_HOME": str(tmp_path / "B")}
     page_b = owned_procs(subprocess.Popen(
@@ -256,8 +259,8 @@ def page_a(tmp_path, monkeypatch, owned_procs):
     monkeypatch.setenv("KNURLOGIC_PAGE", f"127.0.0.1:{ui_a}")
     ctx = SimpleNamespace(port=serve_port, page_b=page_b, pids=[])
     yield ctx
-    for job in list(C.SPECS):
-        C.stop(job, propagate=False, grace=1)
+    for job in list(tables.SPECS):
+        stopping.stop(job, propagate=False, grace=1)
     # every rank either page started, whatever the test reached
     for d in ("A", "B"):
         f = tmp_path / d / "knurlogic" / "jobs" / "jobs.json"
@@ -272,7 +275,7 @@ def page_a(tmp_path, monkeypatch, owned_procs):
     page_b.kill()
     page_b.wait(5)
     srv.shutdown()
-    C.ENDED.clear()
+    tables.ENDED.clear()
 
 
 def test_mcp_load_state_unload_across_two_pages(page_a, monkeypatch):

@@ -21,7 +21,11 @@ also throws inside the rank -- but only once `JACCL_COLLECTIVE_TIMEOUT_MS`
 is set, which happens after the load (0 while loading: a cold 400 GB read
 is not a hang).
 
-## knurlogic/cluster/launch.py
+## knurlogic/cluster: launch and the page's steps
+
+`cluster/launch.py` is the coordinator; each page's own steps are
+`preparing.py`, `starting.py`, `watching.py` and `stopping.py`, over the
+shared tables in `tables.py` and this machine's facts in `here.py`.
 
 The coordinator is the page someone pressed Launch on with two or more
 machines picked. It never starts a rank on another machine itself: every

@@ -6,18 +6,19 @@ import sys
 _MCP_ALONE = r"""
 import sys
 from knurlogic.cluster import launch, recovery
+from knurlogic.cluster import tables
 from knurlogic.interfaces.mcp import inspection
-before = (launch.status_fn, recovery.load_fn)
+before = (tables.status_fn, recovery.load_fn)
 assert isinstance(inspection.state(), dict)
 assert isinstance(inspection.ready(), dict)
 assert "knurlogic.interfaces.page.server" not in sys.modules
-assert (launch.status_fn, recovery.load_fn) == before
-assert launch.status_fn is launch._no_status
+assert (tables.status_fn, recovery.load_fn) == before
+assert tables.status_fn is tables._no_status
 assert recovery.load_fn is recovery._no_load
 import knurlogic.interfaces.page.server as server
-assert (launch.status_fn, recovery.load_fn) == before, "import wired"
+assert (tables.status_fn, recovery.load_fn) == before, "import wired"
 server.make_handler({})
-assert launch.status_fn is not launch._no_status
+assert tables.status_fn is not tables._no_status
 assert recovery.load_fn is not recovery._no_load
 print("ok")
 """
