@@ -32,7 +32,6 @@ import time
 from collections.abc import Callable
 
 from knurlogic.cluster import NET_ERRORS
-from knurlogic.cluster import jobs as J
 from knurlogic.cluster import protocol as P
 from knurlogic.machine import http_client
 
@@ -47,8 +46,9 @@ TIMEOUTS: dict = {
     "Survey": 2.5,
     "Prepare": 30.0,
     "Start": 30.0,
-    # the peer answers once its ranks are gone: its grace, then its reap
-    "Stop": J.GRACE_S + J.REAP_S + 10,
+    # the peer answers once its ranks are marked stopping, before they
+    # are gone (launch.stop, wait=False)
+    "Stop": 10.0,
     "JobState": 5.0,
     "Shape": 30.0,
     "Load": 60.0,

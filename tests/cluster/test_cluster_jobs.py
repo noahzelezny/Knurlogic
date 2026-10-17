@@ -407,6 +407,47 @@ def test_stop_tells_the_other_pages_before_it_stops_its_own_ranks(
     J.save_registry({})
 
 
+def test_another_pages_stop_answers_once_its_ranks_are_marked(
+        cache, monkeypatch):
+    """A follower leaves only on rank 0's stop, and rank 0's page stops
+    rank 0 once every other page has answered: a page answering only after
+    its follower's grace held an idle job's unload for that grace (25 s,
+    measured) and SIGKILLed the follower. It answers once its ranks are
+    marked stopping, and ends them on a thread."""
+    import threading
+    job = "ab12cd34ef567890"
+    J.save_registry({f"{job}/1": {"job": job, "rank": 1, "pid": 4242}})
+    ended = threading.Event()
+    monkeypatch.setattr(C, "_alive", lambda j, pid: not ended.is_set())
+    release = threading.Event()
+
+    calls = []
+
+    def terminate(pids, **kw):
+        calls.append(pids)
+        release.wait(5)
+        ended.set()
+        return []
+    monkeypatch.setattr(J, "terminate", terminate)
+    code, out = C.peer_step("Stop", {"job": job, "reason": "unloaded"})
+    assert code == 200 and out["stopped"] == job and out["exiting"] == [4242]
+    assert not ended.is_set()                  # answered before the end
+    assert J.registry()[f"{job}/1"]["stopping"]
+    # a second Stop (a retry, another page's) answers the same, and does
+    # not end the ranks a second time
+    code, again = C.peer_step("Stop", {"job": job, "reason": "unloaded"})
+    assert code == 200 and again["exiting"] == [4242]
+    release.set()
+    assert ended.wait(5)
+    for t in threading.enumerate():        # the stop's own end, then clean
+        if t.name == f"knurlogic-stop-{job}":
+            t.join(5)
+    assert f"{job}/1" not in J.registry() and calls == [[4242]]
+    assert job not in C._STOPPING
+    C.ENDED.pop(job, None)
+    J.save_registry({})
+
+
 # --- the stall verdict -------------------------------------------------------
 
 def test_verdict_idle_is_not_stalled_but_busy_and_still_is(monkeypatch):

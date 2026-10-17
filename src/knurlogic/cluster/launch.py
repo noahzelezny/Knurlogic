@@ -1043,10 +1043,17 @@ def _alive(job: str, pid: int) -> bool:
 
 def stop(job: str, reason: str = "unloaded", propagate: bool = True,
          post=None, grace: float = J.GRACE_S,
-         reap: float = J.REAP_S, kind: str | None = None) -> dict:
+         reap: float = J.REAP_S, kind: str | None = None,
+         wait: bool = True) -> dict:
     """Stop every rank of `job` on this machine (SIGTERM, then SIGKILL
     after `grace`), forget it, and -- when `propagate` -- tell every other
-    page of the job to do the same."""
+    page of the job to do the same.
+
+    `wait` False (another page's Stop) answers once the ranks here are
+    marked stopping and ends them on a thread: a follower leaves only on
+    rank 0's `stop`, and rank 0's page sends its own SIGTERM only after
+    every page has answered -- waiting here held an idle job's unload for
+    the whole grace, and then SIGKILLed the follower."""
     job = str(job or "")
     cleared: list = []
     if recovery.kind(reason, kind) == "requested":
@@ -1058,6 +1065,7 @@ def stop(job: str, reason: str = "unloaded", propagate: bool = True,
     with _LOCK:
         PREPARED.pop(job, None)
         spec = SPECS.pop(job, None)
+        ending = job in _STOPPING       # another stop is ending it already
         _STOPPING.add(job)
         reg = J.registry()
         mine = {k: v for k, v in reg.items() if v.get("job") == job}
@@ -1079,14 +1087,39 @@ def stop(job: str, reason: str = "unloaded", propagate: bool = True,
         # record all that is left): every peer page hears the stop, so the
         # record goes on whichever Mac holds it
         nodes = [{"id": i} for i in _peer_pages()]
+    if not wait:
+        if not ending:
+            threading.Thread(target=_end_stop, daemon=True,
+                             name=f"knurlogic-stop-{job}",
+                             args=(job, mine, spec, reason, stop_kind,
+                                   grace, reap)).start()
+        return typed(Stopped(
+            job=job, ranks_here=sorted(v["rank"] for v in mine.values()),
+            exiting=[int(v["pid"]) for v in mine.values()
+                     if _alive(job, int(v["pid"]))],
+            reason=reason, cleared=cleared))
     # the other pages first: a rank stopped here before its peers hear of
     # it fails their ranks' ring ("[ring] connection to a peer was lost"),
     # and their pages would record a crash -- and recover it -- where the
-    # job was asked to stop
+    # job was asked to stop. Each answers once its ranks are marked
+    # (wait=False), so this waits for no rank to leave
     told: list = []
     if propagate and nodes:
         told, more = _tell_peers(job, nodes, reason, kind, post)
         cleared += [c for c in more if c not in cleared]
+    killed, left = _end_stop(job, mine, spec, reason, stop_kind, grace,
+                             reap)
+    return typed(Stopped(job=job, ranks_here=sorted(v["rank"] for v in
+                                                    mine.values()),
+                         killed=killed, exiting=left, told=told,
+                         reason=reason, cleared=cleared))
+
+
+def _end_stop(job: str, mine: dict, spec: dict | None, reason: str,
+              stop_kind: str | None, grace: float, reap: float) -> tuple:
+    """`stop`'s second half, after the ranks here are marked: end them
+    (J.terminate) and forget the job once they are gone. (killed pids,
+    pids still exiting)."""
     try:
         pids = [int(v["pid"]) for v in mine.values()
                 if _alive(job, int(v["pid"]))]
@@ -1150,10 +1183,7 @@ def stop(job: str, reason: str = "unloaded", propagate: bool = True,
             if moved:
                 ENDED[job].update(reason=moved["reason"],
                                   relaunched=moved["relaunched"])
-    return typed(Stopped(job=job, ranks_here=sorted(v["rank"] for v in
-                                                    mine.values()),
-                         killed=killed, exiting=left, told=told,
-                         reason=reason, cleared=cleared))
+    return killed, left
 
 
 def _tell_peers(job: str, nodes: list, reason: str, kind: str | None,
@@ -2180,7 +2210,7 @@ def peer_step(kind: str, req: dict) -> tuple:
         k = req.get("kind")
         return 200, stop(req["job"], reason=reason, propagate=False,
                          kind=k if k in (*FAILURE_KINDS, "requested")
-                         else None)
+                         else None, wait=False)
     if kind == "JobState":
         if not J.JOB_RX.fullmatch(str(req.get("job") or "")):
             return 400, {"error": "job is a hex nonce"}

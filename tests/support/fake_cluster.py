@@ -90,6 +90,14 @@ class Page:
     def live_ranks(self, job: str | None = None) -> list:
         return [r for r in self.ranks(job) if alive(int(r["pid"]))]
 
+    def phase(self, job: str, rank: int) -> str:
+        """The rank's own marker phase (cluster/jobs.Marker), "" unread."""
+        f = self.cache / "knurlogic" / "jobs" / job / f"rank{rank}.json"
+        try:
+            return str(json.loads(f.read_text()).get("phase") or "")
+        except (OSError, ValueError):
+            return ""
+
     def start(self, peers: list) -> None:
         env = {**os.environ, "PYTHONPATH": SRC, **self.env,
                "XDG_CACHE_HOME": str(self.cache),
@@ -213,9 +221,13 @@ class FakeCluster:
         return self.pages[coordinator].post("/loaded.json", req)
 
     def running(self, job: str) -> bool:
-        """Every page that is up runs a live rank of `job`."""
-        return all(len(p.live_ranks(job)) == 1 for p in self.pages
-                   if p.proc.poll() is None)
+        """Every page that is up runs a live rank of `job` that has joined
+        it (marker "ready"). A record alone is not running: a machine
+        killed before its rank joined leaves rank 0 waiting for it at the
+        bell (link.BELL_EARLY_S), where nothing else is watched."""
+        return all(len(live := p.live_ranks(job)) == 1
+                   and p.phase(job, int(live[0]["rank"])) == "ready"
+                   for p in self.pages if p.proc.poll() is None)
 
     def job_stopped_everywhere(self, job: str) -> bool:
         return all(not p.live_ranks(job) for p in self.pages

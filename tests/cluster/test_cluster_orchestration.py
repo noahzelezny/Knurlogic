@@ -21,6 +21,7 @@ import urllib.request
 import pytest
 from fake_cluster import VERSIONS, FakeCluster, alive, wait
 
+from knurlogic.cluster import jobs as J
 from knurlogic.cluster import protocol, transport
 
 # each test starts up to eight pages with fixed deadlines: run them one at a
@@ -54,9 +55,15 @@ def test_a_pipeline_launch_over_tcp_runs_a_rank_on_every_page(tmp_path, n):
         docs = [next(d for d in p.get("/loaded.json")["jobs"]
                      if d["job"] == job) for p in c.pages]
         assert {tuple(d["machines"]) for d in docs} == {tuple(out["machines"])}
-        # Unload on the coordinator stops every page's rank
-        c.pages[0].post("/loaded.json", {"action": "unload", "job": job})
+        # Unload on rank 0's page stops every page's rank, without waiting
+        # out a follower's grace: a follower leaves only on rank 0's stop,
+        # and rank 0's page used to SIGTERM rank 0 only once every other
+        # page had answered -- after SIGKILLing its follower (25 s, measured)
+        lead = next(p for p in c.pages if p.name == out["machines"][0])
+        t = time.monotonic()
+        lead.post("/loaded.json", {"action": "unload", "job": job})
         assert wait(lambda: c.job_stopped_everywhere(job), 40)
+        assert time.monotonic() - t < J.GRACE_S / 2
 
 
 @pytest.mark.parametrize("n", [3, 8])

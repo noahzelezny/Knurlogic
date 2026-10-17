@@ -47,11 +47,27 @@ def ring_like(socks, lost):
         threading.Thread(target=watch, args=(c,), daemon=True).start()
 
 
+#: a SIGTERM this follower deferred (follower._defer_sigterm)
+TOLD = threading.Event()
+
+
 def follower_lost():
-    """A follower whose ring failed: one error line, non-zero (follower.py
-    ring_error -> SystemExit(1))."""
+    """A follower's bell closed. Told to stop (SIGTERM, deferred): rank 0
+    left with the job's `stop`, and so does this rank, zero. Else its ring
+    failed: one error line, non-zero (follower.py ring_error ->
+    SystemExit(1))."""
+    if TOLD.is_set():
+        print("rank: leaving on rank 0's stop", flush=True)
+        os._exit(0)
     print(f"rank: lost the ring to rank 0 ({LOST}); leaving", flush=True)
     os._exit(1)
+
+
+def defer_sigterm():
+    """As a real follower: a SIGTERM does not end it -- it leaves on rank
+    0's stop (follower._defer_sigterm), else on the page's SIGKILL."""
+    import signal
+    signal.signal(signal.SIGTERM, lambda *_: TOLD.set())
 
 
 def bell(job):
@@ -91,6 +107,7 @@ def main():
     socks = bell(job)
     marker.progress(phase="loading")
     if rank != 0:
+        defer_sigterm()
         ring_like(socks, follower_lost)
         marker.after_load()
         n = 0
@@ -109,7 +126,10 @@ def main():
         state = "ready"
 
     sched = Scheduler(Host())             # never started: nothing steps
-    lifecycle.watch_ring(sched, Host(), exit_after=1.0)
+    # never at a step boundary either: 1 s, not 15, stands in for an idle
+    # rank 0, which stops the ring at once (50 ms, measured) -- its
+    # followers leave only then
+    lifecycle.watch_ring(sched, Host(), exit_after=1.0, stop_within=1.0)
     # a peer's death fails rank 0's ring: the scheduler's own path (503s,
     # then a non-zero exit), as a collective raising in a real tick
     ring_like(socks, lambda: sched._ring_fatal(RuntimeError(LOST)))

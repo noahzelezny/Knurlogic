@@ -289,6 +289,16 @@ precise reason arrives. `stop()` keeps the first reason recorded
   another cable. Now `stop()` tells the other pages first, in parallel
   (`_tell_peers`), and a lost peer is not a link init failure (`RING_LOST`);
   a rank that exited with it is kind `machine`.
+- **Telling the other pages first held every unload for 25 s.** A peer
+  page answered Stop only once its ranks were gone, but a follower leaves
+  only on rank 0's `stop` -- and rank 0's page sent rank 0 its SIGTERM
+  only after that answer. The follower waited out its grace (`GRACE_S`)
+  and was SIGKILLed: an idle Qwen 35B pipeline took 25.5 s to unload,
+  measured on the two Macs. A peer page now answers once its ranks are
+  marked stopping and ends them on a thread (`stop(wait=False)`); the
+  order -- every page marked before rank 0 stops -- is kept. The fake
+  follower in the end-to-end tests had died on SIGTERM, so no test saw
+  it; it now defers SIGTERM as a real follower does.
 - **`job_state` read `PREPARED`, the registry and `ENDED` apart.** A peer
   could see "no record, not ended" for an instant during a stop. They are
   now read as one snapshot under `_LOCK`, and the "ended" verdict carries
