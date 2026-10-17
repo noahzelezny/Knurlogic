@@ -1,5 +1,8 @@
 """machine/files.py and machine/paths.py: whole-or-nothing writes, tolerant
-reads, and the three state directories."""
+reads, read-change-write as one step, and the three state directories."""
+import subprocess
+import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -69,6 +72,55 @@ def test_save_registry_is_atomic(tmp_path, monkeypatch):
             servers.save_registry({8081: {"pid": 2, "model": "/n"}})
     assert servers.registry_path().read_text() == before
     assert list(servers.registry()) == [8080]
+
+
+_COUNT = """
+import sys
+from knurlogic.machine import files
+for _ in range(int(sys.argv[2])):
+    files.update_json(sys.argv[1], lambda d: d.update(n=d.get("n", 0) + 1),
+                      {})
+"""
+
+
+def test_update_json_loses_no_update_across_threads_and_processes(tmp_path):
+    """A writer that read before another one saved must not write its
+    stale copy over that save: two processes and four threads each add
+    one, 200 times, and every addition is there."""
+    f = tmp_path / "count.json"
+    procs = [subprocess.Popen([sys.executable, "-c", _COUNT, str(f), "200"])
+             for _ in range(2)]
+    threads = [threading.Thread(target=lambda: [
+        files.update_json(f, lambda d: d.update(n=d.get("n", 0) + 1), {})
+        for _ in range(200)]) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert all(p.wait(60) == 0 for p in procs)
+    assert files.read_json(f) == {"n": 1200}
+
+
+def test_update_json_writes_what_change_returns_or_its_edit(tmp_path):
+    f = tmp_path / "doc.json"
+    assert files.update_json(f, lambda d: d.update(a=1), {}) == {"a": 1}
+    assert files.update_json(f, lambda d: [*d, "b"], []) == ["b"]  # a list
+    assert files.read_json(f) == ["b"]
+
+
+def test_a_registry_update_keeps_what_another_writer_saved(tmp_path,
+                                                          monkeypatch):
+    """servers.update_registry re-reads under the lock: a stop that read
+    the registry before a start saved its server drops only its own port
+    (interfaces/spawn waits up to STOP_SAVE_S between the two)."""
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    servers.save_registry({8080: {"pid": 1, "artifact": "/m"}})
+    stale = servers.registry()                     # read before the wait
+    servers.update_registry(lambda r: r.update({8081: {"pid": 2,
+                                                       "artifact": "/n"}}))
+    servers.update_registry(lambda r: r.pop(8080))
+    assert stale == {8080: {"pid": 1, "artifact": "/m"}}
+    assert servers.registry() == {8081: {"pid": 2, "artifact": "/n"}}
 
 
 def test_the_state_directories(tmp_path, monkeypatch):

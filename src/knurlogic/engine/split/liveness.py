@@ -36,6 +36,14 @@ KEEP_IDLE_S = 10
 KEEP_INTVL_S = 5
 KEEP_COUNT = 4
 
+#: what keepalive allows a silent machine: from its last acknowledgement
+#: to the drop. A page probing a machine (`kernel_answers`) waits as long
+SILENT_S = KEEP_IDLE_S + KEEP_INTVL_S * KEEP_COUNT
+
+#: one probe's connect: a live kernel on the same cable answers in
+#: milliseconds (refused in 0.2 s, measured over Thunderbolt)
+PROBE_S = 1.0
+
 #: how often the watcher samples each bell's TCP state; a dropped
 #: connection stays closed, so this is a sampling interval, not a deadline
 SAMPLE_S = 1.0
@@ -73,6 +81,24 @@ def closed(sock: socket.socket) -> bool:
         return sock.getsockopt(socket.IPPROTO_TCP, level, 64)[0] == gone
     except (OSError, IndexError):
         return False
+
+
+def kernel_answers(host: str, port: int,
+                   timeout: float = PROBE_S) -> bool | None:
+    """Whether the machine at `host` answers a TCP connect to `port`: True
+    when it accepts or refuses (its kernel is there, whatever runs on it),
+    False when nothing answers (a timeout, or an errno in SILENCE: no
+    route, host down), None for anything else (not evidence either way).
+    Connects and closes; sends nothing."""
+    try:
+        socket.create_connection((host, port), timeout=timeout).close()
+    except (ConnectionRefusedError, ConnectionResetError):
+        return True
+    except TimeoutError:
+        return False
+    except OSError as e:
+        return False if e.errno in SILENCE else None
+    return True
 
 
 def ring_sockets(hosts: list[str]) -> list[socket.socket]:

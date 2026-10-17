@@ -156,6 +156,22 @@ def send(page: str, kind: str, doc: dict | None = None, *,
     return decode_reply(code, raw, who, seq)
 
 
+def answer(page: str, kind: str, doc: dict | None = None,
+           post=None) -> dict | None:
+    """The peer's reply to `kind`, or None when it gave none: unreachable,
+    of another protocol, or its handler failed or refused (a Failure
+    reply). None says nothing about what was asked: a JobState whose
+    handler failed (a process exiting under psutil) once read as "no rank
+    here" and stopped a healthy job."""
+    try:
+        out = (post or send)(page, kind, doc or {})
+    except (*NET_ERRORS, P.ProtocolError):
+        return None
+    if not isinstance(out, dict) or "error" in out:
+        return None
+    return out
+
+
 class Bytes:
     """A handler's reply that is a file's byte range, not an envelope:
     the page reads and sends it as application/octet-stream."""

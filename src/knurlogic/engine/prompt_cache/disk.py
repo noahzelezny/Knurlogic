@@ -72,7 +72,7 @@ from typing import Any
 
 from knurlogic.engine.arrays import arrays_of
 from knurlogic.machine.artifact import safetensors_header, safetensors_layout
-from knurlogic.machine.files import atomic, read_json, write_json
+from knurlogic.machine.files import atomic, read_json, update_json
 from knurlogic.machine.units import GIB
 from knurlogic.tuning import knobs
 
@@ -501,16 +501,20 @@ def set_pin(session: str, pinned: bool | None,
         for b in _roots(None):
             set_pin(session, pinned, b)
         return
-    p = pins(base)
-    if pinned is None:
-        if session not in p:
-            return
-        p.pop(session)
-    elif p.get(session) is bool(pinned):
-        return
-    else:
-        p[session] = bool(pinned)
-    write_json(base / PINS, p, indent=1, sort_keys=True)
+    now = pins(base)
+    if (session not in now) if pinned is None \
+            else now.get(session) is bool(pinned):
+        return                          # already so: nothing to write
+
+    def change(doc: dict) -> dict:
+        # re-read under the lock: every server sharing this root pins
+        p = {str(k): bool(v) for k, v in doc.items()}
+        if pinned is None:
+            p.pop(session, None)
+        else:
+            p[session] = bool(pinned)
+        return p
+    update_json(base / PINS, change, {}, indent=1, sort_keys=True)
 
 
 def _pinned_files(files, base: Path) -> set:

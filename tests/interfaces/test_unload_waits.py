@@ -23,7 +23,7 @@ class FakeProc:
 def _setup(monkeypatch, proc, sent=None):
     reg = {8080: {"pid": 4242, "artifact": "m", "log": "l"}}
     monkeypatch.setattr(spawn, "registry", lambda: reg)
-    monkeypatch.setattr(spawn, "save_registry", lambda r: None)
+    monkeypatch.setattr(spawn, "update_registry", lambda change: change(reg))
     monkeypatch.setattr(spawn, "is_our_server", lambda pid: True)
     monkeypatch.setattr("os.kill",
                         lambda pid, sig: (sent if sent is not None else []).append(sig))

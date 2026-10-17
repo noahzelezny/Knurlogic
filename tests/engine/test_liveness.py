@@ -69,6 +69,31 @@ def test_closed_reads_the_kernel_state_and_consumes_nothing():
     assert not liveness.closed(c)          # a closed socket object: unknown
 
 
+def test_kernel_answers_tells_a_machine_from_its_silence(monkeypatch):
+    """Accepted or refused: the machine's kernel is there, whatever runs
+    on it. Nothing at all -- a timeout, or no route / host down (an
+    address with no machine on the cable: EHOSTDOWN at once, after a
+    first timeout, measured over Thunderbolt): it is not. Any other error
+    is not evidence."""
+    srv = socket.create_server(("127.0.0.1", 0))
+    port = srv.getsockname()[1]
+    try:
+        assert liveness.kernel_answers("127.0.0.1", port) is True
+    finally:
+        srv.close()
+    assert liveness.kernel_answers("127.0.0.1", port) is True  # refused
+
+    def fails(exc):
+        def connect(*a, **k):
+            raise exc
+        monkeypatch.setattr(liveness.socket, "create_connection", connect)
+        return liveness.kernel_answers("192.0.2.9", 8765)
+    assert fails(TimeoutError("timed out")) is False
+    assert fails(OSError(errno.EHOSTDOWN, "Host is down")) is False
+    assert fails(OSError(errno.EHOSTUNREACH, "No route to host")) is False
+    assert fails(OSError(errno.EADDRNOTAVAIL, "not available")) is None
+
+
 class _Sock:
     """A bell the kernel dropped with `err` (the state and SO_ERROR a
     keepalive failure or a reset leave), or a ring socket shut by the

@@ -19,12 +19,13 @@ model's cache, wherever it lives.
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 from pathlib import Path
 
 from knurlogic.machine import paths
-from knurlogic.machine.files import read_json, write_atomic, write_json
+from knurlogic.machine.files import read_json, update_json, write_atomic
 
 logger = logging.getLogger(__name__)
 
@@ -115,14 +116,15 @@ def remember(d: Path) -> None:
     fb = fallback()
     if Path(d) == fb:
         return
-    got = known()
-    if str(d) in map(str, got):
+    if str(d) in map(str, known()):
         return
-    try:
-        names = [str(p) for p in got if p != fb] + [str(d)]
-        write_json(fb / LOCATIONS, sorted(set(names)), indent=1)
-    except OSError:
-        pass
+    # re-read under the lock (every server sharing the fallback root
+    # remembers its own); an unmounted volume's root stays listed --
+    # known() leaves it out while it is gone
+    with contextlib.suppress(OSError):
+        update_json(fb / LOCATIONS,
+                    lambda names: sorted({str(n) for n in names} | {str(d)}),
+                    [], indent=1)
 
 
 def known() -> list[Path]:

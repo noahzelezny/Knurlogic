@@ -23,7 +23,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from knurlogic.cluster import NET_ERRORS, REFUSED_EXIT, every, transport
+from knurlogic.cluster import REFUSED_EXIT, every, transport
 from knurlogic.cluster.jobs import log_tail
 from knurlogic.cluster.protocol import FAILURE_KINDS, link_name
 from knurlogic.machine import files, paths, processes
@@ -629,9 +629,8 @@ def _cluster_phase(rec: dict) -> str:
     for m in rec["order"]:
         if not m.get("page"):
             continue
-        try:
-            doc = post(m["page"], "JobState", {"job": job})
-        except (*NET_ERRORS, AttributeError):
+        doc = transport.answer(m["page"], "JobState", {"job": job}, post)
+        if doc is None:
             return "unknown"
         phases.append(doc.get("phase") or "joining")
     return "ready" if phases and all(p == "ready" for p in phases) \
@@ -661,13 +660,11 @@ def _machines_down(rec: dict) -> str:
     for m in rec["order"]:
         if not m.get("page"):
             continue
-        try:
-            doc = post(m["page"], "JobState",
-                       {"job": rec.get("ended_job") or rec["job"]})
-            if not isinstance(doc, dict) or "ranks_here" not in doc:
-                raise ValueError("no job state")
-        except (*NET_ERRORS, AttributeError) as e:
-            return f"{m.get('name')} is not answering ({type(e).__name__})"
+        doc = transport.answer(m["page"], "JobState",
+                               {"job": rec.get("ended_job") or rec["job"]},
+                               post)
+        if doc is None or "ranks_here" not in doc:
+            return f"{m.get('name')} is not answering"
     return ""
 
 
@@ -685,7 +682,11 @@ def _leftovers(rec: dict, job: str | None) -> str:
     for m in rec["order"]:
         if not m.get("page"):
             continue
-        doc = post(m["page"], "JobState", {"job": job})
+        doc = transport.answer(m["page"], "JobState", {"job": job}, post)
+        if doc is None:
+            # unknown is not none: a relaunch never starts beside ranks
+            # a page could not say are gone
+            return f"{m.get('name')}: no answer"
         if doc.get("ranks_here") or doc.get("stopping") \
                 or doc.get("processes"):
             return f"{m.get('name')}: ranks {doc.get('ranks_here')}, " \

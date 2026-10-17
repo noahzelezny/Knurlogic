@@ -22,9 +22,9 @@ from knurlogic.machine.servers import (
     PAGE_PORT,
     is_our_server,
     registry,
-    save_registry,
     serve_log,
     stuck_reason,
+    update_registry,
 )
 
 #: Children started from the page: {port: (Popen, artifact path)}.
@@ -213,14 +213,13 @@ def _spawn_unlocked(path: str, port: int, tune: str = "default",
     except (*PROC_ERRORS, ValueError) as e:
         return {"error": f"{type(e).__name__}: {e}"}
     CHILDREN[port] = (proc, path)
-    reg = registry()
-    reg[port] = {"pid": proc.pid, "artifact": path, "log": str(log),
-                 # measured once here (a launch is the user acting); the
-                 # polls read it from this record, never the model folder
-                 "bytes": bytes_on_disk(path),
-                 "started": time.strftime("%Y-%m-%d %H:%M:%S"),
-                 "t": time.time(), "instance": instance}
-    save_registry(reg)
+    rec = {"pid": proc.pid, "artifact": path, "log": str(log),
+           # measured once here (a launch is the user acting); the polls
+           # read it from this record, never the model folder
+           "bytes": bytes_on_disk(path),
+           "started": time.strftime("%Y-%m-%d %H:%M:%S"),
+           "t": time.time(), "instance": instance}
+    update_registry(lambda reg: reg.update({port: rec}))
     return {"starting": path, "port": port, "pid": proc.pid,
             "log": str(log), "instance": instance,
             "note": "the model is loading in its own process; poll `state` "
@@ -233,8 +232,7 @@ def stop(port: int) -> dict:
 
     from knurlogic.cluster import recovery
     recovery.cancel_port(port)          # asked for: never recovered
-    reg = registry()
-    rec = reg.get(port)
+    rec = registry().get(port)
     if not rec:
         # a knurlogic server this page did not start (`knurlogic serve` from
         # a shell, another agent): the page lists it with Unload, so Unload
@@ -252,8 +250,7 @@ def stop(port: int) -> dict:
         return {**out, "stopped": rec.get("artifact"), "port": port}
     pid = int(rec["pid"])
     if not is_our_server(pid):
-        reg.pop(port, None)
-        save_registry(reg)
+        _forget(port, pid)
         CHILDREN.pop(port, None)
         return {"error": f"the server on port {port} (pid {pid}) is already "
                          f"gone; record cleared", "log": rec.get("log")}
@@ -269,15 +266,26 @@ def stop(port: int) -> dict:
         # not gone by its own ceiling: likely mid-step, where a SIGKILL can
         # hang the GPU, so it is left running and listed stuck
         note = f"pid {pid} did not stop in {within:.0f} s: {stuck_reason()}"
-        if port in reg:
-            reg[port]["stuck"] = True
-            save_registry(reg)
+        def stuck(reg: dict) -> None:
+            if reg.get(port, {}).get("pid") == pid:
+                reg[port]["stuck"] = True
+        update_registry(stuck)
         return {"stopped": rec.get("artifact"), "port": port, "pid": pid,
                 "stuck": [pid], "note": note}
     CHILDREN.pop(port, None)
-    reg.pop(port, None)
-    save_registry(reg)
+    _forget(port, pid)
     return {"stopped": rec.get("artifact"), "port": port, "pid": pid}
+
+
+def _forget(port: int, pid: int) -> None:
+    """Drop `port`'s record -- only while it is still `pid`'s: stop waits
+    up to STOP_SAVE_S for the process, and a server started on the port
+    meanwhile keeps its own record (the registry is re-read, not the copy
+    read before the wait)."""
+    def drop(reg: dict) -> None:
+        if reg.get(port, {}).get("pid") == pid:
+            reg.pop(port)
+    update_registry(drop)
 
 
 #: how long past the server's own stop ceiling (http.STOP_SAVE_S) an

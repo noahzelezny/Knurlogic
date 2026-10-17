@@ -15,6 +15,7 @@ saved, so a Mac started with the old variable keeps its folder without it.
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 from knurlogic.machine import files, paths
@@ -28,14 +29,24 @@ def store_path() -> Path:
     return paths.state_dir() / "model_folders.json"
 
 
-def _read() -> dict:
-    d = files.read_json(store_path(), {})
+def _clean(d: dict) -> dict:
     folders = [f for f in d.get("folders") or [] if isinstance(f, str) and f]
     return {"folders": folders, "adopted": bool(d.get("adopted"))}
 
 
-def _write(d: dict) -> None:
-    files.write_json(store_path(), d, indent=1)
+def _read() -> dict:
+    return _clean(files.read_json(store_path(), {}))
+
+
+def _update(change: Callable[[dict], None]) -> dict:
+    """The store (`_clean`), changed in place by `change`, saved as one
+    step against every other writer -- the page and the MCP both add and
+    remove folders (files.update_json). -> the store saved."""
+    def apply(doc: dict) -> dict:
+        d = _clean(doc)
+        change(d)
+        return d
+    return files.update_json(store_path(), apply, {}, indent=1)
 
 
 def _norm(folder: str) -> str:
@@ -65,23 +76,27 @@ def add(folder: str) -> dict:
     f = _norm(folder)
     if not _is_dir(Path(f)):
         return {"error": f"not a folder: {f}", "folders": saved()}
-    d = _read()
-    if f not in d["folders"]:
-        d["folders"].append(f)
-    d["adopted"] = True
-    _write(d)
-    return {"added": f, "folders": d["folders"]}
+
+    def put(d: dict) -> None:
+        if f not in d["folders"]:
+            d["folders"].append(f)
+        d["adopted"] = True
+    return {"added": f, "folders": _update(put)["folders"]}
 
 
 def remove(folder: str) -> dict:
     """Forget `folder` (the models in it are not touched)."""
     f = _norm(folder)
-    d = _read()
-    if f not in d["folders"]:
+    was: list = []
+
+    def drop(d: dict) -> None:
+        was.extend(d["folders"])
+        if f in d["folders"]:
+            d["folders"].remove(f)
+            d["adopted"] = True
+    d = _update(drop)
+    if f not in was:
         return {"error": f"not a saved folder: {f}", "folders": d["folders"]}
-    d["folders"].remove(f)
-    d["adopted"] = True
-    _write(d)
     return {"removed": f, "folders": d["folders"]}
 
 
@@ -89,19 +104,23 @@ def adopt_from_env(env=None) -> list:
     """Save the folders the old variables name, once: only while nothing was
     ever saved here. Returns what was saved."""
     env = os.environ if env is None else env
-    d = _read()
-    if d["adopted"] or d["folders"]:
-        return []
-    found = []
+    found: list = []
     for var in ADOPT_FROM:
         for v in (env.get(var) or "").split(":"):
             if v and _is_dir(Path(v).expanduser()):
                 f = _norm(v)
                 if f not in found:
                     found.append(f)
-    if found:
-        _write({"folders": found, "adopted": True})
-    return found
+    if not found:
+        return []
+    saved_now: list = []
+
+    def adopt(d: dict) -> None:
+        if not (d["adopted"] or d["folders"]):
+            d.update(folders=list(found), adopted=True)
+            saved_now.extend(found)
+    _update(adopt)
+    return saved_now
 
 
 def listing() -> list:

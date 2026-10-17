@@ -8,7 +8,7 @@ would never have guessed. Before it did, two models holding 33 GiB on ports
 from __future__ import annotations
 
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from knurlogic.machine import files, paths, processes
@@ -75,11 +75,11 @@ def registry_path() -> Path:
     return paths.cache_dir() / "servers.json"
 
 
-def registry() -> dict:
+def _records(doc: dict) -> dict:
     """port -> record, for records that name a port and a numeric pid; a
     hand-edited or half-written entry is skipped, not a KeyError later."""
     out = {}
-    for k, v in files.read_json(registry_path(), {}).items():
+    for k, v in doc.items():
         try:
             port = int(k)
             v = dict(v, pid=int(v["pid"]))
@@ -89,11 +89,31 @@ def registry() -> dict:
     return out
 
 
+def _document(reg: dict) -> dict:
+    return {str(k): v for k, v in sorted(reg.items())}
+
+
+def registry() -> dict:
+    """port -> record (`_records`), as the file holds it now."""
+    return _records(files.read_json(registry_path(), {}))
+
+
 def save_registry(reg: dict) -> None:
     """Written whole or not at all: the page, the MCP and every server
-    started from here read it."""
-    files.write_json(registry_path(),
-                     {str(k): v for k, v in sorted(reg.items())}, indent=1)
+    started from here read it. A change to what is there goes through
+    `update_registry`."""
+    files.write_json(registry_path(), _document(reg), indent=1)
+
+
+def update_registry(change: Callable[[dict], None]) -> dict:
+    """The registry, changed in place by `change`, saved -- as one step
+    against every other writer, in this process or another (the page and
+    the MCP both start and stop servers). -> the registry saved."""
+    def apply(doc: dict) -> dict:
+        reg = _records(doc)
+        change(reg)
+        return _document(reg)
+    return _records(files.update_json(registry_path(), apply, {}, indent=1))
 
 
 def is_our_server(pid: int) -> bool:

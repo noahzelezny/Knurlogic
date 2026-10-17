@@ -585,3 +585,21 @@ def test_an_unload_during_a_relaunch_stops_the_new_job(faked, monkeypatch):
     assert stopped == [("f" * 16, "unloaded")]
     assert R.MODELS == {} and R.for_job("f" * 16) is None
     assert R.tick(1e6) == [] and len(faked["launches"]) == 1
+
+
+def test_a_page_that_cannot_say_is_not_a_page_with_no_ranks(monkeypatch):
+    """A JobState whose handler failed (a process exiting under psutil)
+    says nothing: recovery waits rather than relaunch beside ranks a page
+    could not say are gone."""
+    monkeypatch.setattr(J, "by_job", dict)
+    monkeypatch.setattr(J, "pids_of_job", lambda job: [])
+    failed = {"error": "this machine's handler failed",
+              "failure_kind": "failure"}
+    answers = {"p1": {"ranks_here": [], "processes": []}, "p2": failed}
+    rec = {"args": {"post": lambda page, kind, doc: answers[page]},
+           "order": [{"name": "A", "page": "p1"},
+                     {"name": "B", "page": "p2"}]}
+    assert R._leftovers(rec, "ab12cd34ef567890") == "B: no answer"
+    answers["p2"] = {"ranks_here": [], "processes": []}
+    assert R._leftovers(rec, "ab12cd34ef567890") == ""
+

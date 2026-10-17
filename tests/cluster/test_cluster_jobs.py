@@ -1239,13 +1239,17 @@ def test_a_stop_whose_rank_outlives_the_reap_is_finished_by_the_watcher(
 # --- a peer's page: what it says is evidence, its silence is not ------------
 # docs/design/liveness.md: a page is not its rank (ranks outlive a page
 # restart), so only what a page reports stops a job; a peer machine that
-# goes silent is caught by the ranks' bell watchers (engine/split/liveness).
+# goes silent is caught by the ranks' bell watchers (engine/split/liveness),
+# and while the job is still joining, by its kernel not answering.
 
 JOB = "ab12cd34ef567890"
 RECS = [{"job": JOB, "rank": 0, "pid": 1, "t": 0.0,
          "nodes": [{"rank": 0, "id": "a", "name": "M4"},
                    {"rank": 1, "id": "b", "name": "M3"}]}]
-PAGES = dict(pages={"b": "192.0.2.1:8765"}, me="a")
+#: a page that does not answer on a machine whose kernel does (it refuses
+#: or accepts the connect): a page restarting, never evidence
+PAGES = dict(pages={"b": "192.0.2.1:8765"}, me="a",
+             probe=lambda host, port: True)
 
 
 def _down(page, j):
@@ -1263,6 +1267,80 @@ def test_a_page_that_does_not_answer_never_stops_a_job(monkeypatch, caplog):
         assert C.peer_verdict(JOB, RECS, ask=_down, pages={},
                               me="a") == ("", None)
     assert sum("is not evidence" in r.message for r in caplog.records) == 1
+
+
+def test_a_page_whose_handler_failed_says_nothing(monkeypatch, caplog):
+    """Under load a peer's JobState failed (psutil, a process exiting
+    mid-read) and its Failure reply read as "holds no rank, not
+    preparing": a healthy 8-machine job was stopped twice. A reply that is
+    an error is no answer -- and not silence either: the machine
+    answered, so it is never probed."""
+    monkeypatch.setattr(C, "peers_fn", list)
+    probed = []
+    failed = {"error": "this machine's handler failed",
+              "failure_kind": "failure"}
+    with caplog.at_level("WARNING"):
+        for _ in range(3):
+            assert C.peer_verdict(
+                JOB, RECS, ask=lambda page, j: failed, pages=PAGES["pages"],
+                me="a", probe=lambda h, p: probed.append(h)) == ("", None)
+    assert probed == []
+    assert sum("could not say" in r.message for r in caplog.records) == 1
+    C._PEER_SLOW.clear()
+
+
+def test_a_machine_silent_while_the_job_joins_stops_it(monkeypatch):
+    """Before the bell watchers are armed a dead machine leaves nothing to
+    watch: rank 0 waits at the bell (240 s) for a rank that never dials, a
+    rank in mlx's ring init accepts with no timeout. While the job here is
+    still joining, a peer whose page does not answer and whose kernel
+    does not either -- for keepalive's own window -- is gone. A kernel
+    that answers, even once, is a page restarting; and once the job has
+    joined, the bell watchers decide, never this."""
+    from knurlogic.engine.split import liveness
+    monkeypatch.setattr(C, "peers_fn", list)
+    phase = {"now": "joining"}
+    monkeypatch.setattr(J, "phase_of", lambda job, recs: phase["now"])
+    probed = []
+    kernel = {"answers": False}
+
+    def probe(host, port):
+        probed.append((host, port))
+        return kernel["answers"]
+    kw = {"pages": {"b": "192.0.2.1:8765"}, "me": "a", "probe": probe}
+    try:
+        for t in (0.0, 10.0, liveness.SILENT_S - 1):
+            assert C.peer_verdict(JOB, RECS, ask=_down, now=t, **kw) == \
+                ("", None)
+        assert probed[0] == ("192.0.2.1", 8765)   # the page's own address
+        why, kind = C.peer_verdict(JOB, RECS, ask=_down,
+                                   now=liveness.SILENT_S, **kw)
+        assert kind == "machine" and "M3" in why and "joining" in why
+        # one answer and the silence starts over
+        kernel["answers"] = True
+        assert C.peer_verdict(JOB, RECS, ask=_down, now=40.0, **kw) == \
+            ("", None)
+        kernel["answers"] = False
+        assert C.peer_verdict(JOB, RECS, ask=_down, now=41.0, **kw) == \
+            ("", None)
+        assert C.peer_verdict(JOB, RECS, ask=_down,
+                              now=41.0 + liveness.SILENT_S - 1, **kw) == \
+            ("", None)
+        # joined: the machine is the bell watchers' to judge; not probed
+        phase["now"] = "loading"
+        probed.clear()
+        assert C.peer_verdict(JOB, RECS, ask=_down, now=500.0, **kw) == \
+            ("", None)
+        assert probed == []
+        # an unknown answer (an errno outside SILENCE) is not evidence
+        phase["now"] = "joining"
+        kernel["answers"] = None
+        for t in (600.0, 700.0):
+            assert C.peer_verdict(JOB, RECS, ask=_down, now=t, **kw) == \
+                ("", None)
+    finally:
+        C._PEER_SILENT.clear()
+        C._PEER_SLOW.clear()
 
 
 def test_peer_verdict_acts_at_once_on_what_a_page_says(monkeypatch):

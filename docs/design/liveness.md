@@ -246,7 +246,27 @@ jaccl raise on its own thread too.
   first, or running at all.
 - **The page is unreachable or slow:** no verdict. Log it once per episode
   (`_PEER_SLOW`) and show it on the card. If the machine itself is gone,
-  part B ends the ranks and every page stops the job by the rules above.
+  part B ends the ranks and every page stops the job by the rules above --
+  once the job has joined. Before that, the next rule.
+- **The job is still joining and the machine is silent** (built
+  2026-10-17). Part B's watchers are armed only after `mx.distributed.init`
+  returns. Before that a machine that dies leaves nothing to watch: rank 0
+  waits at the bell (`BELL_EARLY_S`, 240 s) for a rank that never dials,
+  and mlx 0.32.3's ring init accepts its left neighbour with no timeout at
+  all (`accept_connections`), so a rank there waits forever. So while every
+  rank of the job on this page is still `joining` (its marker), a peer
+  whose page does not answer has its kernel asked: a TCP connect to the
+  page's own address, which is on the cable (cluster peers are gated to
+  Thunderbolt), sending nothing (`liveness.kernel_answers`). Accepted or
+  refused is a machine that is there -- a page restarting, never evidence.
+  A timeout or an errno in `SILENCE` is silence, and `liveness.SILENT_S`
+  (keepalive's own 30 s) of nothing but silence stops the job, kind
+  `machine` (`_silent_while_joining`). One answer starts the window over;
+  an error outside `SILENCE` is not evidence. The page's port, not the
+  ring's: a ring port not yet bound is refused only with the firewall's
+  stealth mode off, and a live machine must never read as silent.
+  Measured over Thunderbolt: a live Mac refuses a closed port in 0.2 s; an
+  address with no machine times out, then reports `EHOSTDOWN` at once.
 
 These are deleted: `PEER_GONE_S`, `_PEER_OK`, `_page_up`, and reading the
 peer list's `last_seen` in this decision. `_PEER_BOOT` stays.
@@ -299,6 +319,24 @@ precise reason arrives. `stop()` keeps the first reason recorded
   order -- every page marked before rank 0 stops -- is kept. The fake
   follower in the end-to-end tests had died on SIGTERM, so no test saw
   it; it now defers SIGTERM as a real follower does.
+- **A peer page whose JobState handler failed read as "no rank here".**
+  Under load psutil's `proc_cmdline` raises `SystemError` (around a
+  `KERN_PROCARGS2` PermissionError) for a process exiting mid-read, which
+  `processes.commands` let fail the whole table; the handler then answered
+  with a Failure reply, and `peer_verdict` read it as a page holding no
+  rank and not preparing one -- and stopped a healthy job (twice, in one
+  8-machine end-to-end run). `processes` now leaves such a process out;
+  a Failure reply is no answer (`transport.answer`), in `peer_verdict`
+  and in recovery, whose leftover check had read it as "no ranks left".
+- **Registries were read, changed and written back apart.** The jobs and
+  servers registries, the model folders, the knurlogic-wide settings and
+  the prompt cache's pins and locations are written from several threads
+  and processes (the page, the MCP, every server sharing a cache root).
+  `spawn.stop` wrote back a servers registry read before its wait of up to
+  `STOP_SAVE_S`, wiping any server started meanwhile. Each now changes its
+  file in one step under an flock (`files.update_json`, `exclusive`);
+  without it, 1200 increments from two processes and four threads kept
+  307.
 - **`job_state` read `PREPARED`, the registry and `ENDED` apart.** A peer
   could see "no record, not ended" for an instant during a stop. They are
   now read as one snapshot under `_LOCK`, and the "ended" verdict carries

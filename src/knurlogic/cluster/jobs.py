@@ -17,6 +17,7 @@ import os
 import re
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 from knurlogic.cluster import every
@@ -237,13 +238,32 @@ def registry_path() -> Path:
     return root() / "jobs.json"
 
 
-def registry() -> dict:
-    return {k: v for k, v in files.read_json(registry_path(), {}).items()
+def _records(doc: dict) -> dict:
+    return {k: v for k, v in doc.items()
             if isinstance(v, dict) and isinstance(v.get("pid"), int)}
 
 
+def registry() -> dict:
+    """"job/rank" -> this page's rank record, as the file holds it now."""
+    return _records(files.read_json(registry_path(), {}))
+
+
 def save_registry(reg: dict) -> None:
+    """The whole registry; a change to what is there goes through
+    `update_registry`."""
     files.write_json(registry_path(), reg)
+
+
+def update_registry(change: Callable[[dict], None]) -> dict:
+    """The registry, changed in place by `change`, saved -- as one step
+    against every other writer: a stop finishing on its own thread saved
+    a registry it had read before a Start's record, and wiped the record
+    of a healthy rank. -> the registry saved."""
+    def apply(doc: dict) -> dict:
+        reg = _records(doc)
+        change(reg)
+        return reg
+    return files.update_json(registry_path(), apply, {})
 
 
 def by_job(reg: dict | None = None) -> dict:

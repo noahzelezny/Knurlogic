@@ -63,21 +63,25 @@ def set(values: dict) -> dict:
     bad = [k for k in values if k not in NAMES]
     if bad:
         raise ValueError(f"not a knurlogic-wide setting: {', '.join(bad)}")
-    cur = get()
-    for k, v in values.items():
-        s = str(v if v is not None else "").strip()
-        if not s:
-            cur.pop(k, None)
-            continue
-        why = check_knob(k, s)
+    clean = {k: str(v if v is not None else "").strip()
+             for k, v in values.items()}
+    for k, s in clean.items():
+        why = s and check_knob(k, s)
         if why:
             raise ValueError(why)
-        cur[k] = s
     p = path()
-    if not cur:
-        p.unlink(missing_ok=True)
-        return {}
-    files.write_json(p, cur, end="\n", sort_keys=True)
+    # read, merge and write as one step: the page and the MCP both set
+    with files.exclusive(p):
+        cur = get()
+        for k, s in clean.items():
+            if s:
+                cur[k] = s
+            else:
+                cur.pop(k, None)
+        if not cur:
+            p.unlink(missing_ok=True)
+            return {}
+        files.write_json(p, cur, end="\n", sort_keys=True)
     return cur
 
 

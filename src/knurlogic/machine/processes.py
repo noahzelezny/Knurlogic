@@ -17,8 +17,12 @@ import psutil
 #: (plus whatever their own parsing adds), not Exception.
 PROC_ERRORS = (OSError, subprocess.SubprocessError)
 
+#: what reading one process can raise when it is gone or not ours to read.
+#: SystemError too: on macOS psutil's proc_cmdline raises it (around a
+#: KERN_PROCARGS2 PermissionError) for a process exiting mid-read --
+#: seen under load, where it failed a page's whole JobState answer
 _GONE = (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess,
-         OSError, ValueError)
+         OSError, ValueError, SystemError)
 
 
 def command(pid: int) -> str:
@@ -62,11 +66,22 @@ def rss(pid: int) -> int:
         return 0
 
 
+def _each(read) -> dict:
+    """{pid: read(process)} of every process this user can read. One that
+    cannot be read -- gone, denied, or exiting mid-read -- is left out,
+    never the whole table."""
+    def one(p):
+        try:
+            return read(p)
+        except _GONE:
+            return None
+    return {p.pid: v for p in psutil.process_iter()
+            if (v := one(p)) is not None}
+
+
 def rss_all() -> dict:
     """{pid: resident bytes} of every process this user can read."""
-    return {p.pid: p.info["memory_info"].rss
-            for p in psutil.process_iter(["memory_info"])
-            if p.info.get("memory_info")}
+    return _each(lambda p: int(p.memory_info().rss))
 
 
 def environ(pid: int) -> dict:
@@ -77,13 +92,8 @@ def environ(pid: int) -> dict:
 
 
 def commands() -> dict:
-    """{pid: command line} of every process this user can read."""
-    out = {}
-    for p in psutil.process_iter(["cmdline"]):
-        cmd = p.info.get("cmdline")
-        if cmd:
-            out[p.pid] = " ".join(cmd)
-    return out
+    """{pid: command line} of every process this user can read (`_each`)."""
+    return _each(lambda p: " ".join(p.cmdline()) or None)
 
 
 def matching(pattern: str) -> list:

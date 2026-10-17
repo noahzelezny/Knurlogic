@@ -1012,16 +1012,14 @@ def _start(prep: dict, spawn, wait_s: float) -> tuple:
     with _LOCK:
         _PROCS[(spec["job"], spec["rank"])] = proc
         SPECS[spec["job"]] = spec
-        reg = J.registry()
-        reg[f"{spec['job']}/{spec['rank']}"] = rec
-        J.save_registry(reg)
+        J.update_registry(lambda reg: reg.update(
+            {f"{spec['job']}/{spec['rank']}": rec}))
         if "port" in rec:
-            sreg = servers.registry()
-            sreg[rec["port"]] = {"pid": proc.pid, "artifact": path,
-                                 "log": str(log), "job": spec["job"],
-                                 "bytes": rec["bytes"],
-                                 "started": rec["started"], "t": rec["t"]}
-            servers.save_registry(sreg)
+            served = {"pid": proc.pid, "artifact": path, "log": str(log),
+                      "job": spec["job"], "bytes": rec["bytes"],
+                      "started": rec["started"], "t": rec["t"]}
+            servers.update_registry(lambda sreg: sreg.update(
+                {rec["port"]: served}))
     if "port" in rec:
         # this job's recovery row (a relaunch carries it; a launch by
         # somebody clears it), for rank 0's own /v1/residency
@@ -1067,17 +1065,18 @@ def stop(job: str, reason: str = "unloaded", propagate: bool = True,
         spec = SPECS.pop(job, None)
         ending = job in _STOPPING       # another stop is ending it already
         _STOPPING.add(job)
-        reg = J.registry()
-        mine = {k: v for k, v in reg.items() if v.get("job") == job}
-        # marked first: a start on this page waits for these to be gone,
-        # and a prepare does not count them as staying
-        for k in mine:
-            reg[k] = dict(reg[k], stopping=reg[k].get("stopping")
-                          or time.time(),
-                          stop_reason=reg[k].get("stop_reason") or reason,
-                          stop_kind=reg[k].get("stop_kind") or stop_kind)
-        if mine:
-            J.save_registry(reg)
+        mine: dict = {}
+
+        def mark(reg: dict) -> None:
+            # marked first: a start on this page waits for these to be
+            # gone, and a prepare does not count them as staying
+            for k, v in reg.items():
+                if v.get("job") == job:
+                    reg[k] = mine[k] = dict(
+                        v, stopping=v.get("stopping") or time.time(),
+                        stop_reason=v.get("stop_reason") or reason,
+                        stop_kind=v.get("stop_kind") or stop_kind)
+        J.update_registry(mark)
     # the job's machines: its spec, or -- after a page restart, SPECS being
     # in memory -- the ids its rank records here keep
     nodes: list = (spec or {}).get("nodes") or next(
@@ -1145,19 +1144,21 @@ def _end_stop(job: str, mine: dict, spec: dict | None, reason: str,
                 _PROCS.pop((j, r)).wait(timeout=2)
             except subprocess.TimeoutExpired:
                 pass                    # not gone yet; the watcher reaps it
-        reg = J.registry()
-        for k, v in mine.items():
-            if int(v["pid"]) not in left:
-                reg.pop(k, None)
-        J.save_registry(reg)
-        sreg = servers.registry()
-        for port in [p for p, v in sreg.items() if v.get("job") == job
-                     and int(v["pid"]) not in left]:
-            sreg.pop(port)
-        servers.save_registry(sreg)
+        def forget(reg: dict) -> None:
+            for k, v in mine.items():
+                if int(v["pid"]) not in left:
+                    reg.pop(k, None)
+        J.update_registry(forget)
+
+        def unserve(sreg: dict) -> None:
+            for port in [p for p, v in sreg.items() if v.get("job") == job
+                         and int(v["pid"]) not in left]:
+                sreg.pop(port)
+        servers.update_registry(unserve)
         _WATCH.forget(job)
-        for k in [k for k in _PEER_BOOT if k[0] == job]:
-            _PEER_BOOT.pop(k)
+        for state in (_PEER_BOOT, _PEER_SILENT):
+            for k in [k for k in state if k[0] == job]:
+                state.pop(k)
         # stopped means gone: a rank still exiting keeps its record
         # (phase "stopping"), and the watcher finishes the stop
         if (mine or spec) and not left:
@@ -1327,10 +1328,14 @@ def _record_of(nid: str):
 
 #: (job, peer id) pages that did not answer, warned once per episode
 _PEER_SLOW: set = set()
+#: (job, peer id) -> when that machine's kernel was first found silent
+#: while the job was still joining (`_silent_while_joining`)
+_PEER_SILENT: dict = {}
 
 
 def peer_verdict(job: str, recs: list, ask=None, pages=None,
-                 me=None) -> tuple[str, str | None]:
+                 me=None, probe=None,
+                 now: float | None = None) -> tuple[str, str | None]:
     """("", None) while every other machine of the job still runs its rank,
     else (why not, recovery kind), from what that machine's page says: the
     job ended there; a rank of it exited there (with that page's reason);
@@ -1338,7 +1343,9 @@ def peer_verdict(job: str, recs: list, ask=None, pages=None,
     not preparing one. A page that does not answer says nothing: a page
     is not its rank (ranks outlive a page restart), so its silence never
     stops a job. A peer MACHINE that goes silent is caught by the ranks'
-    own bell watchers (engine/split/liveness, docs/design/liveness.md)."""
+    own bell watchers (engine/split/liveness, docs/design/liveness.md) --
+    once they are armed; while the job is still joining, by its kernel
+    (`_silent_while_joining`)."""
     nodes = next((r.get("nodes") for r in recs if r.get("nodes")), None) \
         or (SPECS.get(job) or {}).get("nodes") or []
     if not nodes:
@@ -1365,28 +1372,85 @@ def peer_verdict(job: str, recs: list, ask=None, pages=None,
                 logger.warning("cluster job %s: %s's page has not answered "
                                "(%s); a page's silence is not evidence, the "
                                "job is kept", job, name, type(e).__name__)
+            why = _silent_while_joining(job, recs, key, name, page, probe,
+                                        now)
+            if why:
+                return why, "machine"
+            continue
+        _PEER_SILENT.pop(key, None)         # the machine answered
+        if not isinstance(doc, dict) or "error" in doc:
+            # its handler failed or refused: an answer about nothing, so
+            # no evidence either way (transport.answer)
+            if key not in _PEER_SLOW:
+                _PEER_SLOW.add(key)
+                logger.warning("cluster job %s: %s's page could not say "
+                               "(%s); the job is kept", job, name,
+                               (doc or {}).get("error"))
             continue
         _PEER_SLOW.discard(key)
-        if doc.get("ended"):
-            return (f"{name} stopped the job: {doc['ended']}"[:300],
-                    doc.get("ended_kind"))
-        if doc.get("exited"):
-            return (f"{name}: {doc['exited']}"[:700],
-                    doc.get("exited_kind") or "machine")
-        rec = _record_of(nid)
-        boot = getattr(rec, "boot_id", "") or ""
-        if doc.get("ranks_here") or doc.get("prepared"):
-            # ranks run in their own session and outlive a restarted
-            # page: one still holding its rank is believed, new process
-            # or not (a page redeploy used to stop a healthy job here)
-            if boot:
-                _PEER_BOOT[key] = boot
-            continue
-        if boot and _PEER_BOOT.get(key, boot) != boot:
-            return (f"{name} restarted (a new knurlogic process); its rank "
-                    f"of the job is gone", "machine")
-        return f"{name} no longer runs its rank of the job", "machine"
+        why, kind = _page_says(key, name, doc)
+        if why:
+            return why, kind
     return "", None
+
+
+def _page_says(key: tuple, name: str, doc: dict) -> tuple[str, str | None]:
+    """`peer_verdict` for one machine whose page answered JobState with
+    `doc`: ("", None) while it still runs its rank of the job (key: (job,
+    its id)), else (why not, recovery kind)."""
+    if doc.get("ended"):
+        return (f"{name} stopped the job: {doc['ended']}"[:300],
+                doc.get("ended_kind"))
+    if doc.get("exited"):
+        return (f"{name}: {doc['exited']}"[:700],
+                doc.get("exited_kind") or "machine")
+    rec = _record_of(key[1])
+    boot = getattr(rec, "boot_id", "") or ""
+    if doc.get("ranks_here") or doc.get("prepared"):
+        # ranks run in their own session and outlive a restarted page:
+        # one still holding its rank is believed, new process or not (a
+        # page redeploy used to stop a healthy job here)
+        if boot:
+            _PEER_BOOT[key] = boot
+        return "", None
+    if boot and _PEER_BOOT.get(key, boot) != boot:
+        return (f"{name} restarted (a new knurlogic process); its rank of "
+                f"the job is gone", "machine")
+    return f"{name} no longer runs its rank of the job", "machine"
+
+
+def _silent_while_joining(job: str, recs: list, key: tuple, name: str,
+                          page, probe=None, now: float | None = None) -> str:
+    """Why the machine behind a page that did not answer is gone, or "".
+
+    Before the bell watchers are armed -- every rank of the job here still
+    joining (its marker phase): rank 0 waiting at the bell for a rank that
+    never dials, or any rank in mlx's ring init, which accepts with no
+    timeout -- a machine that dies leaves no connection to watch, and the
+    job would wait out the bell (link.BELL_EARLY_S) or forever. So its
+    kernel is asked instead, on the page's own address (a Thunderbolt
+    address: cluster peers are gated to the cable): accepted or refused
+    is a machine that is there (a page restarting); only silence --
+    liveness.SILENT_S of it, keepalive's own window -- is evidence."""
+    from knurlogic.engine.split import liveness
+    if not page or J.phase_of(job, recs) != "joining":
+        _PEER_SILENT.pop(key, None)
+        return ""
+    host, _, port = str(page).rpartition(":")
+    try:
+        answers = (probe or liveness.kernel_answers)(host, int(port))
+    except ValueError:
+        return ""
+    now = time.monotonic() if now is None else now
+    if answers is not False:
+        _PEER_SILENT.pop(key, None)
+        return ""
+    since = _PEER_SILENT.setdefault(key, now)
+    if now - since < liveness.SILENT_S:
+        return ""
+    return (f"the machine holding {name}'s rank stopped answering on the "
+            f"job's link while the job was joining ({liveness.SILENT_S} s "
+            f"of silence)")
 
 
 def _ensure_watcher() -> None:
@@ -2101,11 +2165,8 @@ def job_end(job: str, order: list, post):
     for m in order:
         if m.get("page") is None:
             continue
-        try:
-            doc = post(m["page"], "JobState", {"job": job})
-        except NET_ERRORS:
-            continue
-        if isinstance(doc, dict) and doc.get("ended"):
+        doc = transport.answer(m["page"], "JobState", {"job": job}, post)
+        if doc and doc.get("ended"):
             return str(doc["ended"])
     return None
 
