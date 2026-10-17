@@ -250,9 +250,10 @@ def template_of(artifact) -> str | None:
     from knurlogic.machine.artifact import chat_template_at
     d = Path(str(getattr(artifact, "path", artifact)))
     t = chat_template_at(d)
-    if not isinstance(t, str) or not t:
-        return None
-    return templates.override(t, d.name) or t
+    # the folder itself, not its name: its config.json picks the variant
+    # (DeepSeek's Vision-Exp), and an artifact shipping no template at all
+    # is served its family's (so its levels are listed, not none)
+    return templates.override(t, str(d)) or t or None
 
 
 _disk_tok: dict = {}

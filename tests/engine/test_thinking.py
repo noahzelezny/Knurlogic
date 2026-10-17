@@ -325,6 +325,22 @@ def test_the_mcp_models_tool_lists_each_models_thinking_levels():
         "dialect": None, "native": [], "default": None}
 
 
+def test_an_artifact_shipping_no_template_lists_its_familys_levels(tmp_path):
+    """DeepSeek-V4-Flash-Vision-Exp ships no chat template; its config
+    picks the Vision-Exp variant, served in its place. /v1/models listed
+    no levels (dialect None) and clients fell back to a generic ladder."""
+    d = tmp_path / "some-vision-exp"
+    d.mkdir()
+    (d / "config.json").write_text(json.dumps(
+        {"model_type": "deepseek_v4", "vision_n_layers": 2,
+         "dspark_block_size": 4}))
+    lv = T.levels(T.template_of(d))
+    assert lv["dialect"] == "deepseek_vision_effort"
+    assert [n["name"] for n in lv["native"]] == ["off", "low", "high", "max"]
+    (d / "config.json").write_text(json.dumps({"model_type": "deepseek_v4"}))
+    assert T.levels(T.template_of(d))["dialect"] == "deepseek_effort"
+
+
 def test_messages_returns_thinking_blocks_only_when_enabled():
     from knurlogic.interfaces.http.messages import from_openai, to_openai
     on = to_openai({"messages": [{"role": "user", "content": "hi"}],
