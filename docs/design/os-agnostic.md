@@ -156,6 +156,7 @@ The suite runs in a Linux arm64 container on the Mac (python:3.12-slim,
 | test markers for CPU numerics, installed memory via psutil, test fixes | 1 failed, 2037 passed |
 | machine readouts per OS (below) | 1 failed, 2049 passed |
 | gated-delta's one home, discovery through Avahi | 1 failed, 2055 passed |
+| two cluster watch races fixed (1e348ee1) | 0 failed, 2058 passed |
 
 The Mac suite is unchanged at every step (2223 passed with the new tests).
 

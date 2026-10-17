@@ -1,5 +1,60 @@
 # Changelog
 
+## 0.1.9
+
+### Clusters: stopping and unloading
+
+* Unloading an idle split job takes about 1 s (was 25.5 s: the follower
+  waited out its grace and was killed). An unload begun from any Mac's
+  page stops the whole job in order, followers first.
+* A rank mid-step is never killed: it stays, shows Stuck and names the
+  machine to restart, on its card and in `running.json`. A model server
+  that does not leave by its stop ceiling is reported the same way.
+
+### Clusters: liveness
+
+* A job stops on evidence, never on a page's silence: a keepalive on the
+  bell (30 s), and a watcher that closes the ring when a peer machine goes
+  silent.
+* A machine that dies while its job is still joining stops the job after
+  30 s of silence (rank 0 waited 240 s).
+* A peer page's error reply is no answer, never "no rank here" (a process
+  exiting mid-read once stopped a healthy job).
+* A redeployed page keeps the job its rank still runs.
+* A stalled rank is its own kind: failed, naming the rank seen, never
+  relaunched. A relaunch keeps its first placement and refuses, naming
+  what a machine still holds, rather than placing smaller.
+
+### Clusters: loading
+
+* A rank's share counts what other ranks hold once (an 11 GiB share beside
+  a 79 GiB rank was refused on a Mac with 29 GiB free).
+* An unknown architecture, or a split that does not fit, is refused in one
+  line and greys Launch. The Load panel starts blank.
+* Pipeline: a race between a prefill's sends and the ring's per-chunk stop
+  word, which wedged both ranks, is gone, and with it
+  `KNURLOGIC_PIPELINE_OVERLAP`.
+
+### Reliability
+
+* Registries, folders, settings and prompt-cache pins and locations change
+  their files in one locked step (without it, a test kept 307 of 1200
+  concurrent updates). On a filesystem without locks (SMB) they write
+  unlocked.
+
+### Toward Linux and Windows (0.2.0)
+
+* Groundwork, not yet supported: processes through psutil on every OS,
+  machine readouts on Linux and Windows, peer discovery through Avahi on
+  Linux, and one gated-delta home with a CUDA port (untested) and a
+  bounded CPU path. The suite passed in a Linux container before this
+  release's cluster changes (was 130 failures).
+
+### Code
+
+* mypy is clean (was 302 errors); quality ratchets for ruff hit counts and
+  duplicate code; one home per concept across the package.
+
 ## 0.1.8
 
 ### Split loads: weight streaming
