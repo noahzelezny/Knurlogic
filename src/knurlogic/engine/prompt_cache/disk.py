@@ -506,15 +506,14 @@ def set_pin(session: str, pinned: bool | None,
             else now.get(session) is bool(pinned):
         return                          # already so: nothing to write
 
-    def change(doc: dict) -> dict:
+    def change(p: dict) -> None:
         # re-read under the lock: every server sharing this root pins
-        p = {str(k): bool(v) for k, v in doc.items()}
         if pinned is None:
             p.pop(session, None)
         else:
             p[session] = bool(pinned)
-        return p
-    update_json(base / PINS, change, {}, indent=1, sort_keys=True)
+    update_json(base / PINS, change, {}, indent=1, sort_keys=True,
+                clean=lambda doc: {str(k): bool(v) for k, v in doc.items()})
 
 
 def _pinned_files(files, base: Path) -> set:

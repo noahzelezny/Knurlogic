@@ -156,6 +156,16 @@ def send(page: str, kind: str, doc: dict | None = None, *,
     return decode_reply(code, raw, who, seq)
 
 
+#: what a send raises when the peer gave no answer at all
+NO_ANSWER = (*NET_ERRORS, P.ProtocolError)
+
+
+def is_answer(reply) -> bool:
+    """Whether `reply` (what send returned) says anything: a Failure
+    reply -- the peer's handler failed or refused -- does not."""
+    return isinstance(reply, dict) and "error" not in reply
+
+
 def answer(page: str, kind: str, doc: dict | None = None,
            post=None) -> dict | None:
     """The peer's reply to `kind`, or None when it gave none: unreachable,
@@ -165,11 +175,10 @@ def answer(page: str, kind: str, doc: dict | None = None,
     here" and stopped a healthy job."""
     try:
         out = (post or send)(page, kind, doc or {})
-    except (*NET_ERRORS, P.ProtocolError):
+    except NO_ANSWER:
         return None
-    if not isinstance(out, dict) or "error" in out:
-        return None
-    return out
+    return out if is_answer(out) else None
+
 
 
 class Bytes:

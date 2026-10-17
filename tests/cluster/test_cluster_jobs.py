@@ -28,6 +28,7 @@ from procs import reap_registries
 from knurlogic.cluster import jobs as J
 from knurlogic.cluster import launch as C
 from knurlogic.cluster import links
+from knurlogic.cluster import protocol as P
 from knurlogic.engine.split import marker
 from knurlogic.interfaces import spawn
 from knurlogic.interfaces.page import loads as page_loads
@@ -381,6 +382,39 @@ def test_stop_tells_only_pages_this_page_knows(cache, monkeypatch):
     assert posted == [("192.0.2.2:8765", "Stop")]
     assert out["told"] == ["B"]
     C.ENDED.pop("ab12cd34ef567890", None)
+
+
+def test_a_follower_page_tells_the_other_followers_before_rank_0(
+        cache, monkeypatch):
+    """Unload on a follower's page, three machines: rank 0's page answers
+    Stop at once and its rank 0 makes every follower leave; a third page
+    told in the same breath could see its follower go before marking it,
+    and record a crash. So every follower's page first, then rank 0's."""
+    from knurlogic.cluster.peers import Peer
+    job = "ab12cd34ef567890"
+    monkeypatch.setattr(identity, "identity", lambda: {"id": "b"})
+    monkeypatch.setattr(page_nodes, "PEERS", SimpleNamespace(all=lambda: [
+        Peer(host="192.0.2.1", port=8765, id="a", name="A",
+             state="answering"),
+        Peer(host="192.0.2.3", port=8765, id="c", name="C",
+             state="answering"),
+        Peer(host="192.0.2.4", port=8765, id="d", name="D",
+             state="answering")]))
+    C.SPECS[job] = spec(nodes=[{"rank": 0, "id": "a", "name": "A"},
+                               {"rank": 1, "id": "b", "name": "B"},
+                               {"rank": 2, "id": "c", "name": "C"},
+                               {"rank": 3, "id": "d", "name": "D"}])
+    told, lock = [], threading.Lock()
+
+    def post(page, kind, d):
+        with lock:
+            told.append(page)
+        return {"stopped": job}
+    out = C.stop(job, post=post, grace=0)
+    assert told[-1] == "192.0.2.1:8765"             # rank 0's page last
+    assert sorted(told[:2]) == ["192.0.2.3:8765", "192.0.2.4:8765"]
+    assert sorted(out["told"]) == ["A", "C", "D"]
+    C.ENDED.pop(job, None)
 
 
 def test_stop_tells_the_other_pages_before_it_stops_its_own_ranks(
@@ -1287,6 +1321,19 @@ def test_a_page_whose_handler_failed_says_nothing(monkeypatch, caplog):
     assert probed == []
     assert sum("could not say" in r.message for r in caplog.records) == 1
     C._PEER_SLOW.clear()
+
+
+def test_a_page_of_another_protocol_is_no_answer(monkeypatch):
+    """A ProtocolError from a peer's JobState aborted the watcher's whole
+    tick, for every job; it is no answer, as silence is."""
+    monkeypatch.setattr(C, "peers_fn", list)
+
+    def other(page, j):
+        raise P.VersionMismatch("another protocol")
+    try:
+        assert C.peer_verdict(JOB, RECS, ask=other, **PAGES) == ("", None)
+    finally:
+        C._PEER_SLOW.clear()
 
 
 def test_a_machine_silent_while_the_job_joins_stops_it(monkeypatch):

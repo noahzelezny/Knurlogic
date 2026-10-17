@@ -13,7 +13,8 @@
   read_json(path, default)   the document, or `default` when the file is
                              missing, unreadable, or not of default's type
   update_json(path, change, default)
-                             read, change and write the document as one
+                             read, change in place and write the document
+                             as one
                              step against every other update_json of
                              `path`, in any thread or process: a writer
                              that read before another one saved never
@@ -25,6 +26,7 @@ the prompt cache's sweeps of `.tmp-*` leftovers apply to it.
 """
 from __future__ import annotations
 
+import errno
 import fcntl
 import json
 import os
@@ -83,16 +85,27 @@ def read_json(path, default=None):
     return doc
 
 
+#: flock errors that mean this filesystem has no locks (an SMB or NFS
+#: mount): the write goes on unlocked, atomic as before
+_NO_LOCKS = (errno.ENOTSUP, errno.EOPNOTSUPP, errno.ENOLCK)
+
+
 @contextmanager
 def exclusive(path) -> Iterator[None]:
     """`path` held for one writer at a time, across threads and processes:
     an flock on `.lock-<name>` beside it (flock is per open file, so two
     threads of one process exclude each other too). The lock file stays;
-    it is empty."""
+    it is empty. On a filesystem without locks, held by nobody."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.with_name(f".lock-{path.name}").open("a") as fh:
-        fcntl.flock(fh, fcntl.LOCK_EX)
+        try:
+            fcntl.flock(fh, fcntl.LOCK_EX)
+        except OSError as e:
+            if e.errno not in _NO_LOCKS:
+                raise
+            yield
+            return
         try:
             yield
         finally:
@@ -100,14 +113,16 @@ def exclusive(path) -> Iterator[None]:
 
 
 def update_json(path, change: Callable, default=None, end: str = "",
-                **dumps_kw):
-    """Read the document at `path` (`default` as read_json), pass it to
-    `change`, and write what it returns -- the document itself when it
-    returns None, so `change` may edit it in place -- all under
-    `exclusive(path)`. -> the document written."""
+                clean: Callable | None = None, **dumps_kw):
+    """Read the document at `path` (`default` as read_json; then `clean`,
+    when given, normalises it), let `change` edit it in place, and write
+    it, all under `exclusive(path)`. What `change` returns is ignored: a
+    `lambda reg: reg.pop(k)` returns the popped value, which must never be
+    written as the document. -> the document written."""
     with exclusive(path):
         doc = read_json(path, default)
-        out = change(doc)
-        doc = doc if out is None else out
+        if clean is not None:
+            doc = clean(doc)
+        change(doc)
         write_json(path, doc, end, **dumps_kw)
         return doc

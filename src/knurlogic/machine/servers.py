@@ -89,10 +89,6 @@ def _records(doc: dict) -> dict:
     return out
 
 
-def _document(reg: dict) -> dict:
-    return {str(k): v for k, v in sorted(reg.items())}
-
-
 def registry() -> dict:
     """port -> record (`_records`), as the file holds it now."""
     return _records(files.read_json(registry_path(), {}))
@@ -102,18 +98,15 @@ def save_registry(reg: dict) -> None:
     """Written whole or not at all: the page, the MCP and every server
     started from here read it. A change to what is there goes through
     `update_registry`."""
-    files.write_json(registry_path(), _document(reg), indent=1)
+    files.write_json(registry_path(), reg, indent=1, sort_keys=True)
 
 
 def update_registry(change: Callable[[dict], None]) -> dict:
     """The registry, changed in place by `change`, saved -- as one step
     against every other writer, in this process or another (the page and
     the MCP both start and stop servers). -> the registry saved."""
-    def apply(doc: dict) -> dict:
-        reg = _records(doc)
-        change(reg)
-        return _document(reg)
-    return _records(files.update_json(registry_path(), apply, {}, indent=1))
+    return files.update_json(registry_path(), change, {}, clean=_records,
+                             indent=1, sort_keys=True)
 
 
 def is_our_server(pid: int) -> bool:

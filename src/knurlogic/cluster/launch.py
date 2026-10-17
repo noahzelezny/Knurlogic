@@ -1076,7 +1076,8 @@ def stop(job: str, reason: str = "unloaded", propagate: bool = True,
                         v, stopping=v.get("stopping") or time.time(),
                         stop_reason=v.get("stop_reason") or reason,
                         stop_kind=v.get("stop_kind") or stop_kind)
-        J.update_registry(mark)
+        if any(v.get("job") == job for v in J.registry().values()):
+            J.update_registry(mark)
     # the job's machines: its spec, or -- after a page restart, SPECS being
     # in memory -- the ids its rank records here keep
     nodes: list = (spec or {}).get("nodes") or next(
@@ -1118,80 +1119,104 @@ def _end_stop(job: str, mine: dict, spec: dict | None, reason: str,
               stop_kind: str | None, grace: float, reap: float) -> tuple:
     """`stop`'s second half, after the ranks here are marked: end them
     (J.terminate) and forget the job once they are gone. (killed pids,
-    pids still exiting)."""
+    pids still exiting). The job stays in `_STOPPING` until its records
+    are gone too: the watcher, which skips it while there, would else
+    start another stop of it from its "all stopping" records."""
     try:
-        pids = [int(v["pid"]) for v in mine.values()
-                if _alive(job, int(v["pid"]))]
-
-        def alive(p):
-            return _alive(job, p)
-        rank_of = {int(v["pid"]): int(v["rank"]) for v in mine.values()}
-
-        def spare(p):
-            return J.mid_step(job, rank_of[p], p)
-
-        killed = J.terminate(pids, grace=grace, alive=alive,
-                             reap=reap, spare=spare) if pids else []
-        left = [p for p in pids if alive(p)]
+        killed, left = _end_ranks(job, mine, grace, reap)
+        with _LOCK:
+            _forget_job(job, mine, spec, left, reason, stop_kind)
     finally:
         with _LOCK:
             _STOPPING.discard(job)
-    with _LOCK:
-        for (j, r) in [k for k in _PROCS if k[0] == job]:
-            if _PROCS[(j, r)].pid in left:
-                continue
-            try:
-                _PROCS.pop((j, r)).wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                pass                    # not gone yet; the watcher reaps it
-        def forget(reg: dict) -> None:
-            for k, v in mine.items():
-                if int(v["pid"]) not in left:
-                    reg.pop(k, None)
-        J.update_registry(forget)
-
-        def unserve(sreg: dict) -> None:
-            for port in [p for p, v in sreg.items() if v.get("job") == job
-                         and int(v["pid"]) not in left]:
-                sreg.pop(port)
-        servers.update_registry(unserve)
-        _WATCH.forget(job)
-        for state in (_PEER_BOOT, _PEER_SILENT):
-            for k in [k for k in state if k[0] == job]:
-                state.pop(k)
-        # stopped means gone: a rank still exiting keeps its record
-        # (phase "stopping"), and the watcher finishes the stop
-        if (mine or spec) and not left:
-            any_rec: dict = next(iter(mine.values()), {})
-            port = next((int(v["port"]) for v in mine.values()
-                         if v.get("port")), None) or (
-                int((spec or {}).get("port") or 0) or None)
-            # a failover that already moved the job keeps saying where it
-            # went: the failing rank's stop can land after it
-            moved = ENDED.get(job) if (ENDED.get(job) or {}).get(
-                "relaunched") else None
-            # an unload says so, so the page drops its card instead of
-            # showing "failed" (picker.js followLaunch)
-            ENDED[job] = {"reason": reason, "kind": stop_kind,
-                          "t": time.time(), "port": port,
-                          "split": any_rec.get("split")
-                          or (spec or {}).get("split"),
-                          "link": link_name(any_rec.get("link")
-                                            or (spec or {}).get("link")),
-                          "machines": any_rec.get("machines")
-                          or [n.get("name") for n in (spec or {}).get(
-                              "nodes") or []]}
-            if moved:
-                ENDED[job].update(reason=moved["reason"],
-                                  relaunched=moved["relaunched"])
     return killed, left
+
+
+def _end_ranks(job: str, mine: dict, grace: float, reap: float) -> tuple:
+    """SIGTERM this page's ranks of `job`, SIGKILL what outlives `grace`
+    (one mid-step is spared): (killed pids, pids still exiting)."""
+    pids = [int(v["pid"]) for v in mine.values()
+            if _alive(job, int(v["pid"]))]
+
+    def alive(p):
+        return _alive(job, p)
+    rank_of = {int(v["pid"]): int(v["rank"]) for v in mine.values()}
+
+    def spare(p):
+        return J.mid_step(job, rank_of[p], p)
+
+    killed = J.terminate(pids, grace=grace, alive=alive,
+                         reap=reap, spare=spare) if pids else []
+    return killed, [p for p in pids if alive(p)]
+
+
+def _forget_job(job: str, mine: dict, spec: dict | None, left: list,
+                reason: str, stop_kind: str | None) -> None:
+    """Drop what this page holds of `job` but the ranks in `left`, still
+    exiting (their records stay, phase "stopping", for the watcher to
+    finish); once none is left, record how it ended (`ENDED`). Under
+    _LOCK."""
+    for (j, r) in [k for k in _PROCS if k[0] == job]:
+        if _PROCS[(j, r)].pid in left:
+            continue
+        try:
+            _PROCS.pop((j, r)).wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            pass                        # not gone yet; the watcher reaps it
+    gone = [k for k, v in mine.items() if int(v["pid"]) not in left]
+    if gone:
+        J.update_registry(lambda reg: _drop(reg, gone))
+    if any(v.get("job") == job for v in servers.registry().values()):
+        servers.update_registry(lambda sreg: _drop(sreg, [
+            p for p, v in sreg.items()
+            if v.get("job") == job and int(v["pid"]) not in left]))
+    _WATCH.forget(job)
+    for state in (_PEER_BOOT, _PEER_SILENT):
+        for k in [k for k in state if k[0] == job]:
+            state.pop(k)
+    _PEER_SLOW.difference_update({k for k in _PEER_SLOW if k[0] == job})
+    # stopped means gone: a rank still exiting keeps its record
+    # (phase "stopping"), and the watcher finishes the stop
+    if (mine or spec) and not left:
+        any_rec: dict = next(iter(mine.values()), {})
+        port = next((int(v["port"]) for v in mine.values()
+                     if v.get("port")), None) or (
+            int((spec or {}).get("port") or 0) or None)
+        # a failover that already moved the job keeps saying where it
+        # went: the failing rank's stop can land after it
+        moved = ENDED.get(job) if (ENDED.get(job) or {}).get(
+            "relaunched") else None
+        # an unload says so, so the page drops its card instead of
+        # showing "failed" (picker.js followLaunch)
+        ENDED[job] = {"reason": reason, "kind": stop_kind,
+                      "t": time.time(), "port": port,
+                      "split": any_rec.get("split")
+                      or (spec or {}).get("split"),
+                      "link": link_name(any_rec.get("link")
+                                        or (spec or {}).get("link")),
+                      "machines": any_rec.get("machines")
+                      or [n.get("name") for n in (spec or {}).get(
+                          "nodes") or []]}
+        if moved:
+            ENDED[job].update(reason=moved["reason"],
+                              relaunched=moved["relaunched"])
+
+
+def _drop(reg: dict, keys: list) -> None:
+    for k in keys:
+        reg.pop(k, None)
 
 
 def _tell_peers(job: str, nodes: list, reason: str, kind: str | None,
                 post=None) -> tuple[list, list]:
-    """Stop to every other page of the job, all at once (each answers once
-    its own ranks are stopped): (who was told, what their recovery
-    cleared)."""
+    """Stop to every other page of the job (each answers once its ranks
+    are marked stopping): (who was told, what their recovery cleared).
+
+    Followers' pages first, all at once, then rank 0's: its rank 0 is what
+    makes the followers leave, so every page has marked its follower by
+    then, and none reads its follower's exit as a crash -- wherever the
+    stop began (a follower's page, with three machines or more, once told
+    rank 0's page first)."""
     from knurlogic.machine import identity
     me = identity.identity().get("id")
     known = _peer_pages()
@@ -1206,17 +1231,20 @@ def _tell_peers(job: str, nodes: list, reason: str, kind: str | None,
         return n, (post or transport.send)(page, "Stop", body)
     told: list = []
     cleared: list = []
-    for got in transport.parallel(tell, targets):
-        if not isinstance(got, tuple):
-            logger.debug("could not tell a page to stop job %s: %s", job, got)
-            continue
-        n, ans = got
-        told.append(n.get("name") or n.get("id"))
-        # what that Mac's recovery cleared (a failed job's record lives on
-        # whichever page started it)
-        if isinstance(ans, dict):
-            cleared += [c for c in ans.get("cleared") or []
-                        if c not in cleared]
+    for wave in ([t for t in targets if t[0].get("rank") != 0],
+                 [t for t in targets if t[0].get("rank") == 0]):
+        for got in transport.parallel(tell, wave):
+            if not isinstance(got, tuple):
+                logger.debug("could not tell a page to stop job %s: %s",
+                             job, got)
+                continue
+            n, ans = got
+            told.append(n.get("name") or n.get("id"))
+            # what that Mac's recovery cleared (a failed job's record lives
+            # on whichever page started it)
+            if isinstance(ans, dict):
+                cleared += [c for c in ans.get("cleared") or []
+                            if c not in cleared]
     return told, cleared
 
 
@@ -1366,7 +1394,7 @@ def peer_verdict(job: str, recs: list, ask=None, pages=None,
             if not page:
                 raise ConnectionError("not a peer this page knows")
             doc = ask(page, job)
-        except (*NET_ERRORS, AttributeError) as e:
+        except (*transport.NO_ANSWER, AttributeError) as e:
             if key not in _PEER_SLOW:
                 _PEER_SLOW.add(key)
                 logger.warning("cluster job %s: %s's page has not answered "
@@ -1378,7 +1406,7 @@ def peer_verdict(job: str, recs: list, ask=None, pages=None,
                 return why, "machine"
             continue
         _PEER_SILENT.pop(key, None)         # the machine answered
-        if not isinstance(doc, dict) or "error" in doc:
+        if not transport.is_answer(doc):
             # its handler failed or refused: an answer about nothing, so
             # no evidence either way (transport.answer)
             if key not in _PEER_SLOW:

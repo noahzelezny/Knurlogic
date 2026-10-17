@@ -122,9 +122,9 @@ def remember(d: Path) -> None:
     # remembers its own); an unmounted volume's root stays listed --
     # known() leaves it out while it is gone
     with contextlib.suppress(OSError):
-        update_json(fb / LOCATIONS,
-                    lambda names: sorted({str(n) for n in names} | {str(d)}),
-                    [], indent=1)
+        update_json(fb / LOCATIONS, lambda names: names.append(str(d)), [],
+                    indent=1, clean=lambda names: [
+                        str(n) for n in names if str(n) != str(d)])
 
 
 def known() -> list[Path]:

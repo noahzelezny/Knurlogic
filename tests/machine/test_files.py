@@ -101,11 +101,36 @@ def test_update_json_loses_no_update_across_threads_and_processes(tmp_path):
     assert files.read_json(f) == {"n": 1200}
 
 
-def test_update_json_writes_what_change_returns_or_its_edit(tmp_path):
+def test_update_json_writes_the_edit_never_what_change_returns(tmp_path):
+    """`change` edits in place; its return is ignored -- a pop returns the
+    popped value, which once replaced a whole registry in a test."""
     f = tmp_path / "doc.json"
-    assert files.update_json(f, lambda d: d.update(a=1), {}) == {"a": 1}
-    assert files.update_json(f, lambda d: [*d, "b"], []) == ["b"]  # a list
-    assert files.read_json(f) == ["b"]
+    assert files.update_json(f, lambda d: d.update(a=1, b=2), {}) == \
+        {"a": 1, "b": 2}
+    assert files.update_json(f, lambda d: d.pop("a"), {}) == {"b": 2}
+    assert files.read_json(f) == {"b": 2}
+    # `clean` normalises what was read before `change` sees it
+    assert files.update_json(f, lambda d: d.append("z"), [],
+                             clean=sorted) == ["z"]
+
+
+def test_a_filesystem_without_locks_still_writes(tmp_path, monkeypatch):
+    """flock on an SMB or NFS mount can fail ENOTSUP: the write goes on
+    unlocked (atomic, as before) -- a pin on a models folder over SMB must
+    not fail. Any other flock error is raised."""
+    import errno
+
+    def no_locks(fh, op):
+        raise OSError(errno.ENOTSUP, "Operation not supported")
+    monkeypatch.setattr(files.fcntl, "flock", no_locks)
+    f = tmp_path / "pins.json"
+    assert files.update_json(f, lambda d: d.update(s=True), {}) == {"s": True}
+
+    def broken(fh, op):
+        raise OSError(errno.EBADF, "Bad file descriptor")
+    monkeypatch.setattr(files.fcntl, "flock", broken)
+    with pytest.raises(OSError):
+        files.update_json(f, lambda d: d.clear(), {})
 
 
 def test_a_registry_update_keeps_what_another_writer_saved(tmp_path,

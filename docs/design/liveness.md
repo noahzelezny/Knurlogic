@@ -267,6 +267,13 @@ jaccl raise on its own thread too.
   stealth mode off, and a live machine must never read as silent.
   Measured over Thunderbolt: a live Mac refuses a closed port in 0.2 s; an
   address with no machine times out, then reports `EHOSTDOWN` at once.
+  **Limit:** with the macOS firewall's stealth mode on, a closed port is
+  silent, not refused. So a peer whose page is down -- not restarting
+  within seconds, but down for 30 s -- while this page's ranks are still
+  joining reads as a machine that is gone, and the join is stopped. That
+  takes a join stuck for 30 s, a page down as long, and stealth mode at
+  once; the job is a join that has not started serving, and recovery
+  relaunches it as it does any job stopped with kind `machine`. Stealth mode was off on both Macs measured.
 
 These are deleted: `PEER_GONE_S`, `_PEER_OK`, `_page_up`, and reading the
 peer list's `last_seen` in this decision. `_PEER_BOOT` stays.
@@ -315,8 +322,13 @@ precise reason arrives. `stop()` keeps the first reason recorded
   only after that answer. The follower waited out its grace (`GRACE_S`)
   and was SIGKILLed: an idle Qwen 35B pipeline took 25.5 s to unload,
   measured on the two Macs. A peer page now answers once its ranks are
-  marked stopping and ends them on a thread (`stop(wait=False)`); the
-  order -- every page marked before rank 0 stops -- is kept. The fake
+  marked stopping and ends them on a thread (`stop(wait=False)`). The
+  order -- every page marked before rank 0 stops -- holds wherever the
+  stop begins: `_tell_peers` tells the followers' pages first, all at
+  once, and rank 0's page only once they have answered. (Told together,
+  as they were, with three machines or more a stop from a follower's page
+  could have reached rank 0's page first, and a third page seen its follower leave before
+  it had marked it, and recorded a crash.) The fake
   follower in the end-to-end tests had died on SIGTERM, so no test saw
   it; it now defers SIGTERM as a real follower does.
 - **A peer page whose JobState handler failed read as "no rank here".**

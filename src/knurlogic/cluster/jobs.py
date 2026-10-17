@@ -259,11 +259,7 @@ def update_registry(change: Callable[[dict], None]) -> dict:
     against every other writer: a stop finishing on its own thread saved
     a registry it had read before a Start's record, and wiped the record
     of a healthy rank. -> the registry saved."""
-    def apply(doc: dict) -> dict:
-        reg = _records(doc)
-        change(reg)
-        return reg
-    return files.update_json(registry_path(), apply, {})
+    return files.update_json(registry_path(), change, {}, clean=_records)
 
 
 def by_job(reg: dict | None = None) -> dict:

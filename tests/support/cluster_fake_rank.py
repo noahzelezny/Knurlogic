@@ -79,7 +79,9 @@ def bell(job):
     spec = os.environ.get("KNURLOGIC_BELL")
     if spec:
         _, _, rest = spec.split(":", 2)
-        port = 20000 + int(job[:8], 16) % 40000
+        # below macOS's ephemeral range (49152-65535): a port the kernel
+        # handed to some connection made the bind fail under load
+        port = 20000 + int(job[:8], 16) % 29000
         os.environ["KNURLOGIC_BELL"] = f"127.0.0.1:{port}:{rest}"
     return link.bell_early() or []
 

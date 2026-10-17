@@ -42,11 +42,8 @@ def _update(change: Callable[[dict], None]) -> dict:
     """The store (`_clean`), changed in place by `change`, saved as one
     step against every other writer -- the page and the MCP both add and
     remove folders (files.update_json). -> the store saved."""
-    def apply(doc: dict) -> dict:
-        d = _clean(doc)
-        change(d)
-        return d
-    return files.update_json(store_path(), apply, {}, indent=1)
+    return files.update_json(store_path(), change, {}, clean=_clean,
+                             indent=1)
 
 
 def _norm(folder: str) -> str:
