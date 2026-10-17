@@ -28,6 +28,19 @@ the quality ratchets (ruff hit counts, duplicate code) by `tests/integration/tes
 - Lowered a count? `python tests/integration/test_quality.py --write-baseline`
   in the same commit. It refuses to raise anything.
 
+## Before a push: the checklist
+Each item is answered for the commits being pushed, not assumed:
+- Every function and module does one job. A long one is fine when it does
+  one thing; one that does A then B is two.
+- Nothing written already existed: helpers, constants and readers were
+  grepped for, and the existing one called or widened.
+- Each package's `__init__` docstring names every module in it with the job
+  it owns (`tests/integration/test_package_maps.py`); a module whose job
+  changed has its line changed.
+- Names, docstrings, comments and docs the change touched still say what is
+  true.
+- New behaviour has a test that would fail without it.
+
 ## The check (CI runs exactly this on 3.11 and 3.12)
 ```bash
 ruff check . && mypy && python -m pytest -q tests

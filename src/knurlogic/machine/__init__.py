@@ -26,6 +26,7 @@ The shared low-level layer every package builds on:
   files.py       write_atomic / write_json / read_json: whole-file writes
   processes.py   running(pid), PROC_ERRORS, command lines, ports
   http_client.py get_json / send_json / request / open_url: HTTP, as a client
+  nvidia.py      this machine's Nvidia GPU, as nvidia-smi reports it
 
 Every answer here says how it was measured, because each one was wrong at
 least once while it was only assumed (see the docstrings).

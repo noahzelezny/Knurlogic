@@ -1,5 +1,8 @@
 """Gemma 4: the text model (gemma4_text) and the multimodal wrapper the
 released rungs load through (gemma4). No MTP head.
+
+  architecture/  the vendored model code (NOTICE).
+  vision/        its vision tower.
 """
 
 # KV precision: the full-attention layers' KVCache is stored quantized

@@ -12,4 +12,5 @@ cluster/'s (no mlx there).
   ring.py          rank 0's side: Ring, Journal, TensorExecutor, assign_seed
   follower.py      a rank >= 1: serve_follower, follow, Mark, HeadAgreement
   marker.py        a rank's progress marker, as the engine reports it
+  weights.py       a rank's read of its share, from a peer's page
 """

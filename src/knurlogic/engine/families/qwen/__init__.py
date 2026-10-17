@@ -1,6 +1,12 @@
 """Qwen: Qwen3.5 / Qwen3.8 (qwen3_5), the MoE wrapper that is the 397B and
 the 35B-A3B (qwen3_5_moe, subclasses qwen3_5), and Qwen3.8-Flash-Next
 (qwen4_exp). One vision tower for all three; two MTP heads.
+
+  architecture/      the vendored model code (NOTICE).
+  heads/             its two MTP heads.
+  vision/            the vision tower all three share.
+  kvcache.py         qwen4_exp's attention cache, K/V stored quantized.
+  pipeline_stage.py  its trunks as a pipeline stage.
 """
 
 # Prompt chunk 4096 -- MEASURED, not the default leaking through: an A/B

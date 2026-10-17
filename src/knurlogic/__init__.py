@@ -4,6 +4,16 @@ An artifact that a person cannot load is worth nothing. This package serves
 models (an OpenAI- and Anthropic-compatible server, a page for people, an
 MCP for agents) and resolves what stands between a downloaded model and a
 working one: the environment, the settings, and whether it fits.
+
+  machine/            this machine: its models, memory, processes, files.
+  tuning/             what a model's settings should be, and whether it fits.
+  engine/             everything that runs a model; the only mlx importer.
+  context_management/ what the model sees of a long conversation.
+  cluster/            several machines as one: peers, jobs, recovery.
+  interfaces/         the server, the page, the MCP and the CLI.
+  __main__.py         `python -m knurlogic`, the CLI.
+
+docs/architecture.md says who may import whom.
 """
 
 from importlib.metadata import PackageNotFoundError

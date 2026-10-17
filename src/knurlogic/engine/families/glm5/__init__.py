@@ -1,5 +1,10 @@
 """GLM-5.3-Flash (glm5_next): vendored from mlx-vlm 0.6.17, the version the
 released rungs were built on. Vision tower and an MTP head.
+
+  architecture/      the vendored model code (NOTICE).
+  heads/             its MTP head.
+  vision/            its vision tower.
+  pipeline_stage.py  its trunk as a pipeline stage.
 """
 
 MANIFEST = {

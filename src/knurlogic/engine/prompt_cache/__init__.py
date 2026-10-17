@@ -25,6 +25,7 @@ the scheduler's commands on it (docs/design/prompt-cache-disk.md).
                apply_cache_op (the following ranks)
   report.py    usage.knurlogic.cache: what the prompt cache did for a
                request
+  slices.py    a layer's cache per head range: cut, joined, its files
 
 The HTTP side (/v1/prompt-cache) is interfaces/http/prompt_cache.py;
 the pieces a peer fetches are served by interfaces/page/prompt_cache.py.

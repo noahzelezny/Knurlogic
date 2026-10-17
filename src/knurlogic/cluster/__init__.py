@@ -14,6 +14,7 @@ across them.
   tables.py     the page's jobs in memory, their locks and ports.
   jobs.py       a job's files, rank progress markers and health verdict.
   recovery.py   a model that died unasked is relaunched, bounded.
+  weights.py    weight streaming: who reads whose shard, served by range.
   links.py      which link a peer is reached over and a page answers on,
                 and the cable a job runs on.
   protocol.py   the control-plane contract: the message envelope and kinds,

@@ -8,6 +8,11 @@ knows about that family, in one place.
              imported only when used, so asking what a family supports
              imports no mlx.
 
+  qwen/      Qwen3.5 / 3.8, the MoE wrapper, Qwen3.8-Flash-Next.
+  deepseek/  DeepSeek-V4 and its Vision-Exp.
+  glm5/      GLM-5.3-Flash.
+  gemma4/    Gemma 4 text and multimodal.
+
 Adding a family is one folder and one line here. Manifest shape and the
 full checklist: docs/design/families.md.
 
