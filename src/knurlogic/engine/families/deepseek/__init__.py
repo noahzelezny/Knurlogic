@@ -14,6 +14,7 @@ Think High, Think Max (the official prefix), the "deepseek_effort" dialect.
 Vision-Exp's variant has four (off, low, high, max): "deepseek_vision_effort".
 
   architecture/     the vendored model code (NOTICE).
+  templates/        deepseek_v4.jinja, its chat encoding (PROVENANCE.md).
   heads/            the MTP head and the DSpark block drafter.
   chat_template.py  the DSML tool-call dialect: its block and parser.
 """

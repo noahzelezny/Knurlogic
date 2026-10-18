@@ -514,11 +514,14 @@ def test_the_latest_reminder_kwarg_is_deepseeks_reminder_before_the_last_user_tu
 
 def test_think_max_is_deepseeks_prefix_and_the_three_modes_are_the_dialect():
     """reasoning_effort max renders the official Think Max prefix (thinking
-    mode only); the dialect offers off / high / max."""
+    mode only), opening the last user turn rather than the prompt; the
+    dialect offers off / high / max."""
+    from deepseek_effort import moved
     h = [{"role": "system", "content": "Be brief."},
          {"role": "user", "content": "hi"}]
-    want = official.encode_messages(copy.deepcopy(h), thinking_mode="thinking",
-                                    reasoning_effort="max")
+    want = moved(official.encode_messages(
+        copy.deepcopy(h), thinking_mode="thinking", reasoning_effort="max"),
+        official.REASONING_EFFORT_MAX, official.bos_token)
     assert render(h, thinking_mode="thinking", reasoning_effort="max") == want
     assert render(h, thinking_mode="chat", reasoning_effort="max") == \
         encode(h)                           # chat mode: no prefix

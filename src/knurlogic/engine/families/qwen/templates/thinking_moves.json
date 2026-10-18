@@ -1,0 +1,20 @@
+{
+ "qwen_effort": [
+  [
+   "    {%- if reasoning_instructions %}\n        {{- reasoning_instructions + '\\n\\n' }}\n    {%- endif %}\n    {{- \"# Tools",
+   "    {{- \"# Tools"
+  ],
+  [
+   "{{- '<|im_start|>system\\n' + (reasoning_instructions + '\\n\\n' if reasoning_instructions else '')  + content + '<|im_end|>\\n' }}",
+   "{{- '<|im_start|>system\\n' + content + '<|im_end|>\\n' }}"
+  ],
+  [
+   "        {%- elif reasoning_instructions %}\n            {{- '<|im_start|>system\\n' + reasoning_instructions + '<|im_end|>\\n' }}\n        {%- endif %}\n    {%- elif reasoning_instructions %}\n        {{- '<|im_start|>system\\n' + reasoning_instructions + '<|im_end|>\\n' }}\n    {%- endif %}",
+   "        {%- endif %}\n    {%- endif %}"
+  ],
+  [
+   "        {{- '<|im_start|>' + message.role + '\\n' + content + '<|im_end|>' + '\\n' }}",
+   "        {{- '<|im_start|>' + message.role + '\\n' + (reasoning_instructions + '\\n\\n' if reasoning_instructions and loop.index0 == ns.last_query_index else '') + content + '<|im_end|>' + '\\n' }}"
+  ]
+ ]
+}

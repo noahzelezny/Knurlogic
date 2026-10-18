@@ -1,0 +1,12 @@
+{
+ "glm_effort": [
+  [
+   "{%- if effective_reasoning_effort is not none -%}<|system|>Reasoning Effort: {{ effective_reasoning_effort | capitalize }}{%- endif -%}\n",
+   ""
+  ],
+  [
+   "{%- if add_generation_prompt -%}\n    <|assistant|>{{- '<think>' -}}",
+   "{%- if add_generation_prompt -%}\n    {%- if effective_reasoning_effort is not none -%}<|system|>Reasoning Effort: {{ effective_reasoning_effort | capitalize }}{%- endif -%}\n    <|assistant|>{{- '<think>' -}}"
+  ]
+ ]
+}

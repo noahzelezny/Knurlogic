@@ -2,6 +2,7 @@
 released rungs were built on. Vision tower and an MTP head.
 
   architecture/      the vendored model code (NOTICE).
+  templates/         thinking_moves.json: the level text, after the conversation.
   heads/             its MTP head.
   vision/            its vision tower.
   pipeline_stage.py  its trunk as a pipeline stage.

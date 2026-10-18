@@ -1,0 +1,12 @@
+{
+ "gemma_toggle": [
+  [
+   "{%- if (enable_thinking is defined and enable_thinking) or tools or messages[0]['role'] in ['system', 'developer'] -%}\n    {{- '<|turn>system\\n' -}}\n    {#- Inject Thinking token at the very top of the FIRST system turn -#}\n    {%- if enable_thinking is defined and enable_thinking -%}\n        {{- '<|think|>\\n' -}}\n        {%- set ns.prev_message_type = 'think' -%}\n    {%- endif -%}\n",
+   "{%- if tools or messages[0]['role'] in ['system', 'developer'] -%}\n    {{- '<|turn>system\\n' -}}\n"
+  ],
+  [
+   "{%- if add_generation_prompt -%}\n    {%- if ns.prev_message_type != 'tool_response' and ns.prev_message_type != 'tool_call' -%}\n        {{- '<|turn>model\\n' -}}",
+   "{%- if add_generation_prompt -%}\n    {%- if ns.prev_message_type != 'tool_response' and ns.prev_message_type != 'tool_call' -%}\n        {%- if enable_thinking is defined and enable_thinking -%}\n            {{- '<|turn>system\\n<|think|><turn|>\\n' -}}\n        {%- endif -%}\n        {{- '<|turn>model\\n' -}}"
+  ]
+ ]
+}

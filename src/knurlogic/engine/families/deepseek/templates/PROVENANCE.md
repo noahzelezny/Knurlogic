@@ -78,3 +78,24 @@ message parts are joined; engine/templates is the generic code reading it.
 - its thinking levels are its own four, the "deepseek_vision_effort"
   dialect (families/deepseek): off / low (the default) / high / max ->
   chat / thinking with reasoning_effort low / high / max.
+
+## effort
+
+- deviation: DeepSeek's encoders (Flash's and Vision-Exp's render_message)
+  write the reasoning-effort text at index 0, before the system prompt.
+  Here it opens the LAST user turn (before the system prompt only when
+  there is no user turn). Every other byte is the encoder's
+  (tests/engine/test_deepseek_v4.py, test_vision_deepseek.py compare with
+  the encoder's prompt, its effort text moved: tests/support/
+  deepseek_effort.py).
+- why: a level is about the reply asked for; text changed at index 0
+  leaves nothing of the conversation for the prompt cache (a 42k-token
+  Vision-Exp conversation whose next turn changed the level: 0 cached,
+  about 5 minutes of prefill).
+- measured (Vision-Exp VQ-3.2bpw, pipeline split over two Macs, 7 problems
+  x 2 samples, 2026-10-17): "high" at index 0 thought LESS than no effort
+  text (489 vs 1336 thinking characters on average); in the last user
+  turn 1401. All answers right in all three. A harder round (8 problems x
+  2): no text 6881, "high" at index 0 2256 (15/16, the one wrong answer),
+  in the last user turn 4064; "max" 6193 at index 0, 7874 moved; 16/16
+  otherwise.

@@ -3,6 +3,7 @@ the 35B-A3B (qwen3_5_moe, subclasses qwen3_5), and Qwen3.8-Flash-Next
 (qwen4_exp). One vision tower for all three; two MTP heads.
 
   architecture/      the vendored model code (NOTICE).
+  templates/         thinking_moves.json: Qwen3.8's level text, after the conversation.
   heads/             its two MTP heads.
   vision/            the vision tower all three share.
   kvcache.py         qwen4_exp's attention cache, K/V stored quantized.

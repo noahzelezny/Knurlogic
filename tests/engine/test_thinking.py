@@ -341,6 +341,121 @@ def test_an_artifact_shipping_no_template_lists_its_familys_levels(tmp_path):
     assert T.levels(T.template_of(d))["dialect"] == "deepseek_effort"
 
 
+#: a conversation every level must render the same through its last answer:
+#: the prompt cache keeps what came before the new user turn, and a level is
+#: about the reply asked for, not the conversation
+_CONVERSATION = [{"role": "system", "content": "SYSTEM-PROMPT"},
+                 {"role": "user", "content": "FIRST-QUESTION"},
+                 {"role": "assistant", "content": "FIRST-ANSWER"},
+                 {"role": "user", "content": "LAST-QUESTION"}]
+
+
+def _render_conversation(template: str, kw: dict) -> str:
+    """`_CONVERSATION` through `template` as transformers renders one."""
+    import jinja2
+    from jinja2.sandbox import ImmutableSandboxedEnvironment
+    env = ImmutableSandboxedEnvironment(
+        trim_blocks=True, lstrip_blocks=True,
+        extensions=["jinja2.ext.loopcontrols"])
+
+    def fail(msg):
+        raise jinja2.TemplateError(msg)
+    env.globals["raise_exception"] = fail
+    env.filters["tojson"] = lambda v, **k: json.dumps(v, ensure_ascii=False)
+    return env.from_string(template).render(
+        messages=_CONVERSATION, add_generation_prompt=True, **kw)
+
+
+def _first_difference(template: str, spec: dict) -> tuple[int, int]:
+    """(where the levels' renders first differ, where the conversation
+    before the new user turn ends) for one template."""
+    renders = [_render_conversation(template, dict(n[2]))
+               for n in spec["native"]]
+    base = renders[0]
+    first = min(next((i for i, (a, b) in enumerate(zip(base, r)) if a != b),
+                     min(len(base), len(r))) for r in renders[1:])
+    return first, base.rindex("FIRST-ANSWER") + len("FIRST-ANSWER")
+
+
+def _served_templates() -> list:
+    """The name of every template knurlogic serves in place of an
+    artifact's that has thinking levels."""
+    from knurlogic.engine import templates
+    return [n for n in sorted(templates.SPECS)
+            if T.detect(templates.text(n))[1] is not None]
+
+
+@pytest.mark.parametrize("name", _served_templates())
+def test_a_thinking_level_changes_only_what_follows_the_conversation(name):
+    """Changing the thinking level between turns keeps the prompt cache:
+    every level renders the conversation the same through its last answer,
+    and differs only in the new user turn and the reply's prompt. A level
+    rendered before the system prompt (the makers' place for DeepSeek-V4,
+    GLM-5.3, Qwen3.8 and Gemma 4) made a changed level a full prefill (a
+    42k-token DeepSeek conversation: 0 cached, about 5 minutes)."""
+    from knurlogic.engine import templates
+    text = templates.text(name)
+    first, last_user = _first_difference(text, T.detect(text)[1])
+    assert first >= last_user, (
+        f"{name}: levels differ at character {first}, inside the "
+        f"conversation (it ends at {last_user})")
+
+
+@pytest.mark.parametrize("rung", sorted(RUNGS))
+def test_each_released_model_is_served_a_template_that_keeps_the_cache(rung):
+    d = MODELS / rung
+    if not d.is_dir():
+        pytest.skip(f"{rung} not on this box")
+    text = T.template_of(d)
+    spec = T.detect(text)[1]
+    first, last_user = _first_difference(text, spec)
+    assert first >= last_user, (
+        f"{rung}: levels differ at character {first}, inside the "
+        f"conversation (it ends at {last_user})")
+
+
+def test_a_makers_template_is_served_with_its_level_after_the_conversation():
+    """GLM-5.3's own template (tests/support/glm5_template) renders
+    "Reasoning Effort" before the system prompt; knurlogic serves it with
+    that turn just before the reply (templates.cache_safe) and nothing else
+    changed. A template no family's moves know is left alone."""
+    from knurlogic.engine import templates
+    root = Path(__file__).resolve().parents[1] / "support" / "glm5_template"
+    maker = (root / "chat_template.jinja").read_text()
+    spec = T.detect(maker)[1]
+    first, end = _first_difference(maker, spec)
+    assert first < end                                  # the maker's: wiped
+    served = templates.override(maker)
+    assert T.detect(served)[0] == "glm_effort"
+    first, end = _first_difference(served, spec)
+    assert first >= end
+    high = _render_conversation(served, {"reasoning_effort": "high"})
+    assert high.endswith("LAST-QUESTION<|system|>Reasoning Effort: High"
+                         "<|assistant|><think>")
+    turn = "<|system|>Reasoning Effort: High"
+    assert high.replace(turn, "") == _render_conversation(
+        maker, {"reasoning_effort": "high"}).replace(turn, "")
+    assert templates.cache_safe("{{ messages[0].content }}") is None
+    assert templates.cache_safe(maker.replace("add_generation_prompt",
+                                              "agp")) is None
+
+
+def test_install_puts_the_moved_template_on_the_tokenizer():
+    """The served tokenizer gets the maker's template with its level moved
+    (templates.install), once: a second install leaves it as it is."""
+    from types import SimpleNamespace
+
+    from knurlogic.engine import templates
+    root = Path(__file__).resolve().parents[1] / "support" / "glm5_template"
+    maker = (root / "chat_template.jinja").read_text()
+    tok = SimpleNamespace(chat_template=maker, name_or_path="")
+    assert templates.install(tok) == "moved"
+    assert tok.chat_template == templates.cache_safe(maker)
+    moved = tok.chat_template
+    assert templates.install(tok) == "moved"
+    assert tok.chat_template is moved
+
+
 def test_messages_returns_thinking_blocks_only_when_enabled():
     from knurlogic.interfaces.http.messages import from_openai, to_openai
     on = to_openai({"messages": [{"role": "user", "content": "hi"}],

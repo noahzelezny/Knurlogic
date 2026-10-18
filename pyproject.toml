@@ -64,6 +64,7 @@ knurlogic = ["interfaces/page/assets/**/*", "interfaces/menubar_assets/*.png", "
              "engine/families/*/vision/PROVENANCE.md",
              "engine/runtime/PROVENANCE.md",
              "engine/families/*/templates/*.jinja",
+             "engine/families/*/templates/*.json",
              "engine/families/*/templates/PROVENANCE.md",
              "context_management/prompts/*.md"]
 

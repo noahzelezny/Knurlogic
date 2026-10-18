@@ -122,6 +122,10 @@ def test_the_vision_template_is_the_vision_exp_encoder(mode, effort):
         copy.deepcopy(msgs), thinking_mode=mode, reasoning_effort=effort,
         return_multi_modal_data=True)
     assert len(media["images"]) == 2
+    if mode == "thinking":
+        from deepseek_effort import moved
+        want = moved(want, official.REASONING_EFFORT_PROMPTS[
+            effort or official.DEFAULT_REASONING_EFFORT], official.bos_token)
     flat = flatten(with_placeholders(copy.deepcopy(msgs),
                                      [IMAGE_PLACEHOLDER] * 2), sep="\n\n")
     kw = {"reasoning_effort": effort} if effort else {}

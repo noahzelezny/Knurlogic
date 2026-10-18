@@ -2,6 +2,7 @@
 released rungs load through (gemma4). No MTP head.
 
   architecture/  the vendored model code (NOTICE).
+  templates/     thinking_moves.json: `<|think|>`, after the conversation.
   vision/        its vision tower.
 """
 

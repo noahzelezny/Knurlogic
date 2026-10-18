@@ -15,6 +15,13 @@ one an artifact gets, its text, and putting it on a tokenizer.
 stub, on the tokenizer itself, so every render and the tool-call parser
 agree. It is idempotent and cheap; the loaders and the prompt stage both
 call it.
+
+A maker's template that renders its thinking level before the
+conversation (Qwen3.8, GLM-5.3, Gemma 4: the effort text in or before the
+system turn) is served with that text moved after it (`cache_safe`, the
+family's templates/thinking_moves.json): a level is about the reply asked
+for, and text changed at the top of a prompt leaves nothing of the
+conversation for the prompt cache to reuse.
 """
 
 from __future__ import annotations
@@ -60,6 +67,37 @@ def text(name: str) -> str:
         return s.get("prefix", "") + text(s["base"])
     return (_families.HERE / s["family"] / s["file"]).read_text(
         encoding="utf-8")
+
+
+def _thinking_moves() -> list:
+    """[(dialect, [(find, replace)])] from every family's
+    templates/thinking_moves.json, in FAMILIES order."""
+    out = []
+    for fam in _families.FAMILIES:
+        f = _families.HERE / fam / "templates" / "thinking_moves.json"
+        if f.is_file():
+            for dialect, edits in json.loads(f.read_text(encoding="utf-8")
+                                             ).items():
+                out.append((dialect, [tuple(e) for e in edits]))
+    return out
+
+
+#: the edits that move a maker's thinking-level text after the conversation
+THINKING_MOVES = _thinking_moves()
+
+
+def cache_safe(template) -> str | None:
+    """`template` with its thinking-level text moved after the conversation,
+    when it is a maker's template a family's thinking_moves.json knows
+    (every edit's text found, each once); else None."""
+    if not isinstance(template, str) or not template:
+        return None
+    for _dialect, edits in THINKING_MOVES:
+        if all(template.count(find) == 1 for find, _ in edits):
+            for find, replace in edits:
+                template = template.replace(find, replace)
+            return template
+    return None
 
 
 def part_separator(name: str | None, role: str | None = None) -> str:
@@ -146,9 +184,11 @@ def served_family(template, name: str = "") -> str | None:
 
 
 def override(template, name: str = "") -> str | None:
-    """The replacement template text, or None to keep the artifact's."""
+    """The replacement template text, or None to keep the artifact's: a
+    family's own template, else the artifact's with its thinking-level text
+    moved (cache_safe)."""
     fam = family_for(template, name)
-    return text(fam) if fam else None
+    return text(fam) if fam else cache_safe(template)
 
 
 def install(tokenizer) -> str | None:
@@ -162,7 +202,7 @@ def install(tokenizer) -> str | None:
     name = str(getattr(tokenizer, "name_or_path", "") or "")
     fam = family_for(t, name)
     if fam is None:
-        return None
+        return _install_moved(tokenizer, t, name)
     new = text(fam)
     try:
         tokenizer.chat_template = new
@@ -193,3 +233,22 @@ def install(tokenizer) -> str | None:
                 "missing; using knurlogic's %s template", name or "tokenizer",
                 fam)
     return fam
+
+
+def _install_moved(tokenizer, template, name: str) -> str | None:
+    """Put the artifact's own template with its thinking-level text moved
+    (cache_safe) on `tokenizer`. Returns "moved", or None when it has none
+    to move."""
+    new = cache_safe(template)
+    if new is None:
+        return None
+    try:
+        tokenizer.chat_template = new
+        tokenizer._knurlogic_template = ("moved", new)
+    except (AttributeError, TypeError):
+        logger.warning("could not move the thinking level on %r", name)
+        return None
+    logger.info("%s: the chat template's thinking level is rendered after "
+                "the conversation, so a changed level keeps the prompt "
+                "cache", name or "tokenizer")
+    return "moved"
