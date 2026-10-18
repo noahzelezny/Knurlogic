@@ -509,7 +509,9 @@ def test_a_fork_keeps_the_workers_checkpoint_it_was_served_from(sched):
     over: the worker's next step no longer deletes it, the fork's save
     writes it, and a reviewer sending those messages plus one more is
     served it, in memory and after a reload from disk. Before: cached only
-    the system prompt (3643 of 5310 tokens on Qwen3.6-35B)."""
+    the system prompt (3643 of 5310 tokens on Qwen3.6-35B). Every request
+    sends keep-latest, as a harness does: the fork's own answer replaced
+    the checkpoint it had just taken (the take-over had no step)."""
     class HeaderTok(Tok):
         """A real template's shape: the reply's header after the messages
         (where the conversation checkpoint ends: before it)."""
@@ -534,7 +536,8 @@ def _fork_keeps_its_checkpoint(s):
     _collect(s.submit(_turns(a, system=sys_p, max_tokens=3, session="w",
                              keep_latest=True)))
     _, _warm = _collect(s.submit(_turns(a, system=sys_p, max_tokens=1,
-                                       session="w.A", pin=True)))
+                                       session="w.A", pin=True,
+                                       keep_latest=True)))
     ckpt = [tuple(t) for _, t, e, m in s.cache.live()
             if m is not None and m["session"] == "w.A"
             and e.cache_type == "user"]
@@ -548,7 +551,8 @@ def _fork_keeps_its_checkpoint(s):
           if r["model"] == "tiny-fork" and r["session"] == "w.A"}
     assert len(ckpt[0]) in on
     _, rev = _collect(s.submit(_turns(a, review, system=sys_p,
-                                      max_tokens=2, session="w.review1")))
+                                      max_tokens=2, session="w.review1",
+                                      keep_latest=True)))
     assert rev["knurlogic"]["cache"]["used"] >= len(ckpt[0]) - 1
     s.unload().done.wait(60)
     s.load("/nonexistent/tiny-fork").done.wait(60)

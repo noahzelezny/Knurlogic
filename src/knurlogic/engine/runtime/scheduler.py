@@ -167,6 +167,16 @@ def _checkpoints(segs, n: int, hit: int) -> list[int]:
     return out
 
 
+def _conversation_served(prompt: list, segs, types, hit: int):
+    """The prompt up to its messages' end (the conversation checkpoint's
+    tokens) when the cache hit covers it, else None."""
+    if "user" not in types:
+        return None
+    end = sum(len(s) for s, kind in zip(segs, types)
+              if kind in ("system", "user"))
+    return list(prompt[:end]) if hit >= end else None
+
+
 @dataclass
 class _Row:
     job: Job
@@ -899,25 +909,19 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
         cachehook.pending(v, K.images_in(out[0]))
         return out
 
-    def _take_conversation(self, job: Job, prompt: list, segs, types,
-                           hit: int) -> None:
-        """A request served from the conversation checkpoint at its own
-        messages' end takes it over from a keep-latest session (the
-        worker it forks from): the request makes no checkpoint there of its
-        own -- it is cached -- and the worker's next step would delete the
-        worker's. A fork pinned and saved at that point then holds it
-        (PromptCache.take_over)."""
+    def _take_conversation(self, job: Job, tokens: list, uid: int) -> None:
+        """The conversation checkpoint a request was served from, at its own
+        messages' end, taken over from a keep-latest session (the worker it
+        forks from): the request makes no checkpoint there of its own -- it
+        is cached -- and the worker's next step would delete the worker's.
+        Owned as this request's step (`uid`), so a keep-latest fork's own
+        answer does not replace it either. A fork pinned and saved at that
+        point then holds it (PromptCache.take_over)."""
         take = getattr(self.cache, "take_over", None)
-        if take is None or "user" not in types:
-            return
-        end = sum(len(s) for s, kind in zip(segs, types)
-                  if kind in ("system", "user"))
-        if hit < end:
-            return
-        if take(prompt[:end], entry_owner(job, kind="user")):
+        if take is not None and take(tokens, entry_owner(job, uid, "user")):
             logger.info("prompt cache: session %s took over the %d-token "
                         "conversation checkpoint it was served from",
-                        job.session, end)
+                        job.session, len(tokens))
 
     def _fit_answer(self, job: Job, n_prompt: int) -> None:
         """Set the job's prompt size and bound its answer by the context
@@ -957,9 +961,10 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
                 self._read_back(job, prompt)
             hit = getattr(self.cache, "hit_length", lambda k, t: 0)(
                 self.host.model_key, prompt)
+            conv = None
             if s:
                 self._diverged(job, prompt, hit)
-                self._take_conversation(job, prompt, segs, types, hit)
+                conv = _conversation_served(prompt, segs, types, hit)
             lean = self._make_room(len(prompt),
                                    _checkpoints(segs, len(prompt), hit)) \
                 == "lean"
@@ -993,6 +998,8 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
                 wire=wire, chunk=chunk,
                 on_chunk=self._prefill_hook(job, len(prompt),
                                             len(prompt) - len(rest))))
+            if conv is not None:
+                self._take_conversation(job, conv, uid)
         try:
             text = Request(tok.detokenizer, sequences=seqs, stops=job.stops,
                            tool_parser=getattr(tok, "tool_parser", None),
