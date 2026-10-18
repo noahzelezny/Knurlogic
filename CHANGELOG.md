@@ -35,6 +35,46 @@
   word, which wedged both ranks, is gone, and with it
   `KNURLOGIC_PIPELINE_OVERLAP`.
 
+### Thinking levels keep the prompt cache
+
+* Changing the thinking level between turns no longer re-reads the whole
+  conversation. DeepSeek-V4, Qwen3.8, GLM-5.3 and Gemma 4 wrote their
+  level before the system prompt, so a changed level was a full prefill
+  (a 42k-token DeepSeek conversation: 0 cached, about 5 minutes); knurlogic
+  now renders it after the conversation, measured not to change thinking
+  or accuracy on each family (each family's templates/PROVENANCE.md).
+* DeepSeek-V4-Flash-Vision-Exp lists its real levels in `/v1/models`
+  (off / low / high / max); it listed none.
+
+### Memory
+
+* A finished request's prompt-cache entry holds only its own state. Each
+  one held the whole batch's (a Qwen3.8-27B with 24 rows running: ~4.5 GiB
+  an entry, its own share 0.2): a 13 GiB model reached 110 GiB, and a
+  request finishing at the memory limit crashed the server's step.
+* The memory guard counts mlx's buffer cache, which refills during a step:
+  a server at its limit no longer runs past the working set.
+
+### Prompt cache: forks
+
+* A conversation forked from a worker keeps the worker's state at the fork:
+  a request served from a keep-latest session's checkpoint takes it over,
+  and a session's save writes its conversation checkpoint beside its
+  newest entry. A reviewer sending a worker's first messages plus one is
+  served them from cache, also after a reload (4565 of 5481 tokens; was
+  only the system prompt, 3643).
+* `/v1/messages` passes `chat_template_kwargs` to the template, as
+  `/v1/chat/completions` does.
+
+### Routing
+
+* A model running on two Macs is two instances. The page's `/v1/models`
+  lists each under `instances`; a request names one as `<id>@<machine>` or
+  with `X-Knurlogic-Machine`; otherwise this Mac's copy, and a session
+  stays on the copy that served it. Before, the page kept whichever server
+  answered first, re-picked every 5 s, so a session's requests and its
+  prompt cache flipped between Macs.
+
 ### Reliability
 
 * Registries, folders, settings and prompt-cache pins and locations change
@@ -54,6 +94,9 @@
 
 * mypy is clean (was 302 errors); quality ratchets for ruff hit counts and
   duplicate code; one home per concept across the package.
+* The cluster's job code is split by what it does (preparing, starting,
+  watching, stopping, the coordinator), and every package's docstring
+  names each of its modules and its one job (a test holds it).
 
 ## 0.1.8
 
