@@ -250,3 +250,16 @@ def test_an_anthropic_image_block_reaches_the_engine_in_order():
     parts = body["messages"][-1]["content"]
     assert [p["type"] for p in parts] == ["text", "image_url", "text"]
     assert parts[1]["image_url"]["url"] == "data:image/png;base64,AAAA"
+
+
+def test_chat_template_kwargs_reach_the_template_as_on_openai():
+    """preserve_thinking keeps a forked conversation's earlier turns as
+    they were rendered (Qwen3.6 drops reasoning before the last query);
+    /v1/chat/completions took chat_template_kwargs, /v1/messages dropped
+    them."""
+    kw = {"preserve_thinking": True}
+    o = M.to_openai({"messages": [{"role": "user", "content": "hi"}],
+                     "chat_template_kwargs": kw})
+    assert o["chat_template_kwargs"] == kw
+    assert "chat_template_kwargs" not in M.to_openai(
+        {"messages": [{"role": "user", "content": "hi"}]})

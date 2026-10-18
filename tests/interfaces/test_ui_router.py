@@ -79,7 +79,7 @@ def cluster(monkeypatch):
     b, base_b = _serve(_fake_model("glm-peer", seen))
     monkeypatch.setattr(page_router, "chat_targets", lambda: {base_a, base_b})
     monkeypatch.setattr(page_nodes, "PEERS", None)
-    page_router._ROUTES.update(at=0.0, map={})
+    page_router._ROUTES.update(at=0.0, all={})
     page, page_url = _serve(page_server.make_handler({}))
     yield page_url, base_a, base_b, seen
     for s in (a, b, page):
@@ -220,3 +220,77 @@ def test_count_tokens_goes_to_the_model_it_names(cluster):
     assert code == 200
     assert [(m, p) for m, p, _, _ in seen] == [
         ("qwen-local", "/v1/messages/count_tokens")]
+
+
+@pytest.fixture
+def twin(monkeypatch):
+    """One model id on two Macs: this one's server and a peer's (reached
+    through its page relay), and the page in front of them."""
+    from types import SimpleNamespace
+    seen = []
+    a, here = _serve(_fake_model("qwen", seen))
+    b, there = _serve(_fake_model("qwen", seen))
+    monkeypatch.setattr(page_router, "chat_targets", lambda: {here, there})
+    monkeypatch.setitem(page_peers.PEER_TARGETS, there,
+                        {"machine": "Peer Mac", "relay": there, "job": ""})
+    monkeypatch.setattr(page_nodes, "PEERS", SimpleNamespace(
+        all=lambda: [SimpleNamespace(name="Peer Mac", id="abc123")]))
+    monkeypatch.setattr(page_peers, "PEER_AT", [1e18])
+    monkeypatch.setattr(page_router, "_AFFINITY", {})
+    page_router._ROUTES.update(at=0.0, all={})
+    page, page_url = _serve(page_server.make_handler({}))
+    yield page_url, seen
+    for s in (a, b, page):
+        s.shutdown()
+
+
+def _went(seen):
+    """Which server each forwarded request reached: the peer's comes in
+    through its relay (/peer/...)."""
+    return ["peer" if p.startswith("/peer") else "here"
+            for _, p, _, _ in seen]
+
+
+def test_one_model_on_two_macs_goes_to_the_same_instance_every_time(twin):
+    """The table kept whichever server answered first, rebuilt every 5 s:
+    a model on both Macs flipped between them, and a session's prompt
+    cache with it (a fork test served 0 of 4523 cached tokens)."""
+    page, seen = twin
+    for _ in range(6):
+        page_router._ROUTES["at"] = 0.0              # a new table each time
+        assert _post(page + "/v1/messages", {"model": "qwen"})[0] == 200
+    assert _went(seen) == ["here"] * 6               # this Mac's, first
+
+
+def test_an_instance_is_named_by_machine_in_the_model_or_a_header(twin):
+    page, seen = twin
+    for body, headers in (({"model": "qwen@abc123"}, None),
+                          ({"model": "qwen@peer mac"}, None),
+                          ({"model": "qwen"},
+                           {page_router.MACHINE_HEADER: "abc123"})):
+        assert _post(page + "/v1/messages", body, headers)[0] == 200
+    assert _went(seen) == ["peer"] * 3
+    assert {json.loads(b)["model"] for _, _, b, _ in seen} == {"qwen"}
+    code, _, raw = _post(page + "/v1/messages", {"model": "qwen@nowhere"})
+    assert code == 404 and "'nowhere'" in json.loads(raw)["error"]["message"]
+
+
+def test_a_session_stays_on_the_instance_that_served_it(twin):
+    page, seen = twin
+    s1 = {"X-Client-Session": "s1"}
+    _post(page + "/v1/messages", {"model": "qwen@abc123"}, s1)
+    _post(page + "/v1/messages", {"model": "qwen"}, s1)    # names none now
+    _post(page + "/v1/messages", {"model": "qwen"}, {"X-Client-Session": "s2"})
+    assert _went(seen) == ["peer", "peer", "here"]
+
+
+def test_models_lists_every_instance_of_a_model(twin):
+    page, _ = twin
+    with urllib.request.urlopen(page + "/v1/models", timeout=5) as r:
+        doc = json.loads(r.read())
+    (m,) = doc["data"]
+    assert m["id"] == "qwen" and len(m["instances"]) == 2
+    first, second = m["instances"]
+    assert first["machine_id"] != "abc123"           # this Mac's first
+    assert second == dict(second, model="qwen@abc123", machine="Peer Mac",
+                          machine_id="abc123")

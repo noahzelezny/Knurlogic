@@ -110,7 +110,7 @@ def _fake_model(model_id, seen, echo=True):
 def _page(monkeypatch, *bases):
     monkeypatch.setattr(page_router, "chat_targets", lambda: set(bases))
     monkeypatch.setattr(page_nodes, "PEERS", None)
-    page_router._ROUTES.update(at=0.0, map={})
+    page_router._ROUTES.update(at=0.0, all={})
     _, url = _serve(page_server.make_handler({}))
     return url
 

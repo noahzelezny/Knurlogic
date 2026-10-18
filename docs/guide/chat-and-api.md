@@ -15,6 +15,17 @@ name.
 `GET /v1/models` on a model server returns the one model it serves. Use its
 `id`, or on the page, the id you want routed to.
 
+The same model can run on two Macs. The page's `GET /v1/models` lists each
+model once, with every copy under `instances`. A request goes to this
+Mac's copy unless it names another:
+
+- `"model": "<id>@<machine id>"` (as each instance's `model` says; a
+  machine's name works too), or
+- the header `X-Knurlogic-Machine: <machine id or name>`.
+
+A request with `X-Client-Session` stays on the copy that served its
+session last, where its prompt cache is.
+
 ## Connect a client
 
 The page's **Connect** panel shows these for the models running now, and

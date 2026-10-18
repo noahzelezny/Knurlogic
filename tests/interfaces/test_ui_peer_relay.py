@@ -91,7 +91,7 @@ def two(monkeypatch):
                         state="answering", key=f"127.0.0.1:{pport}",
                         id="m4", found_by={"bonjour"})
     monkeypatch.setattr(page_nodes, "PEERS", Peers(p))
-    page_router._ROUTES.update(at=0.0, map={})
+    page_router._ROUTES.update(at=0.0, all={})
     # the peer reports its model where it runs: on ITS loopback
     row = {"runtime": "knurlogic", "name": "glm-peer", "state": "ready",
            "where": "http://127.0.0.1:8080"}
@@ -101,7 +101,7 @@ def two(monkeypatch):
     for s in (model, peer_page, here):
         s.shutdown()
     page_peers.PEER_TARGETS.clear()
-    page_router._ROUTES.update(at=0.0, map={})
+    page_router._ROUTES.update(at=0.0, all={})
 
 
 def _post(url, body, headers=None):
@@ -265,7 +265,7 @@ def test_a_chat_to_a_model_the_page_has_not_surveyed_yet_resurveys(
 def test_the_router_resurveys_once_on_a_miss(two, monkeypatch):
     here, _, seen = two
     page_peers.PEER_TARGETS.clear()
-    page_router._ROUTES.update(at=1e18, map={})      # a fresh, empty cached table
+    page_router._ROUTES.update(at=1e18, all={})      # a fresh, empty cached table
     calls = _counting_survey(monkeypatch, [
         {"runtime": "knurlogic", "name": "glm-peer",
          "where": "http://127.0.0.1:8080"}])

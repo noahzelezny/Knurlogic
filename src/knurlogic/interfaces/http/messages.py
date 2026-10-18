@@ -190,6 +190,11 @@ def to_openai(req: dict) -> dict:
     # API asked
     if req.get("context_management") is not None:
         body["context_management"] = req["context_management"]
+    # the chat template's own switches (preserve_thinking: a fork of a
+    # conversation renders its earlier turns as they were), as on the
+    # OpenAI endpoint; build_job checks them
+    if req.get("chat_template_kwargs") is not None:
+        body["chat_template_kwargs"] = req["chat_template_kwargs"]
     if req.get("tools"):
         body["tools"] = [{
             "type": "function",

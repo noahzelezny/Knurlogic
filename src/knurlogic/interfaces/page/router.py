@@ -1,8 +1,10 @@
 """The page's router to model servers: one address for every model here and
 on peers. POST /v1/messages, /v1/chat/completions and count_tokens by
-`model` (`route`), the page's chat (`proxy_chat`), GET /v1/models
-(`route_models_document`), and the streaming that carries the answer back
-(`stream`, with a cluster job's failure said in its words).
+`model` (`route`; a model on two Macs is two instances, picked by
+`<id>@<machine>`, X-Knurlogic-Machine or the session: `pick`), the page's
+chat (`proxy_chat`), GET /v1/models (`route_models_document`), and the
+streaming that carries the answer back (`stream`, with a cluster job's
+failure said in its words).
 
 Errors: the page's own endpoints answer {"error": "<why>"}; a route that
 forwards an API (/v1/messages, /v1/chat/completions, the prompt cache)
@@ -226,7 +228,7 @@ ROUTE_PATHS = ("/v1/messages", "/v1/chat/completions",
 ROUTE_S = 2.0
 
 
-_ROUTES: dict = {"at": 0.0, "map": {}, "docs": {}}
+_ROUTES: dict = {"at": 0.0, "all": {}, "docs": {}}
 
 
 #: how old that may be before the router asks again itself
@@ -238,11 +240,13 @@ def fetch_json(url: str, timeout: float):
     return json.loads(request(url, timeout=timeout)[1])
 
 
-def models_at(bases, fetch=None, docs: dict | None = None) -> dict:
-    """{model id: base} over `bases`, each asked its /v1/models -- the id a
-    client names is the one the server answers to -- in parallel with one
-    deadline (ROUTE_S); one that does not answer is left out. `docs`, when
-    given, is filled with each model's own /v1/models entry
+def instances_at(bases, fetch=None, docs: dict | None = None) -> dict:
+    """{model id: [base, ...]} over `bases`, each asked its /v1/models --
+    the id a client names is the one the server answers to -- in parallel
+    with one deadline (ROUTE_S); one that does not answer is left out.
+    Every server of an id, in a fixed order (_ordered): the same model on
+    two Macs is two instances, never whichever answered first. `docs`,
+    when given, is filled with each model's own /v1/models entry
     (sampling_defaults, thinking, context_length)."""
     fetch = fetch or fetch_json
     found: dict = {}
@@ -252,24 +256,53 @@ def models_at(bases, fetch=None, docs: dict | None = None) -> dict:
             for m in fetch(peers.upstream(base, "/v1/models"),
                            ROUTE_S).get("data") or []:
                 if isinstance(m, dict) and m.get("id"):
-                    found.setdefault(str(m["id"]), base)
+                    found.setdefault(str(m["id"]), set()).add(base)
                     if docs is not None:
                         docs.setdefault(str(m["id"]), m)
         # one server's silence is logged, the others are still asked
         except Exception:
             logger.debug("no model list from %s", base, exc_info=True)
     transport.parallel(one, sorted(bases), deadline=ROUTE_S)
-    return dict(found)
+    return {m: _ordered(bs) for m, bs in found.items()}
 
 
-def routable(fetch=None, ttl: float = 5.0) -> dict:
-    """{model id: base} for every running knurlogic server this page knows
-    (chat_targets: its own and the ones peers reported), by models_at.
-    Cached for a few seconds: Claude Code sends several requests a turn."""
+def models_at(bases, fetch=None, docs: dict | None = None) -> dict:
+    """{model id: base}: each id's first instance (instances_at)."""
+    return {m: bs[0] for m, bs in instances_at(bases, fetch, docs).items()}
+
+
+def _ordered(bases) -> list:
+    """This machine's servers first (no relay hop), then each peer's, by
+    machine and address: a stable choice, the same every time."""
+    def key(b):
+        t = peers.PEER_TARGETS.get(b.rstrip("/"))
+        return (t is not None, (t or {}).get("machine") or "", b)
+    return sorted(bases, key=key)
+
+
+def machine_of(base: str) -> tuple:
+    """(name, node id) of the machine serving at `base`: this one, or the
+    peer that reported it (its id from the page's peer list; "" unknown)."""
+    from knurlogic.machine.identity import identity
+    t = peers.PEER_TARGETS.get(base.rstrip("/"))
+    if t is None:
+        me = identity()
+        return me.get("name") or "", me.get("id") or ""
+    name = t.get("machine") or ""
+    known = nodes.PEERS.all() if nodes.PEERS is not None else []
+    pid = next((p.id for p in known if p.name == name and p.id), "")
+    return name, pid
+
+
+def instances(fetch=None, ttl: float = 5.0) -> dict:
+    """{model id: [base, ...]} for every running knurlogic server this
+    page knows (chat_targets: its own and the ones peers reported), by
+    instances_at. Cached for a few seconds: Claude Code sends several
+    requests a turn."""
     now = time.time()
     if fetch is None:
         if now - _ROUTES["at"] < ttl:
-            return dict(_ROUTES["map"])
+            return {m: list(bs) for m, bs in _ROUTES["all"].items()}
         # the page's own polling refreshes what peers serve, but a client
         # (Claude Code) may call before anyone has opened the page: the
         # router then saw only this machine
@@ -279,28 +312,80 @@ def routable(fetch=None, ttl: float = 5.0) -> dict:
             except Exception:  # peer survey (logged)
                 logger.debug("peer survey failed", exc_info=True)
     docs: dict = {}
-    out = models_at(chat_targets(), fetch, docs)
-    _ROUTES.update(at=now, map=out, docs=docs)
+    out = instances_at(chat_targets(), fetch, docs)
+    _ROUTES.update(at=now, all=out, docs=docs)
     return out
+
+
+def routable(fetch=None, ttl: float = 5.0) -> dict:
+    """{model id: base}: each running model's default instance (the first
+    of instances())."""
+    return {m: bs[0] for m, bs in instances(fetch, ttl).items()}
 
 
 def route_models_document(fetch=None) -> dict:
     """GET /v1/models on the page: every model its router can reach, each
     with its server's own entry (sampling_defaults, thinking,
-    context_length: what the page's chat reads), and the machine that
-    answers for it (a split model's rank 0)."""
-    from knurlogic.machine.identity import identity
-    table = routable(fetch)
+    context_length: what the page's chat reads), the machine that answers
+    for it by default (a split model's rank 0), and every instance: a
+    model on two Macs is named `<id>@<node id>` to reach one of them."""
+    table = instances(fetch)
     docs = _ROUTES.get("docs") or {}
-    here = identity().get("name")
 
-    def machine(b):
-        t = peers.PEER_TARGETS.get(b.rstrip("/"))
-        return (t or {}).get("machine") if t is not None else here
-    return {"object": "list", "data": [
-        dict(docs.get(m) or {}, id=m, object="model", owned_by="knurlogic",
-             server=b, machine=machine(b))
-        for m, b in sorted(table.items())]}
+    def inst(m, b):
+        name, mid = machine_of(b)
+        return {"model": f"{m}@{mid}" if mid else m, "machine": name,
+                "machine_id": mid, "server": b}
+    out = []
+    for m, bs in sorted(table.items()):
+        name, mid = machine_of(bs[0])
+        out.append(dict(docs.get(m) or {}, id=m, object="model",
+                        owned_by="knurlogic", server=bs[0], machine=name,
+                        machine_id=mid, instances=[inst(m, b) for b in bs]))
+    return {"object": "list", "data": out}
+
+
+#: the instance each session was last served by, {session: base}: its
+#: prompt cache is there, so its next request goes there too. Bounded
+#: (oldest forgotten first).
+_AFFINITY: dict = {}
+AFFINITY_MAX = 4096
+#: the header that names an instance's machine, beside `<id>@<machine>`
+MACHINE_HEADER = "X-Knurlogic-Machine"
+
+
+def split_instance(model) -> tuple:
+    """(model id, machine) of a `model` field: `<id>@<machine>` names an
+    instance (node id or machine name); a plain id names none."""
+    if isinstance(model, str) and "@" in model:
+        mid, _, machine = model.rpartition("@")
+        if mid and machine:
+            return mid, machine
+    return model, ""
+
+
+def pick(bases: list, machine: str = "", session: str = "") -> str | None:
+    """The instance a request goes to: the one on `machine` (a node id or
+    a machine name, any case) when it names one, None if no instance is
+    there; else the one its session was served by last; else the first."""
+    if machine:
+        want = machine.lower()
+        for b in bases:
+            name, mid = machine_of(b)
+            if want in (mid.lower(), name.lower()):
+                return b
+        return None
+    last = _AFFINITY.get(session) if session else None
+    return last if last in bases else bases[0] if bases else None
+
+
+def _remember(session: str, base: str) -> None:
+    if not session:
+        return
+    _AFFINITY.pop(session, None)
+    _AFFINITY[session] = base
+    while len(_AFFINITY) > AFFINITY_MAX:
+        _AFFINITY.pop(next(iter(_AFFINITY)))
 
 
 def route(handler, path: str, body: bytes, fetch=None) -> None:
@@ -311,30 +396,44 @@ def route(handler, path: str, body: bytes, fetch=None) -> None:
     knurlogic server holds one model. So the page, which already knows
     every running server here and on its peers, is the one address that
     can hand each request to the server holding the model it names. Only
-    to those servers -- the same allow-list the page's chat uses."""
+    to those servers -- the same allow-list the page's chat uses. A model
+    running on two Macs: `<id>@<machine>` or the X-Knurlogic-Machine
+    header picks one; a session stays on the one that served it."""
     try:
-        model = json.loads(body or b"{}").get("model")
-    except (ValueError, AttributeError):
-        model = None
-    table = routable(fetch)
-    base = table.get(model) if isinstance(model, str) else None
+        doc = json.loads(body or b"{}")
+    except ValueError:
+        doc = None
+    asked = doc.get("model") if isinstance(doc, dict) else None
+    model, machine = split_instance(asked)
+    machine = machine or (handler.headers.get(MACHINE_HEADER) or "").strip()
+    session = (handler.headers.get("X-Client-Session") or "").strip()
+    table = instances(fetch)
+    base = pick(table.get(model) or [], machine, session) \
+        if isinstance(model, str) else None
     if base is None:
         # launched a moment ago? ask the peers once more before refusing
         refresh_targets()
-        table = routable(fetch, ttl=0)
-        base = table.get(model) if isinstance(model, str) else None
-    if base is None and isinstance(model, str) and fetch is None:
+        table = instances(fetch, ttl=0)
+        base = pick(table.get(model) or [], machine, session) \
+            if isinstance(model, str) else None
+    if base is None and isinstance(model, str) and fetch is None \
+            and not machine:
         # a split job still starting: its rank 0 serves (and queues) only
         # once every rank has loaded, so until then nothing here answers
         # for the model. Wait for it, as a one-Mac server would queue.
-        base, table = _await_launch(handler, model, table)
+        base, _ = _await_launch(handler, model, routable(fetch))
     if base is None:
+        running = sorted(table)
+        where = f" on {machine!r}" if machine else ""
         # say it in the shape either client reads as an error
         send_json(handler, 404, api_error(
-            "not_found_error", f"no running model {model!r}; running: "
-                               f"{', '.join(sorted(table)) or 'none'}",
-            models=sorted(table)))
+            "not_found_error", f"no running model {model!r}{where}; "
+                               f"running: {', '.join(running) or 'none'}",
+            models=running))
         return
+    _remember(session, base)
+    if asked != model:            # `<id>@<machine>`: the server knows <id>
+        body = json.dumps(dict(doc, model=model)).encode()
     stream(handler, peers.upstream(base, path), body, base=base)
 
 
