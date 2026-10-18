@@ -195,16 +195,36 @@ def long_context_overlay(path, env=None) -> dict:
     return context_window.long_context_config(cfg, mode)
 
 
+#: the freed-buffer cache limit set_cache_limit last applied, in bytes
+#: (None: never set; mlx has no getter for it)
+CACHE_LIMIT: dict = {"bytes": None}
+
+
+def _cache_setter():
+    import mlx.core as mx
+    return getattr(mx, "set_cache_limit", None) or \
+        getattr(getattr(mx, "metal", None), "set_cache_limit", None)
+
+
 def set_cache_limit(gib: float) -> str:
     """Bound mlx's freed-buffer cache for this process. mlx-lm never sets
     it, so without this the knob is a number on a page."""
-    import mlx.core as mx
-    setter = getattr(mx, "set_cache_limit", None) or \
-        getattr(getattr(mx, "metal", None), "set_cache_limit", None)
+    setter = _cache_setter()
     if setter is None:
         return "no cache-limit setter in this engine build"
-    setter(int(float(gib) * GIB))
+    n = int(float(gib) * GIB)
+    setter(n)
+    CACHE_LIMIT["bytes"] = n
     return f"applied ({gib} GiB)"
+
+
+def cap_cache(nbytes: int) -> None:
+    """Hold mlx's freed-buffer cache to `nbytes` for now (at most the limit
+    set_cache_limit applied), leaving that limit as it was set: the memory
+    guard's per-step cap (engine/runtime/memory_guard)."""
+    setter = _cache_setter()
+    if setter is not None and CACHE_LIMIT["bytes"] is not None:
+        setter(max(0, min(int(nbytes), CACHE_LIMIT["bytes"])))
 
 
 def generate(model, tokenizer, prompt: str, max_tokens: int = 8) -> str:

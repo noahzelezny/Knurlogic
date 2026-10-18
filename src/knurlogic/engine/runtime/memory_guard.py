@@ -6,7 +6,10 @@ cache gives up entries first and then the newest rows are stopped with
 caches measured: a row is admitted with checkpoints, LEAN without them,
 waits, or with nothing running is refused -- never admitted to abort.
 The limit is working set - others - margin; the margin is the next
-step's predicted transient, read off lines measured on this model.
+step's predicted transient, read off lines measured on this model. mlx's
+freed-buffer cache is GPU memory too and refills DURING a step, so before
+each one it is capped to what is left above active memory and the margin
+(_cap_buffer_cache).
 macOS memory pressure is watched here and reported, never a refusal.
 
 The state these methods read lives on the Scheduler (its __init__).
@@ -651,10 +654,31 @@ class MemoryGuard:
                         self._transient(self._context() + n_tokens, chunk)
                         / GIB, room / GIB)
 
+    def _cap_buffer_cache(self) -> None:
+        """Cap mlx's freed-buffer cache for the step about to run to the
+        room left: the working set less other processes, active memory and
+        the step's margin. The limit counts active memory only; the cache
+        (KNURLOGIC_CACHE_LIMIT_GB) refills with the step's freed
+        temporaries while it runs. A 27B with 32 long-thinking rows sat at
+        the limit (76.9 GiB) with 4 GiB cached and 3 GiB of other
+        processes' on an 84 GiB working set, and the next step aborted
+        Metal (kIOGPUCommandBufferCallbackErrorOutOfMemory)."""
+        ws = self._working_set()
+        if not ws:
+            return
+        room = ws - self._others_bytes() - self._local_active() \
+            - self._margin()
+        self._set_cache_cap(max(room, 0))
+
+    def _set_cache_cap(self, nbytes: int) -> None:
+        from knurlogic.engine.model.loading import cap_cache
+        cap_cache(nbytes)
+
     def _guard_memory(self) -> None:
         limit = self._limit()
         if not limit:
             return
+        self._cap_buffer_cache()
         # mlx's freed buffers stay wired until cleared, and the step's
         # transient lands on top of them: past the limit, they go first
         if self._cached() and self._local_active() + self._cached() > limit:

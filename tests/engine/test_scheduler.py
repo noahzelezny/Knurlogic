@@ -480,6 +480,43 @@ def test_mlx_buffer_cache_is_cleared_before_a_step_it_would_crowd():
     assert freed == [1]
 
 
+def test_the_buffer_cache_is_capped_to_the_room_a_step_leaves():
+    """mlx's freed-buffer cache refills while a step runs, on top of the
+    active memory the limit counts: before each step it is capped to the
+    working set less others, active memory and the step's margin. A 27B
+    with 32 long-thinking rows at its limit, 4 GiB cached and 3 GiB of
+    others' on an 84 GiB working set aborted Metal on the next step."""
+    from knurlogic.engine.runtime.scheduler import Scheduler
+    from knurlogic.machine.units import GIB
+    s = Scheduler(Host(None, Tok({})), working_set_bytes=100 * GIB,
+                  gpu_in_use=lambda: 93 * GIB)
+    caps = []
+    s._set_cache_cap = caps.append
+    s._release = lambda: None
+    s._cached = lambda: 0
+    s._local_active = s._active = lambda: 90 * GIB
+    _rows_of(s, 1000)
+    s._guard_memory()            # 100 - 3 others - 90 active - 5 margin
+    assert caps == [2 * GIB]
+    s._local_active = s._active = lambda: 92 * GIB
+    s._guard_memory()            # at the limit: no room left for a cache
+    assert caps[-1] == 0
+
+
+def test_cap_cache_never_raises_the_limit_that_was_set(monkeypatch):
+    from knurlogic.engine.model import loading
+    got = []
+    monkeypatch.setattr(loading, "_cache_setter", lambda: got.append)
+    monkeypatch.setitem(loading.CACHE_LIMIT, "bytes", None)
+    loading.cap_cache(1 << 30)
+    assert got == []                     # never set: left as mlx has it
+    loading.set_cache_limit(4)
+    loading.cap_cache(1 << 30)
+    loading.cap_cache(10 << 30)
+    assert got == [4 << 30, 1 << 30, 4 << 30]
+    assert loading.CACHE_LIMIT["bytes"] == 4 << 30
+
+
 def test_an_admission_is_priced_as_the_copies_the_engine_makes():
     """Measured on the 27B (M3 Ultra; mlx active memory around each
     admission): 24.6k tokens segmented [8223, 16357, 1, 1] beside a running
