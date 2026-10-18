@@ -58,9 +58,10 @@ class PromptCacheCommands:
     def save_prompt_cache(self, session: str | None = None) -> Command:
         """Queue a save of the prompt cache to disk (prompt_disk.save), on
         the scheduler thread between steps; on a ring every rank saves its
-        own part. `session`: only that session's newest entry (its longest),
-        if not on disk yet -- what a client asks for right after its context
-        compacts. Command.result has the counts."""
+        own part. `session`: only that session's longest entry and its
+        longest conversation checkpoint (PromptCache.to_save), if not on
+        disk yet -- what a client asks for right after its context compacts,
+        or at a point it will fork from. Command.result has the counts."""
         return self._command(Command("save", None, session=session))
 
     def drop_prompt_cache(self, session: str) -> Command:
@@ -197,14 +198,15 @@ class PromptCacheCommands:
                 del self._disk_index[t]
 
     def _save_session(self, session: str) -> dict | None:
-        """POST /v1/prompt-cache/save {"session"}: that session's newest
-        entry -- its longest -- to disk if it is not there yet."""
-        mine = [tuple(t) for _, t in self.cache.of_session(session)] \
-            if self.cache is not None else []
+        """POST /v1/prompt-cache/save {"session"}: that session's longest
+        entry and its longest conversation checkpoint (PromptCache.to_save)
+        to disk if they are not there yet."""
+        mine = self.cache.to_save(session) if self.cache is not None \
+            else set()
         if not mine:
             return {"saved": 0, "kept": 0, "skipped": 0, "bytes": 0,
                     "why": [], "entries": 0, "not_worth": 0}
-        return self._save_disk(only_new=True, select={max(mine, key=len)})
+        return self._save_disk(only_new=True, select=mine)
 
     def _park(self, session: str, why: str = "parked on request") -> dict:
         """`session`'s entries to disk (what is not there yet), then out of

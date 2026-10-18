@@ -899,6 +899,26 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
         cachehook.pending(v, K.images_in(out[0]))
         return out
 
+    def _take_conversation(self, job: Job, prompt: list, segs, types,
+                           hit: int) -> None:
+        """A request served from the conversation checkpoint at its own
+        messages' end takes it over from a keep-latest session (the
+        worker it forks from): the request makes no checkpoint there of its
+        own -- it is cached -- and the worker's next step would delete the
+        worker's. A fork pinned and saved at that point then holds it
+        (PromptCache.take_over)."""
+        take = getattr(self.cache, "take_over", None)
+        if take is None or "user" not in types:
+            return
+        end = sum(len(s) for s, kind in zip(segs, types)
+                  if kind in ("system", "user"))
+        if hit < end:
+            return
+        if take(prompt[:end], entry_owner(job, kind="user")):
+            logger.info("prompt cache: session %s took over the %d-token "
+                        "conversation checkpoint it was served from",
+                        job.session, end)
+
     def _fit_answer(self, job: Job, n_prompt: int) -> None:
         """Set the job's prompt size and bound its answer by the context
         window; PromptError when the prompt leaves no room for one."""
@@ -939,6 +959,7 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
                 self.host.model_key, prompt)
             if s:
                 self._diverged(job, prompt, hit)
+                self._take_conversation(job, prompt, segs, types, hit)
             lean = self._make_room(len(prompt),
                                    _checkpoints(segs, len(prompt), hit)) \
                 == "lean"

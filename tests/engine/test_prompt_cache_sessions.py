@@ -87,7 +87,7 @@ def test_remove_entry_keeps_mlx_lm_s_books():
     assert D.remove_entry(pc.lru, "m", (9, 2, 3, 4, 5, 6, 7, 8))
     assert pc.lru.nbytes == before - one and len(pc.lru) == 3
     assert not D.remove_entry(pc.lru, "m", (9, 2, 3, 4, 5, 6, 7, 8))
-    cache, rest = pc.fetch("m", [9, 2, 3, 4, 5])
+    cache, _rest = pc.fetch("m", [9, 2, 3, 4, 5])
     assert cache is None
 
 
@@ -279,8 +279,7 @@ def test_rank_0_journals_owner_drop_and_pin_and_a_follower_applies_them(
     j.ops.clear()
     assert r0.drop("s1") == 1
     assert [o["op"] for o in j.ops] == ["drop"]
-    for op in j.ops + [{"op": "save_cache", "session": "s2"},
-                       {"op": "save_cache"}]:
+    for op in [*j.ops, {"op": "save_cache", "session": "s2"}, {"op": "save_cache"}]:
         apply_cache_op(op, follower, "m", last,
                        lambda only_new=False, select=None:
                        saves.append((only_new, select)))
@@ -289,6 +288,37 @@ def test_rank_0_journals_owner_drop_and_pin_and_a_follower_applies_them(
             for f, _, _ in D._all_files(LOC.fallback())] == ["s2"]
     assert saves == [(True, {(5, 2, 3, 4)}), (False, None)]
     assert not apply_cache_op({"op": "set"}, follower, "m", last, None)
+
+
+def test_a_take_over_moves_only_a_keep_latest_entry_and_rides_the_journal():
+    """A fork takes a keep-latest worker's entry, never a plain session's
+    (it may resume from any of its steps); the follower's side map moves
+    the same way, from the journaled op."""
+    from knurlogic.engine.prompt_cache.ring import (
+        JournalPromptCache,
+        apply_cache_op,
+    )
+    j = _Journal()
+    r0 = JournalPromptCache(PromptCache(10), j)
+    follower = PromptCache(10)
+    worker = dict(_own("w"), step=1, latest=True)
+    for cache in (r0, follower):
+        cache.insert("m", [1, 2, 3], _kv(3), "user",
+                     **({"origin": ("checkpoint", 0)} if cache is r0 else {}),
+                     owner=worker)
+        cache.insert("m", [4, 5, 6], _kv(3), "user",
+                     **({"origin": ("checkpoint", 1)} if cache is r0 else {}),
+                     owner=_own("plain"))
+    j.ops.clear()
+    assert r0.take_over([1, 2, 3], _own("w.A"))
+    assert not r0.take_over([4, 5, 6], _own("w.A"))       # not keep-latest
+    assert not r0.take_over([1, 2, 3], _own("w.A"))       # already its
+    assert r0.owners[(1, 2, 3)]["session"] == "w.A"
+    assert r0.owners[(1, 2, 3)]["file"] is None           # saved anew
+    assert [o["op"] for o in j.ops] == ["take_over"]
+    assert apply_cache_op(j.ops[0], follower, "m", {}, None)
+    assert follower.owners[(1, 2, 3)]["session"] == "w.A"
+    assert follower.owners[(4, 5, 6)]["session"] == "plain"
 
 
 # --- through the scheduler ---------------------------------------------------------
@@ -348,7 +378,7 @@ def test_an_entry_on_disk_is_read_back_on_demand(sched):
     for m, t in s.cache.of_session("a1"):
         s.cache.remove(m, t)
     assert s._disk_index
-    _, warm = _collect(s.submit(_job(p + [5, 6, 7], max_tokens=4,
+    _, warm = _collect(s.submit(_job([*p, 5, 6, 7], max_tokens=4,
                                      session="a1")))
     c = warm["knurlogic"]["cache"]
     assert c["used"] >= len(p) - 1 and c["disk"]["tokens"] == c["used"]
@@ -376,21 +406,29 @@ def test_drop_pin_and_list_commands(sched):
     assert s.cache.of_session("b1") == [] and "b1" not in D.pins()
 
 
-def test_a_sessions_save_writes_its_longest_entry_only(sched):
+def test_a_sessions_save_writes_its_longest_entry_and_its_checkpoint(sched):
+    """The longest (its own next turn continues there) and the
+    conversation checkpoint (where its messages end: a fork of it
+    continues there), nothing else of it and nothing of another's."""
     s = sched
     s.load("/nonexistent/tiny-ss").done.wait(60)
     s._prefill_tps = None           # no break-even skip here
-    _collect(s.submit(_job(s.prompts[1], max_tokens=3, session="d1")))
+    _collect(s.submit(_chat(list(s.prompts[0][:20]), list(s.prompts[1]),
+                            max_tokens=3, session="d1")))
     _collect(s.submit(_job(s.prompts[0], max_tokens=3, session="d2")))
-    mine = [tuple(t) for _, t in s.cache.of_session("d1")]
+    want = s.cache.to_save("d1")
+    kinds = {e.cache_type for _, t, e, m in s.cache.live()
+             if tuple(t) in want}
+    assert len(want) == 2 and kinds == {"user", "assistant"}
     cmd = s.save_prompt_cache("d1")
     assert cmd.done.wait(60) and not cmd.error
-    assert cmd.result["saved"] == 1 and cmd.result["entries"] == 1
-    (f,) = [r for r in D.list_disk()]
-    assert f["session"] == "d1" and f["tokens"] == max(len(t) for t in mine)
+    assert cmd.result["saved"] == 2 and cmd.result["entries"] == 2
+    on = [r for r in D.list_disk() if r["model"] == "tiny-ss"]
+    assert {r["session"] for r in on} == {"d1"}
+    assert {r["tokens"] for r in on} == {len(t) for t in want}
     again = s.save_prompt_cache("d1")
     assert again.done.wait(60) and again.result["saved"] == 0
-    assert again.result["kept"] == 1
+    assert again.result["kept"] == 2
     none = s.save_prompt_cache("nobody")
     assert none.done.wait(60) and none.result["entries"] == 0
 
@@ -453,6 +491,73 @@ def test_keep_latest_replaces_the_sessions_earlier_steps(sched):
     assert len(s.cache.of_session("k2")) > 2
 
 
+def _turns(*users, system=(), **kw):
+    """A Job whose messages are a system prompt, then one user message per
+    `users` (lists of token ids, as text)."""
+    from knurlogic.engine.runtime import prompt as P
+    from knurlogic.engine.runtime.scheduler import Job
+    say = lambda ids: " ".join(str(i) for i in ids)
+    msgs = [{"role": "system", "content": say(system)}] + [
+        {"role": "user", "content": say(u)} for u in users]
+    return Job(P.ChatRequest(messages=msgs), P.PromptArgs(), **kw)
+
+
+def test_a_fork_keeps_the_workers_checkpoint_it_was_served_from(sched):
+    """A worker (keep-latest) reads; a fork warms its exact messages under
+    its own session -- served entirely from the worker's conversation
+    checkpoint, so it makes none of its own. It takes that checkpoint
+    over: the worker's next step no longer deletes it, the fork's save
+    writes it, and a reviewer sending those messages plus one more is
+    served it, in memory and after a reload from disk. Before: cached only
+    the system prompt (3643 of 5310 tokens on Qwen3.6-35B)."""
+    class HeaderTok(Tok):
+        """A real template's shape: the reply's header after the messages
+        (where the conversation checkpoint ends: before it)."""
+        def apply_chat_template(self, messages, add_generation_prompt=True,
+                                tokenize=True, **kw):
+            out = super().apply_chat_template(messages, tokenize=tokenize)
+            return [*out, 5, 6] if add_generation_prompt else out
+
+    s = sched
+    plain, s.host._t = s.host._t, HeaderTok(s.prompts)
+    try:
+        _fork_keeps_its_checkpoint(s)
+    finally:
+        s.host._t = plain
+
+
+def _fork_keeps_its_checkpoint(s):
+    s.load("/nonexistent/tiny-fork").done.wait(60)
+    s._prefill_tps = None
+    sys_p = list(s.prompts[0][:20])
+    a, more, review = list(s.prompts[1]), list(s.prompts[2]), [7, 8, 9]
+    _collect(s.submit(_turns(a, system=sys_p, max_tokens=3, session="w",
+                             keep_latest=True)))
+    _, _warm = _collect(s.submit(_turns(a, system=sys_p, max_tokens=1,
+                                       session="w.A", pin=True)))
+    ckpt = [tuple(t) for _, t, e, m in s.cache.live()
+            if m is not None and m["session"] == "w.A"
+            and e.cache_type == "user"]
+    assert len(ckpt) == 1                       # taken over, not copied
+    _collect(s.submit(_turns(a, more, system=sys_p, max_tokens=3,
+                             session="w", keep_latest=True)))
+    assert ckpt[0] in {tuple(t) for _, t in s.cache.of_session("w.A")}
+    saved = s.save_prompt_cache("w.A")
+    assert saved.done.wait(60) and not saved.error
+    on = {r["tokens"] for r in D.list_disk()
+          if r["model"] == "tiny-fork" and r["session"] == "w.A"}
+    assert len(ckpt[0]) in on
+    _, rev = _collect(s.submit(_turns(a, review, system=sys_p,
+                                      max_tokens=2, session="w.review1")))
+    assert rev["knurlogic"]["cache"]["used"] >= len(ckpt[0]) - 1
+    s.unload().done.wait(60)
+    s.load("/nonexistent/tiny-fork").done.wait(60)
+    s.cache.trim_to(0)                          # nothing in memory: disk
+    _, back = _collect(s.submit(_turns(a, review, system=sys_p,
+                                       max_tokens=2, session="w.review2")))
+    assert back["knurlogic"]["cache"]["disk"]["tokens"] >= len(ckpt[0]) - 1
+
+
 def test_the_shared_system_checkpoint_is_saved_and_restored(sched):
     """Nobody's, yet kept across a reload: the first worker after it
     starts from the system prompt and tools, not from nothing."""
@@ -471,7 +576,7 @@ def test_the_shared_system_checkpoint_is_saved_and_restored(sched):
     s.unload().done.wait(60)
     s.load("/nonexistent/tiny-shared").done.wait(60)
     assert tuple(sys_p) in s.cache.shared       # restored as shared
-    assert s.cache.hit_length(s.host.model_key, sys_p + [1, 2]) >= len(sys_p)
+    assert s.cache.hit_length(s.host.model_key, [*sys_p, 1, 2]) >= len(sys_p)
 
 
 def test_a_session_parked_on_request_is_read_back(sched):
@@ -496,7 +601,7 @@ def test_a_session_parked_on_request_is_read_back(sched):
     on = [f for f in D.list_disk()
           if f["model"] == "tiny-park-req" and f["session"] == "pm"]
     assert on
-    _, warm = _collect(s.submit(_job(p + [5, 6, 7], max_tokens=4,
+    _, warm = _collect(s.submit(_job([*p, 5, 6, 7], max_tokens=4,
                                      session="pm")))
     assert warm["knurlogic"]["cache"]["disk"]["tokens"] >= len(p) - 1
     again = s.park_prompt_cache("nobody")
@@ -573,11 +678,12 @@ def test_every_journaled_cache_op_passes_the_plan_check():
     from pathlib import Path
 
     from knurlogic.engine.prompt_cache import commands as CM
+    from knurlogic.engine.prompt_cache import ring as cache_ring
     from knurlogic.engine.runtime import scheduler as SC
     from knurlogic.engine.split import plan as P
     from knurlogic.engine.split import ring as split_ring
-    src = Path(SC.__file__).read_text() + Path(split_ring.__file__).read_text() \
-        + Path(CM.__file__).read_text()
+    src = "".join(Path(m.__file__).read_text()
+                  for m in (SC, split_ring, CM, cache_ring))
     added = set(re.findall(r'journal\.add\(\s*"(\w+)"', src))
     assert added and not added - set(P.OPS), added - set(P.OPS)
     ops = [{"op": "insert", "uid": 1, "event": "finished", "kind": "assistant",
@@ -588,12 +694,15 @@ def test_every_journaled_cache_op_passes_the_plan_check():
            {"op": "drop", "session": "pm"},
            {"op": "pin", "session": "pm", "pinned": True},
            {"op": "drop_sessionless"},
-           {"op": "drop_files", "names": ["00000001-000000-abc.safetensors"]}]
+           {"op": "drop_files", "names": ["00000001-000000-abc.safetensors"]},
+           {"op": "take_over", "tokens": [1, 2, 3],
+            "owner": {"session": "w.A", "role": None, "run": None}}]
     assert P.decode(P.encode({"ops": ops}))["ops"] == ops
     for bad in ({"op": "insert", "uid": 1, "event": "finished",
                  "kind": "assistant", "who": 1},
                 {"op": "drop", "session": ""},
-                {"op": "pin", "session": "a", "pinned": "yes"}):
+                {"op": "pin", "session": "a", "pinned": "yes"},
+                {"op": "take_over", "tokens": [1], "owner": {}}):
         with pytest.raises(P.PlanError):
             P.check({"ops": [bad]})
 
@@ -605,10 +714,10 @@ def test_a_sessions_prompt_that_parts_from_its_entries_says_where(sched):
     s.load("/nonexistent/tiny-diverge").done.wait(60)
     p = list(s.prompts[2])
     _collect(s.submit(_job(p, max_tokens=3, session="dv")))
-    _, again = _collect(s.submit(_job(p + [5, 6], max_tokens=3,
+    _, again = _collect(s.submit(_job([*p, 5, 6], max_tokens=3,
                                       session="dv")))
     assert "diverged" not in again["knurlogic"]["cache"]     # it extends
-    other = p[:4] + [7, 7, 7] + p[7:]
+    other = [*p[:4], 7, 7, 7, *p[7:]]
     _, miss = _collect(s.submit(_job(other, max_tokens=3, session="dv")))
     d = miss["knurlogic"]["cache"]["diverged"]
     assert d["at"] == 4 and d["entry_tokens"] >= len(p)

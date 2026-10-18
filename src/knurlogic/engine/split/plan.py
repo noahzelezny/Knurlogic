@@ -29,7 +29,7 @@ OVER, STEP, LENGTH, ACTIVE, PEAK = range(CONTROL_LEN)
 
 OPS = ("admit", "remove", "chunk", "insert", "pop", "reset", "stop", "park",
        "set", "save_cache", "drop", "pin", "drop_sessionless", "drop_files",
-       "park_session", "read_back", "commit_entries")
+       "park_session", "read_back", "commit_entries", "take_over")
 #: admit's `chunk` is the prefill chunk rank 0 fitted the row at (memory:
 #: memory_guard._make_room); `chunk` (uid, chunk) refits a row not yet
 #: prefilled (memory_guard._fit_next). Ranks prefilling one row in different
@@ -60,6 +60,10 @@ _FIELDS = {
     # rank votes on holding its part, then writes each whole one's
     # entry.json (engine/prompt_cache/layers.commit)
     "commit_entries": ("entries",),
+    # a fork took a keep-latest session's conversation checkpoint
+    # (prompt_cache/memory.PromptCache.take_over): the same owner on every
+    # rank, so its save writes the same entry everywhere
+    "take_over": ("tokens", "owner"),
 }
 #: fields an op may carry besides its own: insert's owner (the session that
 #: made the entry, engine/prompt_cache/ring.JournalPromptCache), a session's
@@ -118,6 +122,12 @@ def check(plan) -> None:
                 isinstance(op["owner"], dict)
                 and all(isinstance(k, str) for k in op["owner"])):
             raise PlanError(f"insert owner is an object, got {op['owner']!r}")
+        if op["op"] == "take_over":
+            _ints(op["tokens"], "take_over tokens")
+            if not (isinstance(op["owner"], dict)
+                    and isinstance(op["owner"].get("session"), str)
+                    and op["owner"]["session"]):
+                raise PlanError("take_over owner names its session")
         if op["op"] == "read_back" and (not isinstance(op["name"], str)
                                         or "/" in op["name"]
                                         or not op["name"]):

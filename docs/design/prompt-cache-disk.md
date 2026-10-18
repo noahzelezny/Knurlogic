@@ -144,7 +144,10 @@ The cache belongs to the agent (the client session), not the model.
   and `model` in their header; restore puts them back.
 - **Saves.** Unload / stop / `POST .../save` with no body: every live
   entry that has a session. `POST .../save {"session"}`: that session's
-  newest entry (its longest), written only if not already on disk --
+  newest entry (its longest) and its longest conversation checkpoint
+  (where its messages end, before a reply's header: where a fork of it
+  continues; a hybrid model cannot trim the longer entry back to it --
+  `PromptCache.to_save`), written only if not already on disk --
   under a new gen, renaming nothing, so a restore still inserts oldest
   save first. There is no timed save.
 - **Break-even.** An entry is not written when recomputing it (tokens /
@@ -191,6 +194,16 @@ The cache belongs to the agent (the client session), not the model.
   because the page's chat regenerates and edits from
   earlier messages. On a ring the owner rides the `insert` op with its
   step, and every rank replaces the same entries.
+- **A fork takes its checkpoint.** A request served from the conversation
+  checkpoint at its own messages' end makes no checkpoint there (it is
+  cached). When that checkpoint is a keep-latest session's, the request's
+  session takes it over (`PromptCache.take_over`; a `take_over` op on a
+  ring): the worker never resumes from an earlier step, so it loses
+  nothing, and its next step no longer deletes what the fork holds. The
+  entry's file is written again under the fork at its save. Found live:
+  a reviewer sending a worker's first messages plus one was served only
+  the system prompt (3643 of 5310 tokens, Qwen3.6-35B), the worker's next
+  step having deleted the checkpoint the fork was warmed from.
 - **Read-back.** An admission whose best memory hit is shorter than an on-disk entry of
   this model that prefixes the prompt reads that entry back first (an
   in-memory index of the key directory's tokens, built at restore,

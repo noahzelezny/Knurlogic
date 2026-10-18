@@ -67,6 +67,16 @@ class JournalPromptCache:
     def hit_length(self, key, tokens) -> int:
         return self.inner.hit_length(key, tokens)
 
+    def to_save(self, session: str) -> set:
+        return self.inner.to_save(session)
+
+    def take_over(self, tokens, owner: dict | None) -> bool:
+        moved = self.inner.take_over(tokens, owner)
+        if moved:
+            self.journal.add("take_over", tokens=[int(x) for x in tokens],
+                             owner=owner)
+        return moved
+
     def drop(self, session: str) -> int:
         n = self.inner.drop(session)
         self.journal.add("drop", session=session)
@@ -176,12 +186,14 @@ def apply_cache_op(op: dict, cache, model_key, last: dict,
     elif kind == "pin":
         cache.set_pinned(op["session"], op["pinned"])
         prompt_disk.set_pin(op["session"], op["pinned"])
+    elif kind == "take_over":
+        cache.take_over(op["tokens"], op.get("owner"))
     elif kind == "save_cache" and op.get("session"):
-        # rank 0's choice, made the same way on the same side map: the
-        # session's longest entry
-        entries = [tuple(t) for _, t in cache.of_session(op["session"])]
+        # rank 0's choice, made the same way on the same side map
+        # (PromptCache.to_save)
+        entries = cache.to_save(op["session"])
         if entries:
-            save_disk(only_new=True, select={max(entries, key=len)})
+            save_disk(only_new=True, select=entries)
     elif kind == "save_cache":
         save_disk()
     else:

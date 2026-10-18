@@ -136,6 +136,40 @@ class PromptCache:
         return [(m, t) for m, t, _, meta in self.live()
                 if meta is not None and meta["session"] == session]
 
+    def to_save(self, session: str) -> set:
+        """The entries a save of `session` writes: its longest (where its
+        own next turn continues) and its longest conversation checkpoint
+        (kind "user": where its messages end, before a reply's header --
+        where a fork of it continues; a hybrid model cannot trim the
+        longer entry back to it)."""
+        mine = [(tuple(t), e.cache_type) for _, t, e, meta in self.live()
+                if meta is not None and meta["session"] == session]
+        out = {max(mine, key=lambda x: len(x[0]))[0]} if mine else set()
+        convs = [t for t, kind in mine if kind == "user"]
+        if convs:
+            out.add(max(convs, key=len))
+        return out
+
+    def take_over(self, tokens, owner: dict | None) -> bool:
+        """`owner`'s session takes the entry of `tokens` from a keep-latest
+        session (one that never resumes from an earlier step, so it loses
+        nothing): a fork served from the worker's conversation checkpoint
+        holds it from then on -- the worker's next step no longer deletes
+        it, and the fork's save writes it, under the fork's name (not on
+        disk under that name yet). Returns whether it moved."""
+        t = tuple(tokens)
+        meta = self.owners.get(t)
+        o = owner or {}
+        s = o.get("session")
+        if not s or meta is None or meta.get("step") is None or \
+                meta["session"] == s:
+            return False
+        self.owners[t] = {"session": s, "role": o.get("role"),
+                          "run": o.get("run"),
+                          "pinned": s in self.pinned, "file": None,
+                          "saved_at": None, "step": o.get("step")}
+        return True
+
     def remove(self, model, tokens) -> bool:
         from knurlogic.engine.prompt_cache import disk as prompt_disk
         self.owners.pop(tuple(tokens), None)

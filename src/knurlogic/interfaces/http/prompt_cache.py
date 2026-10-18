@@ -27,9 +27,11 @@ class PromptCacheHandlers:
     def _save_prompt_cache(self, raw: bytes = b"") -> None:
         """POST /v1/prompt-cache/save [{"session"}]: the prompt cache to
         disk now (engine/prompt_cache/disk), between steps; on a ring every
-        rank saves its part. With a session, only its newest (longest)
-        entry, if not on disk yet: a client calls it right after its
-        context compacts. The loopback operator only."""
+        rank saves its part. With a session, only its longest entry and
+        its longest conversation checkpoint (where its messages end), if
+        not on disk yet: a client calls it right after its context
+        compacts, or at a point it will fork from. The loopback operator
+        only."""
         if not self._loopback():
             return self._json(403, {"error": {
                 "message": "the prompt cache is saved from this machine "

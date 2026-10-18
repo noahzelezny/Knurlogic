@@ -41,6 +41,14 @@ step instead of dozens. The system prompt's checkpoint is shared by every
 session that starts with it, and is kept. Do not use it from a chat that
 edits or regenerates earlier messages.
 
+**Forking a worker.** To keep a worker's state at some point -- for a
+reviewer that will see exactly what the worker had read -- send the
+worker's messages at that point under a session of its own (one token is
+enough: they are cached), pin it and save it. That request is served from
+the worker's checkpoint and takes it over, so the worker's later steps no
+longer replace it; a request that starts with those messages is then
+served from it, also after a reload.
+
 ## Saving to disk
 
 Saved entries survive a model unload, a switch, a restart. When the same
@@ -59,7 +67,7 @@ curl -X POST localhost:8899/v1/prompt-cache/save -d '{"session": "pm-1"}'
 
 | call | what it does |
 |---|---|
-| `POST /v1/prompt-cache/save {"session"}` | save that session's newest entry (call it after your context compacts) |
+| `POST /v1/prompt-cache/save {"session"}` | save that session's newest entry and the checkpoint where its messages end (call it after your context compacts, or at a point you will fork from) |
 | `POST /v1/prompt-cache/save` (no body) | save every entry that has a session |
 | `POST /v1/prompt-cache/park {"session"}` | save the session, then free its memory; its next request reads it back from disk |
 | `POST /v1/prompt-cache/pin {"session", "pinned": true}` | its files are never deleted by age or size limits |
