@@ -190,6 +190,25 @@ def logits_trunk(model):
     return model
 
 
+def _owned(cache):
+    """`cache` (a row extracted from a batch) with its arrays in buffers of
+    its own. mlx-lm's ArraysCache.extract returns `c[idx : idx + 1]`, a
+    view: it kept the WHOLE batch's recurrent state alive, every layer --
+    each finished Qwen3.8 row put 4.5-6 GiB into the prompt cache (24 rows
+    running; measured 96 MiB held for a 4 MiB row), a 13 GiB model reached
+    110 GiB, and the copy landing inside a step at the memory limit aborted
+    Metal. KV caches' extract copies (mx.contiguous), but lazily: every
+    array is evaluated here, since an unevaluated copy still holds its
+    input, the batch."""
+    from knurlogic.engine.arrays import arrays_of
+    arrays = getattr(cache, "cache", None)
+    if isinstance(arrays, list):
+        cache.cache = [mx.contiguous(a) if isinstance(a, mx.array) else a
+                       for a in arrays]
+    mx.eval(arrays_of(cache))
+    return cache
+
+
 class MTPBatchGenerator(BatchGenerator):
     """mlx-lm's BatchGenerator, drafting every row with an MTP head -- or,
     with `head=None`, the same engine without drafting, which is how a
@@ -564,8 +583,9 @@ class MTPBatchGenerator(BatchGenerator):
 
     def _entry(self, i: int) -> list:
         """Row i's caches for the prompt cache: trunk, plus the head's when
-        it sits at the same offset (otherwise a restore could not draft)."""
-        trunk = [c.extract(i) for c in self._batch.cache]
+        it sits at the same offset (otherwise a restore could not draft).
+        Each holds buffers of its own (_owned)."""
+        trunk = [_owned(c.extract(i)) for c in self._batch.cache]
         h = self._batch.hcache
         # A row that never drafted (an image row) never advanced
         # its head cache, so it has no head to store -- and in a batch where
@@ -573,7 +593,7 @@ class MTPBatchGenerator(BatchGenerator):
         # `extract` does not survive (found by G10).
         if (h is not None and hasattr(h, "extract")
                 and self._batch.drafts[i]):
-            head = h.extract(i)
+            head = _owned(h.extract(i))
             # Compare against a cache that HAS a position. On a hybrid model
             # the first layers are recurrent (ArraysCache, no offset), and
             # comparing against one of those never matches -- which stored

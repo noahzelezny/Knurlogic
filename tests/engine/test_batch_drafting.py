@@ -457,3 +457,62 @@ def test_a_row_ending_mid_step_stores_only_what_it_committed(monkeypatch):
     fresh, _ = _drive(MTPBatchGenerator(model, head, prefill_step_size=16),
                       [fed + nxt], 12)
     assert restored == fresh
+
+
+def test_a_rows_extracted_state_holds_only_that_row():
+    """mlx-lm's ArraysCache.extract returns a view of the batch's arrays;
+    kept in the prompt cache it held the WHOLE batch's recurrent state (a
+    finished Qwen3.8 row cost 4.5-6 GiB with 24 rows running). The entry
+    batch_generator saves owns its own buffers."""
+    import gc
+
+    import mlx.core as mx
+    from mlx_lm.models.cache import ArraysCache
+
+    from knurlogic.engine.mtp.batch_generator import _owned
+
+    def held(make):
+        gc.collect()
+        mx.clear_cache()
+        base = mx.get_active_memory()
+        batch = ArraysCache(1)
+        batch.cache = [mx.zeros((24, 64, 128, 128), dtype=mx.float32)]
+        mx.eval(batch.cache)
+        row = make(batch)          # not evaluated: the engine does not
+        del batch
+        gc.collect()
+        mx.clear_cache()
+        return mx.get_active_memory() - base, row
+
+    whole, view = held(lambda b: b.extract(3))
+    mx.eval(view.cache)
+    own, row = held(lambda b: _owned(b.extract(3)))
+    assert whole >= 24 * 64 * 128 * 128 * 4          # the view: all 24 rows
+    assert own <= 2 * 64 * 128 * 128 * 4              # its own row only
+    assert row.cache[0].shape == (1, 64, 128, 128)
+
+
+def test_a_rows_extracted_kv_holds_only_that_row():
+    """mlx-lm's BatchKVCache.extract copies with mx.contiguous, lazily:
+    unevaluated, the copy still holds the batch's keys and values."""
+    import gc
+
+    import mlx.core as mx
+    from mlx_lm.models.cache import BatchKVCache
+
+    from knurlogic.engine.mtp.batch_generator import _owned
+
+    gc.collect()
+    mx.clear_cache()
+    base = mx.get_active_memory()
+    batch = BatchKVCache([0] * 24)
+    k = mx.zeros((24, 8, 2048, 128), dtype=mx.float16)
+    batch.update_and_fetch(k, k)
+    mx.eval(batch.keys, batch.values)
+    row = _owned(batch.extract(3))
+    del batch, k
+    gc.collect()
+    mx.clear_cache()
+    held = mx.get_active_memory() - base
+    assert held <= 3 * 2 * 8 * 2048 * 128 * 2       # one row's K and V
+    assert row.keys.shape == (1, 8, 2048, 128)
