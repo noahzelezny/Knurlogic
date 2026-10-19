@@ -116,6 +116,72 @@ A first measurement before building: the same mixed-difficulty set (some
 problems a low level gets right, some only a high one), the model's own
 rating for each, scored against the cheapest level that gets it right.
 
+## Measurement plan: can a model rate its own difficulty?
+
+Started 2026-10-18 on Qwen3.8-27B; reviewed before the first run. The
+level A/B runs (2026-10-17/18) set each level by hand and scored the
+answers; no model was asked to choose. A level is prompt text, not a
+budget: at `low` a model may still think as long as it likes (DeepSeek
+Vision-Exp got all 8 of those problems at `low`, one at 21k tokens), so
+whether the levels separate on a problem set is itself the first result.
+
+The goal is the right answer in the fewest tokens for that model (one
+model at a time, so tokens stand in for time).
+
+1. **Problem set** (28, integer answers computed by script): easy
+   arithmetic and facts; mid counting with famous problems' constants
+   changed so the answer is not recall; hard multi-step counting that is
+   still workable by reasoning; and code/ops tasks (a 40-line function run
+   exactly as written, a short trace, a dependency config, a log where the
+   culprit is not named).
+2. **Reference, per model:** each problem at every level the dialect
+   offers, 4-5 samples, through /v1/chat/completions at the model's own
+   sampling. Rows record right/wrong, thinking and completion tokens,
+   truncation (reported apart, not silently wrong). The cost compared is
+   completion tokens, not thinking tokens: with thinking off the 27B wrote
+   its working into the answer, 2-5x the tokens of `xhigh` on easy
+   problems (first 34 rows, 2026-10-18).
+   The **cheapest sufficient level** is the lowest level at which this and
+   every higher level is right in most samples; "none" otherwise. First
+   result: the distribution of cheapest levels. If too few problems land
+   strictly between the lowest level and "none" (fewer than ~8), problems
+   are replaced before any rating is run.
+3. **Rating, per model:** the production path -- the problem's
+   conversation with the rating instruction appended, thinking off where
+   the dialect allows (else its lowest level), stop at a newline, a few
+   tokens. How often it names no level is a result, not a retry. Two
+   wordings, each also with the level list reversed; and a control with
+   the problem replaced by a neutral sentence (the base rate). One
+   problem placed after a long unrelated history, to see whether the
+   rating follows the last turn. 3 samples; the first is scored as the
+   deployed behaviour, agreement reported apart.
+4. **Scores**, from the reference rows (no extra runs):
+   - primary: accuracy and total thinking tokens for `auto` against
+     always-lowest, always-default, a prompt-length rule, and the oracle
+     (each problem at its cheapest sufficient level), with confidence
+     intervals;
+   - under-rating (below the cheapest: costs correctness) and over-rating
+     (above it: costs tokens) counted apart; exact match secondary;
+   - problems no level solves scored apart (does the model rate them
+     highest?);
+   - rating latency and tokens, against the estimate above.
+5. **Order:** what one Mac holds first. Qwen3.8-27B (graded: off, low,
+   medium, xhigh) to build and validate the experiment; Qwen3.6-35B-A3B
+   and Gemma 4 as the on/off case (the rating is think or not);
+   GLM-5.3-Flash when the cluster is free; the large models last, one
+   capped confirmation each, DeepSeek after the non-vision Flash effort
+   A/B shows its levels move at all.
+
+Speed: Qwen3.8-27B-VQ-3.9bpw on one M3 Ultra decoded ~24 tok/s alone
+and ~32 tok/s across 8 rows (2026-10-18), so the full reference is hours
+there. Before scaling it: a faster engine for the reference (an MoE
+model, or fewer samples where the easy end is already settled), and the
+samples spent where the levels disagree.
+
+`auto` is worth offering on a model where it beats the always-default
+level on tokens without losing accuracy outside the intervals; a fixed
+loss threshold waits until there are enough samples to resolve one.
+
 ## Open
 
 - Mid-answer escalation (start low, restart higher when the thinking
