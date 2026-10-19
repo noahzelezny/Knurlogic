@@ -12,7 +12,10 @@ parser when the call closes. A model can also spell a call's open tag as
 ordinary tokens ("<", "tool", "_call", ">" for Qwen's one `<tool_call>`
 token), which the state machine cannot see; when the request sent tools,
 the answer text is read for the tags' strings as well (`tool_tags`), held
-back the same way a stop string is.
+back the same way a stop string is. And a model can call a tool before it
+closes its think block (Qwen3.6-35B late in long agent sessions): when a
+reply ends with no answer and no call, the calls written in its reasoning
+are its calls.
 
 The object is fed on the scheduler's thread and read on the HTTP thread
 only through the deltas it returns, so it holds no lock.
@@ -87,6 +90,10 @@ class Request:
         self._spelled = ""
         #: inside a call whose open tag was spelled as text
         self._in_spelled = False
+        #: the reasoning so far, read for calls made inside it (tool_tags)
+        self._reasoning = ""
+        #: whether any answer text that is not whitespace went out
+        self._answered = False
         self.want_logprobs = logprobs
         self.prompt_tokens = prompt_tokens
         self.completion_tokens = 0
@@ -157,6 +164,8 @@ class Request:
             out.logprobs.append((token, lp, top))
         if state == "reasoning":
             out.reasoning += text
+            if self.tool_tags:
+                self._reasoning += text
         elif state == "tool":
             self._tool_text += text
         elif state == "normal":
@@ -198,7 +207,19 @@ class Request:
             return shown + s[:len(s) - k]
         return shown
 
+    def _calls_in_reasoning(self, out: Delta) -> None:
+        """The calls written inside the think block, for a reply that made
+        neither an answer nor a call: each open tag to its close (or to the
+        end, for one cut short)."""
+        assert self.tool_tags is not None
+        start, end = self.tool_tags
+        for block in self._reasoning.split(start)[1:]:
+            self._tool_text = block.split(end, 1)[0]
+            self._close_tool(out)
+
     def _stop_stage(self, text: str, out: Delta) -> None:
+        if text.strip():
+            self._answered = True
         if not self.stops:
             out.content += text
             return
@@ -268,6 +289,9 @@ class Request:
                     return
             if self._prev_state == "tool" or self._tool_text:
                 self._close_tool(out)
+            if self.tool_tags and not self.made_tool_call \
+                    and not self._answered:
+                self._calls_in_reasoning(out)
             out.content += self._pending
             self._pending = ""
         self._buf.clear()

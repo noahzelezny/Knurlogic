@@ -188,6 +188,27 @@ def test_a_spelled_open_tag_never_reaches_a_streamed_delta():
     assert all("<" not in d.content for d in got["deltas"])
 
 
+def test_a_call_made_inside_an_unclosed_think_block_is_a_tool_call():
+    # the reply never closed its reasoning, so <tool_call> was reasoning
+    # text (Qwen3.6-35B, Chuck workers, 2026-10-18)
+    got, _ = run([15, 3, 17, 4, 90], initial="reasoning",
+                 tool_parser=_parse, tools=TOOLS, tool_tags=TAGS)
+    [tc] = got["tool_calls"]
+    assert tc["function"]["name"] == "f" and got["finish"] == "tool_calls"
+    got, _ = run([15, *SPELLED_OPEN, 17], initial="reasoning",
+                 tool_parser=_parse, tools=TOOLS, tool_tags=TAGS)
+    assert len(got["tool_calls"]) == 1 and got["finish"] == "length"
+
+
+def test_a_call_drafted_in_reasoning_is_not_one_when_the_reply_answered():
+    got, _ = run([15, 3, 17, 4, 2, 10, 11, 90], initial="reasoning",
+                 tool_parser=_parse, tools=TOOLS, tool_tags=TAGS)
+    assert got["tool_calls"] == [] and got["content"] == "The answer"
+    got, _ = run([15, 3, 17, 4, 90], initial="reasoning", tool_parser=_parse,
+                 tool_tags=TAGS)
+    assert got["tool_calls"] == [] and got["finish"] == "stop"
+
+
 def test_an_unclosed_tool_call_is_still_reported_at_the_end():
     parse = lambda text, tools: json.loads(text)
     got, _ = run([3, 17], tool_parser=parse)
