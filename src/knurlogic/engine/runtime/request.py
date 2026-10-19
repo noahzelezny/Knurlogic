@@ -8,7 +8,11 @@ sequences by the engine's state machine and never reach the client. Stop
 strings match the detokenized ANSWER text only, across token boundaries;
 the last max(len(stop)) - 1 characters are held back so a stop never leaks
 into a streamed delta. Tool calls are parsed by the tokenizer's own tool
-parser when the call closes.
+parser when the call closes. A model can also spell a call's open tag as
+ordinary tokens ("<", "tool", "_call", ">" for Qwen's one `<tool_call>`
+token), which the state machine cannot see; when the request sent tools,
+the answer text is read for the tags' strings as well (`tool_tags`), held
+back the same way a stop string is.
 
 The object is fed on the scheduler's thread and read on the HTTP thread
 only through the deltas it returns, so it holds no lock.
@@ -54,7 +58,8 @@ class Request:
     def __init__(self, detokenizer, *, sequences: dict[tuple, str],
                  stops: Sequence[str] = (), tool_parser: Callable = None,
                  tools: Any = None, logprobs: bool = False,
-                 prompt_tokens: int = 0, no_tools: bool = False):
+                 prompt_tokens: int = 0, no_tools: bool = False,
+                 tool_tags: tuple[str | None, str | None] | None = None):
         self.detok = detokenizer
         self.detok.reset()
         self.seqs = dict(sequences)
@@ -72,6 +77,16 @@ class Request:
         self.tools = tools
         #: tool_choice "none": a tool call the model makes is dropped
         self.no_tools = no_tools
+        #: (open, close) strings of a tool call, read in the answer text
+        #: when tools were sent: a call spelled as ordinary tokens
+        self.tool_tags: tuple[str, str] | None = (
+            (str(tool_tags[0]), str(tool_tags[1]))
+            if tools and tool_parser and not no_tools and tool_tags
+            and all(tool_tags) else None)
+        #: answer text withheld while a spelled open tag could be starting
+        self._spelled = ""
+        #: inside a call whose open tag was spelled as text
+        self._in_spelled = False
         self.want_logprobs = logprobs
         self.prompt_tokens = prompt_tokens
         self.completion_tokens = 0
@@ -151,6 +166,39 @@ class Request:
         self._prev_state = state
 
     def _answer(self, text: str, out: Delta) -> None:
+        if self.tool_tags:
+            text = self._spelled_calls(text, out)
+        self._stop_stage(text, out)
+
+    def _spelled_calls(self, text: str, out: Delta) -> str:
+        """`text` with the tool calls spelled in it taken out and parsed;
+        a tail that could be the start of the open tag is held back."""
+        assert self.tool_tags is not None
+        start, end = self.tool_tags
+        s, self._spelled, shown = self._spelled + text, "", ""
+        while s:
+            if self._in_spelled:
+                self._tool_text += s
+                j = self._tool_text.find(end)
+                if j < 0:
+                    return shown
+                s = self._tool_text[j + len(end):]
+                self._tool_text = self._tool_text[:j]
+                self._in_spelled = False
+                self._close_tool(out)
+                continue
+            i = s.find(start)
+            if i >= 0:
+                shown += s[:i]
+                s, self._in_spelled = s[i + len(start):], True
+                continue
+            k = next((k for k in range(min(len(start) - 1, len(s)), 0, -1)
+                      if s.endswith(start[:k])), 0)
+            self._spelled = s[len(s) - k:]
+            return shown + s[:len(s) - k]
+        return shown
+
+    def _stop_stage(self, text: str, out: Delta) -> None:
         if not self.stops:
             out.content += text
             return
@@ -210,6 +258,12 @@ class Request:
                 # text the detokenizer held for a token already routed
                 self._route([self._prev_state or "normal", tail, None,
                              None, None], out)
+                if self.finished:
+                    return
+            if self._spelled:
+                # a held tail that never became an open tag
+                held, self._spelled = self._spelled, ""
+                self._stop_stage(held, out)
                 if self.finished:
                     return
             if self._prev_state == "tool" or self._tool_text:

@@ -1005,6 +1005,8 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
                            tool_parser=getattr(tok, "tool_parser", None),
                            tools=job.request.tools,
                            no_tools=job.request.tool_choice == "none",
+                           tool_tags=(getattr(tok, "tool_call_start", None),
+                                      getattr(tok, "tool_call_end", None)),
                            logprobs=job.logprobs or bool(job.top_logprobs),
                            prompt_tokens=len(prompt))
         except BaseException:

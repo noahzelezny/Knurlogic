@@ -21,6 +21,7 @@ VOCAB = {1: "<think>", 2: "</think>", 3: "<tool_call>", 4: "</tool_call>",
          16: " so", 17: "{\"name\": \"f\", \"arguments\": {\"x\": 1}}",
          18: " STO", 19: "P", 20: " more", 21: "<", 22: "end>",
          31: "</", 32: "thin", 33: "king", 34: ">", 35: "\n\n", 36: ">\n\n",
+         41: "tool", 42: "_call", 43: "</tool", 44: " text\n",
          90: "<eot>"}
 
 
@@ -134,6 +135,57 @@ def test_a_tool_call_is_parsed_and_the_finish_says_tool_calls():
     assert tc["function"] == {"name": "f", "arguments": "{\"x\": 1}"}
     assert tc["type"] == "function" and tc["id"] and tc["index"] == 0
     assert got["finish"] == "tool_calls"
+
+
+# "<" "tool" "_call" ">": the open tag spelled as ordinary tokens, which the
+# state machine never sees (Qwen3.6, a Chuck worker's step, 2026-10-18)
+SPELLED_OPEN = [21, 41, 42, 34]
+SPELLED_CLOSE = [43, 42, 34]
+TOOLS = [{"type": "function", "function": {"name": "f"}}]
+TAGS = ("<tool_call>", "</tool_call>")
+
+
+def _parse(text, tools):
+    return json.loads(text)
+
+
+def test_a_call_whose_tags_are_spelled_as_text_is_a_tool_call():
+    got, _ = run([10, 44, *SPELLED_OPEN, 17, *SPELLED_CLOSE, 90],
+                 tool_parser=_parse, tools=TOOLS, tool_tags=TAGS)
+    assert got["content"] == "The text\n"
+    [tc] = got["tool_calls"]
+    assert tc["function"] == {"name": "f", "arguments": "{\"x\": 1}"}
+    assert got["finish"] == "tool_calls"
+
+
+def test_spelled_calls_in_a_row_and_a_spelled_open_with_a_real_close():
+    got, _ = run([10, *SPELLED_OPEN, 17, *SPELLED_CLOSE, 35,
+                  *SPELLED_OPEN, 17, 4, 90],
+                 tool_parser=_parse, tools=TOOLS, tool_tags=TAGS)
+    assert [tc["index"] for tc in got["tool_calls"]] == [0, 1]
+    assert got["content"] == "The\n\n" and got["finish"] == "tool_calls"
+
+
+def test_spelled_tags_stay_text_when_no_tools_were_sent():
+    got, _ = run([10, *SPELLED_OPEN, 17, *SPELLED_CLOSE, 90],
+                 tool_parser=_parse, tool_tags=TAGS)
+    assert got["content"] == "The<tool_call>" + VOCAB[17] + "</tool_call>"
+    assert got["tool_calls"] == [] and got["finish"] == "stop"
+
+
+def test_a_held_partial_tag_that_is_not_one_comes_out_as_text():
+    got, _ = run([10, 21, 41, 20, 90], tool_parser=_parse, tools=TOOLS,
+                 tool_tags=TAGS)
+    assert got["content"] == "The<tool more" and got["tool_calls"] == []
+    got, _ = run([10, 21, 41], tool_parser=_parse, tools=TOOLS,
+                 tool_tags=TAGS)
+    assert got["content"] == "The<tool" and got["finish"] == "length"
+
+
+def test_a_spelled_open_tag_never_reaches_a_streamed_delta():
+    got, _ = run([10, *SPELLED_OPEN, 17, *SPELLED_CLOSE, 90],
+                 tool_parser=_parse, tools=TOOLS, tool_tags=TAGS)
+    assert all("<" not in d.content for d in got["deltas"])
 
 
 def test_an_unclosed_tool_call_is_still_reported_at_the_end():
