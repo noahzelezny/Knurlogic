@@ -296,6 +296,29 @@ def test_a_launch_refreshes_what_the_page_can_reach(monkeypatch, req, which,
     assert out == answer and bool(calls) is refresh
 
 
+@pytest.mark.parametrize("req", [
+    {"action": "unload", "target": "/m/Model"},
+    {"action": "unload", "target": "8081"},
+    {"action": "unload", "port": 8081},       # as an unload elsewhere names it
+])
+def test_a_local_unload_names_the_server_by_target_or_port(monkeypatch, req):
+    stopped = []
+    monkeypatch.setattr(page_loads, "registry",
+                        lambda: {8081: {"artifact": "/m/Model", "pid": 7}})
+    monkeypatch.setattr(page_loads.spawn, "stop",
+                        lambda port: stopped.append(port) or {"stopped": port})
+    out = page_loads.load_fn(8080)({}, json.dumps(req).encode())
+    assert out == {"stopped": 8081} and stopped == [8081]
+
+
+def test_a_local_unload_of_nothing_it_started_is_refused(monkeypatch):
+    monkeypatch.setattr(page_loads, "registry",
+                        lambda: {8081: {"artifact": "/m/Model", "pid": 7}})
+    for req in ({"action": "unload", "port": 9000}, {"action": "unload"}):
+        out = page_loads.load_fn(8080)({}, json.dumps(req).encode())
+        assert "did not start" in out["error"]
+
+
 def test_a_peer_named_with_peer_by_hostname_is_trusted_at_its_address(
         monkeypatch):
     """`--peer bobs-mac.local` compared the NAME with the connection's numeric

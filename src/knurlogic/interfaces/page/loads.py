@@ -83,12 +83,16 @@ def load_fn(serve_port: int):
                                 draft=req.get("draft") is not False))
             if act == "unload":
                 # Ours to stop only if we started it. Anything else is
-                # somebody's server and not this page's to kill.
+                # somebody's server and not this page's to kill. Named by
+                # artifact or port in `target`, or by `port` as an unload
+                # on another machine is (forward_launch)
+                which = str(target or req.get("port") or "")
                 for port, rec in registry().items():
-                    if rec.get("artifact") == target or str(port) == str(target):
+                    if which and which in (rec.get("artifact"), str(port)):
                         return spawn.stop(port)
-                return {"error": "this page did not start that; stop it "
-                                 "where it was started"}
+                return {"error": f"this page did not start {which or 'that'!r}; "
+                                 "stop it where it was started (an unload "
+                                 "names the model's target or port)"}
             if act == "ollama-unload":
                 return loaded.ollama_unload(where, target)
         # a load action's failure is the page's answer, not a dead handler
