@@ -1,9 +1,14 @@
 # Auto effort: the model sets its own thinking level
 
-Status: design, not built (2026-10-18). Noah's direction: an `auto`
-thinking level, with the model judging how hard the request is. knurlogic
-builds the mechanism; harnesses (Chuck) own the outcome data a classifier
-would later be trained on.
+Status: design, not built. Started 2026-10-18 as an `auto` level, the
+model rating the request's difficulty before answering; the measurements
+below (2026-10-18/19) turned it into **default low, escalate on demand**:
+the model asks for more thinking, as a tool, after it has tried. knurlogic
+builds the mechanism; harnesses (Chuck) own the outcome data.
+
+Testing paused 2026-10-19 (Noah): nothing so far shows a level improving
+what a model can do enough to be worth chasing; the escalation test below
+is written down in case that changes.
 
 ## Why now
 
@@ -17,7 +22,7 @@ templates/thinking_moves.json, test_thinking's cache test), so a changed
 level costs only the level's own few dozen tokens. Choosing the level per
 turn is now cheap.
 
-## The shape
+## The shape (first design: superseded by escalation, below)
 
 `reasoning_effort: "auto"` is one more value on the request's ladder
 (engine/model/thinking). With it, the server answers in two passes over
@@ -182,10 +187,67 @@ samples spent where the levels disagree.
 level on tokens without losing accuracy outside the intervals; a fixed
 loss threshold waits until there are enough samples to resolve one.
 
+## What the runs found (2026-10-18/19)
+
+A level is prompt text: the template adds a line asking for more or less
+reasoning, and the model was trained to reason longer when it says so.
+Nothing else changes -- the same compute per token, the same model. More
+effort means longer reasoning by habit, which a model can also spend
+talking itself out of a right answer.
+
+- **Qwen3.8-Flash-Next VQ-2.1bpw**, 28 mixed problems, 2 samples, every
+  level: `low` 56/56 at the fewest tokens (978 mean); `medium` 50/56,
+  `xhigh` 54/56 at 2081. Off writes its working into the answer (1417).
+- Same model, 13 harder problems, `low` vs `xhigh`, 2 samples: at a 16k
+  cap `low` 20/26, `xhigh` 16/26 -- all 10 of `xhigh`'s misses ran out of
+  room. Rerun at 64k: `low` 22/26, `xhigh` 23/26, `xhigh` at 3-5x the
+  tokens. No verbatim loops (Chuck's `ReasoningLoopMonitor` over every
+  long run); the runs still open at 64k drifted, re-deriving the same
+  partial results ("Wait" 98-143 times).
+- **GLM-5.3-Flash VQ-2.7bpw** (both Macs), asked before answering, with
+  thinking off, how hard each of 20 problems is: "high" for 19, "low" for
+  one (a subtle code bug), "max" never. A rating that is nearly always the
+  same word says nothing; and it cost 5-11 s on the split, not the
+  0.3-0.5 s estimated above for one Mac. The model judges difficulty
+  poorly before it has tried.
+
+So: no fixed cap (it cuts long productive thinking; a loop guard in the
+harness is the stop), the lowest level that still lets the model think
+as long as it needs, and more effort only where it was measured to fix
+answers -- on these models about one problem in 26.
+
+## Escalation: `think_harder`, the model's call after trying
+
+The model answers at `low`. When its own attempt leaves it unsure, it
+calls a tool -- `think_harder(reason)` -- and the harness reruns the turn
+at the dialect's top level with the first attempt and the reason in the
+context. A model that has its answer does not call it. The decision is
+made after the attempt, when the difficulty is known, not before it, when
+GLM rated nearly everything "high".
+
+Cost: the level renders after the conversation (ab68ba09), so the rerun
+reuses the cached conversation and redoes only the reply.
+
+Where it lives: the tool is the harness's (Chuck offers it like any other
+and reruns the step); knurlogic needs nothing new -- `reasoning_effort`
+per request already picks the level, and the prompt cache already serves
+the rerun.
+
+**Test** (the problems and reference rows above, one model at a time):
+1. Every problem at `low` with `think_harder` in the tools, 2 samples.
+2. Score where it fires against the reference: calls on problems `low`
+   gets wrong (good), on problems `low` gets right (wasted), and no call
+   on a problem `low` gets wrong (missed).
+3. The result is accuracy and total tokens for low+escalation against
+   always-low, always-top and the oracle (each problem at its cheapest
+   sufficient level).
+Offered where it beats always-low on accuracy at a modest token cost;
+always-low is the default it has to beat.
+
 ## Open
 
-- Mid-answer escalation (start low, restart higher when the thinking
-  hedges): only the reply is redone, the conversation stays cached; not in
-  the first version.
+- Escalation from inside the thinking (the harness sees hedging and
+  restarts higher) rather than a tool call: needs a signal for hedging;
+  drift, not verbatim loops, is what the long runs showed.
 - Whether the rating sees the tools and the whole history or a summary:
   the whole cached conversation is free, so the whole.
