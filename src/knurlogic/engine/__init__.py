@@ -17,6 +17,7 @@ fails the suite, so swapping the engine stays a change to this folder.
   kvquant.py     the quantized KV cache (8, 6 or 4 bits)
   kvattn.py      the decode attention kernel over kvquant's 8-bit cache
   matmul_padding.py  per-chip rounding off: identical results on M3 and M4
+  embeddings.py  the text embedder: load on demand, embed, drop when idle
   arch.py        which architecture module a model_type needs, verified
   register.py    installs the architecture modules into mlx-lm
   smoke.py       `knurlogic smoke`: generate a token, prove where code came from

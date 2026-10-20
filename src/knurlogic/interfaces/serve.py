@@ -108,6 +108,8 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     and report it, then serve it (or follow rank 0). A refusal prints its
     REFUSING line(s) and returns REFUSED_EXIT."""
     a = Artifact.load(path)
+    if a.embeds:
+        return serve_embeddings(a, host, port, serving, ring)
     try:
         register_artifact(a)
         launch = resolve_launch(a, working_set_gib, profile, tune, overrides,
@@ -117,6 +119,24 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         print(e, file=sys.stderr)
         return REFUSED_EXIT
     return serve_launch(launch, host, port, serving)
+
+
+def serve_embeddings(a: Artifact, host: str, port: int,
+                     serving: dict | None, ring: dict | None) -> int:
+    """An embedding model: its own server (interfaces/http/embeddings),
+    none of a chat model's launch settings. Refused split, or with no
+    recipe for its model_type."""
+    from knurlogic.engine.embeddings import refusal
+    from knurlogic.interfaces.http import embeddings
+    why = refusal(a.model_type) or (
+        "an embedding model runs on one machine, not split"
+        if ring and int(ring.get("world") or 1) > 1 else None)
+    if why:
+        print(f"{REFUSING}{why}", file=sys.stderr)
+        return REFUSED_EXIT
+    print(f"artifact  {a.path.name}  (embedding model, {a.model_type}, "
+          f"{a.bytes_on_disk / MIB:.0f} MiB)")
+    return embeddings.serve(a, host, port, settings=serving)
 
 
 def register_artifact(a: Artifact) -> None:

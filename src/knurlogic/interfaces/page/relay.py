@@ -1,6 +1,6 @@
 """PEER_RELAY/v1/...: a peer page reaching a model this machine started --
-chat, messages, count_tokens, /v1/models and the prompt cache, resolved
-by model name against the servers started here (`peer_relay`)."""
+chat, messages, count_tokens, embeddings, /v1/models and the prompt
+cache, resolved by model name against the servers started here (`peer_relay`)."""
 
 from __future__ import annotations
 
@@ -15,8 +15,8 @@ from knurlogic.machine import identity
 def peer_relay(handler, method: str, path: str, body: bytes,
                fetch=None) -> None:
     """GET /peer/v1/models, POST /peer/v1/chat/completions, /v1/messages,
-    /v1/messages/count_tokens -- on the machine holding the model, for a
-    peer page whose router or chat names it. The caller has passed
+    /v1/messages/count_tokens, /v1/embeddings -- on the machine holding
+    the model, for a peer page whose router or chat names it. The caller has passed
     peer_refusal. Resolved by model name against the servers this machine
     started (local_models) and streamed back as it arrives."""
     if path == prompt_cache.PROMPT_CACHE_PATH or path.startswith(

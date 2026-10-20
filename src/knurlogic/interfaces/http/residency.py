@@ -1,7 +1,8 @@
 """Endpoints for orchestration and ingest clients that manage what the
 server holds, in OpenAI's shapes:
 
-  /v1/models     capabilities (text / vision / thinking) and size_bytes
+  /v1/models     capabilities (text / vision / thinking; embeddings on
+                 an embedding server) and size_bytes
   /v1/residency  model, capabilities, memory_bytes, nodes, state
   /v1/ensure     {model, wait}: idempotent load or switch; 409 while
                  requests run, unless force

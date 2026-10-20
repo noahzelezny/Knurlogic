@@ -348,3 +348,13 @@ def test_manual_hosts_cover_every_address_of_a_named_peer(monkeypatch):
     hosts = page_peers.manual_hosts()
     assert {"192.0.2.2", "203.0.113.105"} <= set(hosts)
     assert "203.0.113.9" not in hosts
+
+
+def test_router_reaches_an_embedder_on_the_peer(two):
+    """An embedding model loaded on the other Mac: this page's router
+    sends /v1/embeddings through the peer page's relay to it."""
+    here, _, seen = two
+    code, _, raw = _post(here + "/v1/embeddings",
+                         {"model": "glm-peer", "input": ["a"]})
+    assert code == 200 and json.loads(raw) == PLAIN
+    assert seen == [("/v1/embeddings", {"model": "glm-peer", "input": ["a"]})]

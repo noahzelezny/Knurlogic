@@ -67,6 +67,19 @@ class Artifact:
         return bool(self.vq_modules or self.vq_other)
 
     @property
+    def embeds(self) -> bool:
+        """A text embedding model (Qwen3-Embedding). Its config is a causal
+        LM's, so sentence-transformers' modules.json says it, else the
+        name does: the folder's, or for a Hugging Face cache snapshot the
+        cache entry's (models--org--name)."""
+        if (self.path / "modules.json").is_file():
+            return True
+        names = [self.path.name]
+        if self.path.parent.name == "snapshots":
+            names.append(self.path.parent.parent.name)
+        return any("embedding" in n.lower() for n in names)
+
+    @property
     def geometries(self) -> dict:
         """{(d, K): module_count} -- what the kernels will actually dispatch."""
         out: dict = {}
