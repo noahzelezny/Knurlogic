@@ -384,10 +384,16 @@ what is measured, not for a feeling:
 - 💡 got it: a jump to high (most traces had one clear jump);
 - 😌 settled: high and steady -- where Thinking: auto stops;
 - 😬 drifting: high, still going (the re-checking tail at `xhigh`);
-- 😤 struggling: self-corrections ("wait", "that's wrong") and repeated
-  tool errors rising while confidence stays flat. Countable from the
-  stream today, no probe; a probe trained on those counts as labels may
-  show it a paragraph or two earlier -- an experiment.
+- 😤 struggling: from the hidden state, not from words (Noah: "wait,
+  wait" can be excitement). Labelled by behaviour -- will the forced
+  answer change by the next break -- a probe reads it at AUC 0.97 on the
+  Flash's `xhigh` traces, but it is mostly the confidence direction again
+  (scores correlate -0.94; low confidence alone predicts it at 0.97). So
+  struggling and drifting are patterns of confidence over time. One
+  sliver may differ: among confident points the struggle probe still
+  picked the rare answers about to change (AUC 0.93-0.95, but only ~8
+  such points) -- "confident but about to change its mind", the stop's
+  one weakness; worth a larger test.
 The monitor is the harness's (Chuck); knurlogic streams the number.
 
 **Next:**
