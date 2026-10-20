@@ -1,9 +1,10 @@
 # Auto effort: the model thinks until it has its answer
 
-Status: design, not built. **Thinking: auto** is a probe on the model's
-hidden state that closes the think block when the model has its answer;
-its threshold is the effort knob (the probe sections below, 2026-10-19).
-It learns per model from served traffic, then switches itself on.
+Status: design, not built. **Thinking: auto** runs the model at its top
+level and a probe on its hidden state closes the think block when the
+model has its answer; the probe's threshold is the effort knob, set per
+model (the probe sections below, 2026-10-19/20). It learns per model from
+served traffic, then switches itself on.
 
 How it got here: started 2026-10-18 as the model rating the request's
 difficulty before answering; the runs turned that into "default low,
@@ -399,9 +400,32 @@ output minus the tail; it saves time, it cannot make a model more right.
   each): probe AUC 0.95 at layer 32 of 64 (0.943 at 42; position 0.895);
   the stop at 0.95 keeps 40/41 -- every answer it gets right -- at 43% of
   the thinking.
-- **The layer to read sits at one-half to two-thirds of the depth** in all
-  four families (Gemma 19/30, the 35B 26/40, the Flash 32-40/48, the 27B
-  32-42/64): a default for onboarding a new model without a layer search.
+- **Every model at its top level** (2026-10-20; Noah: auto is the top
+  level plus the probe stop, so probes are trained there). Stop at the
+  first point over 0.95 (to the end in brackets):
+
+  | model, level | probe AUC | position | right, thinking kept |
+  |---|---|---|---|
+  | Qwen3.8 Flash, xhigh | 0.98 | 0.95 | 77/82 at ~33% (80/82) |
+  | Qwen3.8-27B, xhigh | 0.95 | 0.90 | 40/41 at 43% (40/41) |
+  | Qwen3.6-35B, on | 0.95 | 0.91 | 80/82 at 43% (81/82) |
+  | Qwen3.5-397B VQ-2.2, on | 0.92 | 0.86 | 35/38 at 40% (37/38) |
+  | Gemma 4 26B, on | 0.92 | 0.89 | 39/41 at 33% (41/41) |
+  | GLM-5.3 VQ-2.7, max | 0.93 | 0.89 | 69/76 at 45%; 0.99: 71/76 at 51% (75/76) |
+  | DeepSeek V4 Flash VQ-3.2, max | 0.93 | 0.92 | 71/77 at 59%; 0.99: 75/77 at 64% (77/77) |
+
+  The Qwen family and Gemma read cleanly; GLM and DeepSeek carry the
+  signal less clearly and need a higher threshold (0.99) for less saving.
+  The threshold is therefore per model, set at onboarding from how many
+  answers each threshold loses. GLM and DeepSeek fit the M4 for the full
+  walk (~101 of 120 GiB wired). On these single problems GLM at max
+  finished on its own (median 1,077 tokens; one of 76 reached 24k): the
+  never-ending max Noah sees is in long conversations, which these
+  problems do not reproduce -- real long-session traces will.
+- **The layer to read sits at one-half to two-thirds of the depth** in
+  every model tried (Gemma 19/30, the 35B 26/40, the Flash 32-40/48, the
+  27B 32-42/64, the 397B 40/60, GLM 22-29/45, DeepSeek 21-41/43): a
+  default for onboarding a new model without a layer search.
 
 **A state monitor from the same signal** (Noah, 2026-10-19): streamed with
 the thinking, the confidence gives a harness a glance at each worker --
@@ -425,8 +449,8 @@ what is measured, not for a feeling:
 The monitor is the harness's (Chuck); knurlogic streams the number.
 
 **Next:**
-- the same on GLM-5.3 at max (both Macs, when the cluster is free): its
-  own traces, does the stop end the thinking that never finishes;
+- GLM-5.3 at max in long conversations, where it does not stop (single
+  problems here finish on their own): real long-session traces;
 - each quant reading its own generated thinking (all quants here read the
   4.6's text);
 - probe training as a step of onboarding a new model
