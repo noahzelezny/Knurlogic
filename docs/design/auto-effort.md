@@ -375,6 +375,21 @@ output minus the tail; it saves time, it cannot make a model more right.
   breaks inside batched, drafted decoding without slowing it, and
   storing it with the request.
 
+**A state monitor from the same signal** (Noah, 2026-10-19): streamed with
+the thinking, the confidence gives a harness a glance at each worker --
+with four workers running, which is stuck. A face per state, named for
+what is measured, not for a feeling:
+- 🤔 working: confidence low, climbing;
+- 😕 stuck: confidence low and swinging (the traces' dips and recoveries);
+- 💡 got it: a jump to high (most traces had one clear jump);
+- 😌 settled: high and steady -- where Thinking: auto stops;
+- 😬 drifting: high, still going (the re-checking tail at `xhigh`);
+- 😤 struggling: self-corrections ("wait", "that's wrong") and repeated
+  tool errors rising while confidence stays flat. Countable from the
+  stream today, no probe; a probe trained on those counts as labels may
+  show it a paragraph or two earlier -- an experiment.
+The monitor is the harness's (Chuck); knurlogic streams the number.
+
 **Next:**
 - the same on GLM-5.3 at max (both Macs, when the cluster is free): its
   own traces, does the stop end the thinking that never finishes;
