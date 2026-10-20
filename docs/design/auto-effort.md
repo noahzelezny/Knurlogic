@@ -395,9 +395,13 @@ output minus the tail; it saves time, it cannot make a model more right.
   sample each, all right): probe AUC 0.92 at layer 19 of 30 (position
   0.89); the stop at 0.95 keeps 39/41 at 33% of the thinking, 0.99 keeps
   40/41 at 51%.
-- **The layer to read sits at about two-thirds of the depth** in all three
-  families (Gemma 19/30, the 35B 26/40, the Flash 32-40/48): a default for
-  onboarding a new model without a layer search.
+- A fourth, Qwen3.8-27B VQ-3.9 (`xhigh`, its default; 41 traces, one
+  each): probe AUC 0.95 at layer 32 of 64 (0.943 at 42; position 0.895);
+  the stop at 0.95 keeps 40/41 -- every answer it gets right -- at 43% of
+  the thinking.
+- **The layer to read sits at one-half to two-thirds of the depth** in all
+  four families (Gemma 19/30, the 35B 26/40, the Flash 32-40/48, the 27B
+  32-42/64): a default for onboarding a new model without a layer search.
 
 **A state monitor from the same signal** (Noah, 2026-10-19): streamed with
 the thinking, the confidence gives a harness a glance at each worker --
@@ -423,8 +427,8 @@ The monitor is the harness's (Chuck); knurlogic streams the number.
 **Next:**
 - the same on GLM-5.3 at max (both Macs, when the cluster is free): its
   own traces, does the stop end the thinking that never finishes;
-- the remaining single-Mac model (Qwen3.8-27B; the 35B is done, below):
-  does the direction exist there too, and at what layer depth;
+- each quant reading its own generated thinking (all quants here read the
+  4.6's text);
 - probe training as a step of onboarding a new model
   (docs/design/new-model.md), once the stop is a feature;
 - finer checks (every paragraph, not 12 per trace), and a probe that does
