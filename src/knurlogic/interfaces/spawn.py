@@ -13,7 +13,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from knurlogic.machine.artifact import bytes_on_disk
+from knurlogic.machine.artifact import bytes_on_disk, embeds
 from knurlogic.machine.http_client import NET_ERRORS, request
 from knurlogic.machine.memory import footprint
 from knurlogic.machine.processes import PROC_ERRORS
@@ -72,6 +72,17 @@ def stalled(pid: int, quiet, resident: int, now: float) -> bool:
 WARM_FRACTION = 0.9
 
 
+def warming(rec: dict, held: int, size: int | None = None) -> bool:
+    """A server answering while it holds under WARM_FRACTION of `size`
+    (default: the weights its launch measured): mlx is still mapping them
+    in. Never an embedding model's: it drops its weights when idle on
+    purpose, and ~320 MiB coming back is no memory move a load must wait
+    for."""
+    size = int(rec.get("bytes") or 0) if size is None else int(size)
+    return bool(size) and held < WARM_FRACTION * size \
+        and not rec.get("embeds")
+
+
 def answers(port: int) -> bool:
     try:
         return request(f"http://127.0.0.1:{port}/v1/models", timeout=1.5)[0] < 400
@@ -122,16 +133,15 @@ def children() -> list:
                                        else None)}
         if alive and answers(port):
             held = pids.get(pid, 0)
-            # the size the launch measured: a poll reads no model folder
-            size = int(rec.get("bytes") or 0)
             row["bytes_resident"] = held
             # Answering is not loaded. mlx maps weights lazily: measured, a
             # 15.5 GiB model answered with 3 GiB resident and reached 15.0
             # seconds later. Until it holds its weights, memory is still
             # moving, and a fit taken now is stale.
-            if size and held < WARM_FRACTION * size:
+            if warming(rec, held):
                 row["phase"] = "warming"
-                row["weights_resident_fraction"] = round(held / size, 2)
+                row["weights_resident_fraction"] = round(
+                    held / int(rec["bytes"]), 2)
             else:
                 row["phase"] = "serving"
         elif alive:
@@ -217,6 +227,8 @@ def _spawn_unlocked(path: str, port: int, tune: str = "default",
            # measured once here (a launch is the user acting); the polls
            # read it from this record, never the model folder
            "bytes": bytes_on_disk(path),
+           # its weights come and go by design (spawn.warming)
+           "embeds": embeds(path),
            "started": time.strftime("%Y-%m-%d %H:%M:%S"),
            "t": time.time(), "instance": instance}
     update_registry(lambda reg: reg.update({port: rec}))

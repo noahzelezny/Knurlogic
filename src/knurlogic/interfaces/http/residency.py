@@ -1,7 +1,8 @@
 """Endpoints for orchestration and ingest clients that manage what the
 server holds, in OpenAI's shapes:
 
-  /v1/models     capabilities (text / vision / thinking) and size_bytes
+  /v1/models     capabilities (text / vision / thinking; embeddings on
+                 an embedding server) and size_bytes
   /v1/residency  model, capabilities, memory_bytes, nodes, state
   /v1/ensure     {model, wait}: idempotent load or switch; 409 while
                  requests run, unless force
@@ -14,7 +15,6 @@ Design: docs/design/server.md (residency).
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 from . import lifecycle
 from .openai import ApiError
@@ -39,7 +39,7 @@ def _capabilities() -> list:
 def served(artifact, host):
     """-> a function giving /v1/models' one entry for what is served now
     (the artifact changes on a switch)."""
-    from knurlogic.machine.artifact import Artifact
+    from knurlogic.machine.artifact import Artifact, name_of
     memo = {"path": str(artifact.path), "art": artifact}
 
     def current() -> dict:
@@ -50,7 +50,7 @@ def served(artifact, host):
             except (OSError, ValueError, AttributeError):
                 memo.update(path=path, art=None)
         art = memo["art"]
-        return {"id": Path(path).name, "path": path,
+        return {"id": name_of(path), "path": path,
                 "created": int(host.loaded_at or 0),
                 "capabilities": _capabilities(),
                 "size_bytes": int(getattr(art, "bytes_on_disk", 0) or 0)}
@@ -80,6 +80,7 @@ def ensure(body: dict) -> dict:
 def residency(host, sched, port: int = 0) -> dict:
     from knurlogic.cluster import recovery
     from knurlogic.machine import identity, servers
+    from knurlogic.machine.artifact import name_of
     st = host.status()
     if st["state"] == "empty":
         return {"object": "list", "data": []}
@@ -88,7 +89,7 @@ def residency(host, sched, port: int = 0) -> dict:
             if port else None
     except (KeyError, AttributeError, TypeError, ValueError, OSError):
         rec = None
-    row = {"model": Path(st["model"] or "").name,
+    row = {"model": name_of(st["model"] or ""),
            "capabilities": _capabilities() if st["state"] == "ready"
            else ["text"],
            "memory_bytes": int(st.get("memory_bytes") or 0),

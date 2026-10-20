@@ -16,6 +16,7 @@ loads, and inference requests wait for it (they are queued, not refused).
   responses.py     the OpenAI Responses API, over the OpenAI one
   ollama.py        the Ollama API, over the OpenAI one
   residency.py     what the server holds: capabilities, ensure, unload
+  embeddings.py    an embedding model's server: /v1/embeddings
   prompt_cache.py  /v1/prompt-cache: save, drop, pin, park, list
   compaction.py    the chat path through context_management/
   telemetry.py     request ids, the ledger row, progress, /v1/usage

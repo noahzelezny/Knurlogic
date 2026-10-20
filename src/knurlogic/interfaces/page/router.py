@@ -1,5 +1,6 @@
 """The page's router to model servers: one address for every model here and
-on peers. POST /v1/messages, /v1/chat/completions and count_tokens by
+on peers. POST /v1/messages, /v1/chat/completions, count_tokens and
+/v1/embeddings by
 `model` (`route`; a model on two Macs is two instances, picked by
 `<id>@<machine>`, X-Knurlogic-Machine or the session: `pick`), the page's
 chat (`proxy_chat`), GET /v1/models (`route_models_document`), and the
@@ -219,10 +220,10 @@ def proxy_chat(handler, where: str, body: bytes) -> None:
 
 
 #: The paths the page's router forwards by `model`: the two chat surfaces
-#: a client pointed at this page (Claude Code, an OpenAI SDK) uses, and
-#: Claude Code's token count (it names the model too).
+#: a client pointed at this page (Claude Code, an OpenAI SDK) uses,
+#: Claude Code's token count (it names the model too), and embeddings.
 ROUTE_PATHS = ("/v1/messages", "/v1/chat/completions",
-               "/v1/messages/count_tokens")
+               "/v1/messages/count_tokens", "/v1/embeddings")
 
 
 ROUTE_S = 2.0

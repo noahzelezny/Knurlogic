@@ -39,6 +39,25 @@ def chat_template_at(path) -> str:
     return ""
 
 
+def name_of(path) -> str:
+    """A model's name: its folder's, or for a Hugging Face cache snapshot
+    (models--org--repo/snapshots/<sha>) the repo id, org/repo -- the name
+    /models.json lists and a client asks for, never the snapshot's hash."""
+    p = Path(path)
+    for parent in p.parents:
+        if parent.name.startswith("models--"):
+            return parent.name[len("models--"):].replace("--", "/")
+    return p.name
+
+
+def embeds(path) -> bool:
+    """Artifact.embeds for `path`; False where no artifact loads."""
+    try:
+        return Artifact.load(path).embeds
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
 @dataclass
 class Artifact:
     path: Path
@@ -65,6 +84,18 @@ class Artifact:
         / `vq_embed` instead. Keying on vq_modules alone called every dense
         rung "not a VQ artifact" and skips its kernel settings."""
         return bool(self.vq_modules or self.vq_other)
+
+    @property
+    def name(self) -> str:
+        return name_of(self.path)
+
+    @property
+    def embeds(self) -> bool:
+        """A text embedding model (Qwen3-Embedding). Its config is a causal
+        LM's, so sentence-transformers' modules.json says it, else its
+        name (name_of) does."""
+        return (self.path / "modules.json").is_file() or \
+            "embedding" in self.name.lower()
 
     @property
     def geometries(self) -> dict:

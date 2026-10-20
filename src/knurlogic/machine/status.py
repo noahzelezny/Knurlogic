@@ -77,7 +77,7 @@ def snapshot(artifact=None, arch_rows=None, env=None, requests=0,
         d["metrics"] = metrics
     if artifact is not None:
         d["artifact"] = {
-            "name": artifact.path.name,
+            "name": artifact.name,
             "path": str(artifact.path),
             "model_type": artifact.model_type,
             "size_bytes": artifact.bytes_on_disk,

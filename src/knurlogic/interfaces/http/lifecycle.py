@@ -1,5 +1,5 @@
 """The model server's life: serve() builds the host and the scheduler and
-binds every address (bind_all); switch() and unload() change what it
+binds every address (bind_gated); switch() and unload() change what it
 holds; watch_ring() stops a cluster rank whose ring failed; CURRENT is the
 running server's scheduler, for the page's actions built before it."""
 
@@ -38,10 +38,12 @@ def switch(model: str, *, force: bool = False, wait: bool = True,
     scheduler's thread. Idempotent. NotLoadable says why not; `force`
     switches even with requests running (they fail, saying so)."""
     from knurlogic.interfaces.load_checks import NotLoadable, prepare
+    from knurlogic.machine.artifact import name_of
     sched = CURRENT["scheduler"]
     host = sched.host
     st = host.status()
-    if not (model in ("", Path(host.path or "").name, host.path)
+    if not (model in ("", Path(host.path or "").name,
+                      name_of(host.path or ""), host.path)
             and st["state"] in ("ready", "loading", "warming")):
         freed = int(st.get("memory_bytes") or 0)
         a = prepare(model, served=host.path, freed_bytes=freed)
@@ -62,7 +64,7 @@ def switch(model: str, *, force: bool = False, wait: bool = True,
     if st["state"] == "failed":
         raise NotLoadable(500, f"loading {Path(st['model'] or '').name} "
                                f"failed: {st['error']}", "load_failed")
-    return {"model": Path(st["model"] or "").name, "state": st["state"],
+    return {"model": name_of(st["model"] or ""), "state": st["state"],
             "memory_bytes": int(st.get("memory_bytes") or 0)}
 
 
@@ -331,12 +333,7 @@ def serve(artifact, host: str, port: int, *, routes: dict | None = None,
               concurrency=lambda: res_api.concurrency(sched),
               residency=lambda: res_api.residency(mh, sched, port),
               ensure=res_api.ensure)
-    if host == "cluster":
-        # every address bound, only loopback and Thunderbolt answered --
-        # the same rule as the page's (cluster/links.Gate)
-        from knurlogic.cluster import links
-        app.gate, host = links.Gate(), "0.0.0.0"
-    servers = bind_all(app, host, port)
+    servers = bind_gated(app, host, port)
     httpd, extra = servers[0], servers[1:]
     for srv in extra:
         threading.Thread(target=srv.serve_forever, daemon=True).start()
@@ -361,6 +358,16 @@ def serve(artifact, host: str, port: int, *, routes: dict | None = None,
 
 def _url_host(h: str) -> str:
     return f"[{h}]" if ":" in h else h
+
+
+def bind_gated(app, host: str, port: int, make=None) -> list:
+    """bind_all, with `host` "cluster" meaning every address bound and only
+    loopback and Thunderbolt answered -- the same rule as the page's
+    (cluster/links.Gate), set on `app.gate`."""
+    if host == "cluster":
+        from knurlogic.cluster import links
+        app.gate, host = links.Gate(), "0.0.0.0"
+    return bind_all(app, host, port, make)
 
 
 def bind_all(app, host: str, port: int, make=None) -> list:

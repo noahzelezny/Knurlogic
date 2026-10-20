@@ -208,18 +208,13 @@ def _weights_bytes(d: Path, depth: int = 1) -> int:
 
 def _from_config_dir(d: Path, store: str) -> Found | None:
     """A directory that carries a config.json is an artifact we can read."""
-    from knurlogic.machine.artifact import Artifact, mtp_head_file
+    from knurlogic.machine.artifact import Artifact, mtp_head_file, name_of
     try:
         a = Artifact.load(d)
     except (OSError, ValueError, AttributeError):
         return None
     size = a.bytes_on_disk or _weights_bytes(d)
-    name = d.name
-    # An HF cache entry's real name lives two levels up: models--org--repo.
-    for parent in d.parents:
-        if parent.name.startswith("models--"):
-            name = parent.name[len("models--"):].replace("--", "/")
-            break
+    name = name_of(d)
     # A config.json with no weights beside it is an interrupted or evicted
     # download, not a model. Two of these sat in the hub cache here and read
     # as 0 GiB artifacts -- which then dragged their whole model group into

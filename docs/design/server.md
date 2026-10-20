@@ -152,6 +152,24 @@ OpenAI shapes plus:
    on `/v1/residency`. Ingest is often prefill- or image-bound, where the
    hint is weaker.
 
+### Embeddings
+
+An embedding artifact (`Artifact.embeds`: the name says `Embedding`, or
+sentence-transformers' `modules.json`; its config is a causal LM's, so
+nothing else tells) gets its own server, `interfaces/http/embeddings.py`,
+in place of the scheduler: `serve.run` branches before the chat launch
+settings, since none apply. It answers `POST /v1/embeddings` and the
+listing routes every server has, so the page's survey, router, relay and
+unload treat it as a model. `engine/embeddings.Embedder` holds the
+weights: loaded through `engine.model.load` (the load lock) at launch, one
+forward pass per text under one lock, dropped after `IDLE_S` with no
+request and loaded again by the next. Its mlx buffer pool is held to
+`CACHE_LIMIT_GIB` (set_cache_limit): unbounded it grew 0.64 -> 3.21 GiB
+over a 7k-text run. The pooling is Qwen3-Embedding's: mlx-lm's
+qwen3 trunk (`model.model`, final norm applied), last token, L2 norm --
+what mlx_embeddings computes, without that library. A model_type with
+no recipe in `POOLING` is refused at serve; so is a split.
+
 ### Requests: running and waiting
 
 Any number of requests may wait. The server decides how many run at once

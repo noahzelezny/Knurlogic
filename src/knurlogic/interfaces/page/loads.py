@@ -454,7 +454,7 @@ def load_progress(doc: dict) -> list:
         elif r is None or r.get("state") == "loading":
             e["phase"] = ("stalled" if spawn.stalled(pid, quiet, e["bytes"], now)
                           else "loading")
-        elif e["total_bytes"] and e["bytes"] < spawn.WARM_FRACTION * e["total_bytes"]:
+        elif spawn.warming(rec, e["bytes"], e["total_bytes"]):
             e["phase"] = "warming"
         else:
             e["phase"] = "ready"

@@ -21,11 +21,12 @@ def ready(**_) -> dict[str, Any]:
     so a fit measured now would be stale.
     """
     from knurlogic.interfaces import spawn
+    from knurlogic.machine.artifact import name_of
     # A second load let through while the first was still reading weights,
     # on a budget that did not yet count them, is the race this gate ends.
     blockers = [{"what": "a knurlogic server is still loading",
                  "detail": {"port": c["port"],
-                            "artifact": (c["artifact"] or "").split("/")[-1],
+                            "artifact": name_of(c["artifact"] or ""),
                             "phase": c["phase"],
                             "seconds": c["seconds_since_start"],
                             "last_log_line": c.get("last_log_line", "")},

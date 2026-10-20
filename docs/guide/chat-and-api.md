@@ -10,7 +10,7 @@ name.
 | address | use it when |
 |---|---|
 | the model's own port, e.g. `http://127.0.0.1:8080` | one model; everything below is served here |
-| the page, `http://127.0.0.1:8899` | several models, here or on other Macs: it forwards `POST /v1/chat/completions`, `/v1/messages` and `/v1/messages/count_tokens` to the server whose model id the request's `model` names. Its `GET /v1/models` lists every model it can reach, with the machine each runs on. |
+| the page, `http://127.0.0.1:8899` | several models, here or on other Macs: it forwards `POST /v1/chat/completions`, `/v1/messages`, `/v1/messages/count_tokens` and `/v1/embeddings` to the server whose model id the request's `model` names. Its `GET /v1/models` lists every model it can reach, with the machine each runs on. |
 
 `GET /v1/models` on a model server returns the one model it serves. Use its
 `id`, or on the page, the id you want routed to.
@@ -64,12 +64,36 @@ because a local model is slower than the hosted one. Pointed at the page
 | `POST /v1/messages/count_tokens` | Anthropic token count |
 | `POST /v1/responses` | OpenAI Responses: function tools, streaming, reasoning summaries |
 | `POST /api/chat`, `/api/generate`, `/api/show`; `GET /api/tags`, `/api/version` | Ollama (streaming NDJSON by default) |
-| `GET /v1/models` | the model: `id`, `status` (`loading`, `ready`, `failed`, or why memory is short), `capabilities` (text, vision, thinking), `size_bytes`, `context_length`, `sampling_defaults`, `thinking` levels |
+| `GET /v1/models` | the model: `id`, `status` (`loading`, `ready`, `failed`, or why memory is short), `capabilities` (text, vision, thinking; embeddings for an embedding model), `size_bytes`, `context_length`, `sampling_defaults`, `thinking` levels |
 | `GET /health` | `{"status": "ok", ...}` |
 | `GET /v1/residency` | the model, its memory, state, requests waiting and running, recovery |
 | `POST /v1/ensure` | load or switch to a model ([loading-models.md](loading-models.md)) |
 | `GET /v1/usage` | request rollups, loopback only ([usage-and-telemetry.md](usage-and-telemetry.md)) |
 | `/v1/prompt-cache...` | the prompt cache, loopback only ([prompt-cache.md](prompt-cache.md)) |
+
+## Embeddings
+
+An embedding model (Qwen3-Embedding: a folder or Hugging Face entry whose
+name says `Embedding`, or one with sentence-transformers' `modules.json`)
+loads like any other model, on either Mac, from the page or `POST
+/loaded.json`, and is listed in `GET /v1/models` with `capabilities:
+["embeddings"]`. Its server answers one thing:
+
+| endpoint | |
+|---|---|
+| `POST /v1/embeddings` | OpenAI embeddings: `{"input": "text" or ["text", ...], "model": ...}` -> `{"object": "list", "data": [{"object": "embedding", "index", "embedding": [...]}], "model", "usage"}` |
+
+plus `GET /v1/models`, `/health`, `/v1/residency` and `/status.json`.
+Each vector is the last token's final hidden state, L2-normalized,
+from one forward pass per text (no padding), the text cut to 512 tokens.
+`encoding_format: "base64"` returns little-endian float32; token-array
+inputs and `dimensions` are refused with a 400. The weights are dropped
+after 10 minutes with no request and loaded again by the next one (a
+second or two), so the ~320 MiB model stays out of a big model's way;
+the server itself stays up until it is unloaded. A model from the Hugging Face
+cache is named by its repo id (`mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ`),
+as in `/models.json`. Through the page (`http://127.0.0.1:8899/v1/embeddings`)
+the request reaches the embedder on whichever Mac holds it.
 
 The Responses API keeps no conversation: `previous_response_id` and
 `store: true` are refused, so resend the input.
