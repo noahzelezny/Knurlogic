@@ -375,7 +375,7 @@ output minus the tail; it saves time, it cannot make a model more right.
   breaks inside batched, drafted decoding without slowing it, and
   storing it with the request.
 
-**A second model, and every quant of it** (2026-10-19 evening).
+**More models, and every quant of one** (2026-10-19 evening).
 - Qwen3.6-35B-A3B VQ-4.6, thinking on, the same 41 problems x 2 (82
   traces, 940 points): probe AUC 0.95 at layer 26 of 40 (~65% depth;
   position 0.909); the stop at 0.9 keeps 80/82 right at 41% of the
@@ -391,6 +391,13 @@ output minus the tail; it saves time, it cannot make a model more right.
   small it is not expected to change the answer.
 - (The walker hooks the decoder layer class: the 35B iterates
   `pipeline_layers`, a list rebuilt on every access.)
+- A third family, Gemma 4 26B-A4B VQ-6.2 (thinking on; 41 traces, one
+  sample each, all right): probe AUC 0.92 at layer 19 of 30 (position
+  0.89); the stop at 0.95 keeps 39/41 at 33% of the thinking, 0.99 keeps
+  40/41 at 51%.
+- **The layer to read sits at about two-thirds of the depth** in all three
+  families (Gemma 19/30, the 35B 26/40, the Flash 32-40/48): a default for
+  onboarding a new model without a layer search.
 
 **A state monitor from the same signal** (Noah, 2026-10-19): streamed with
 the thinking, the confidence gives a harness a glance at each worker --
