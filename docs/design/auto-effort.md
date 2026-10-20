@@ -363,9 +363,9 @@ output minus the tail; it saves time, it cannot make a model more right.
   auto serves the model's own default and collects traces in the
   background; once it has enough it switches itself on. The page shows it
   per model: "auto: learning (120/300 traces)", then "auto: ready". A
-  probe belongs to one exact model (its weights; another quant or size is
-  another model), so the learning is once per model; whether a probe
-  carries across a family is untested.
+  probe belongs to a model, and serves all its quants (measured below on
+  the 35B: VQ-3.4 to 8-bit, drop <= 0.002); another size is another model.
+  The learning is once per model.
 - **Enough, then stop:** collection ends by itself once a model and task
   type has a few hundred traces (82 per level gave AUC 0.98 here), and
   resumes only when the model changes (a new quant, a template change) to
@@ -374,6 +374,23 @@ output minus the tail; it saves time, it cannot make a model more right.
 - **The work in the engine:** reading one layer's state at paragraph
   breaks inside batched, drafted decoding without slowing it, and
   storing it with the request.
+
+**A second model, and every quant of it** (2026-10-19 evening).
+- Qwen3.6-35B-A3B VQ-4.6, thinking on, the same 41 problems x 2 (82
+  traces, 940 points): probe AUC 0.95 at layer 26 of 40 (~65% depth;
+  position 0.909); the stop at 0.9 keeps 80/82 right at 41% of the
+  thinking (81/82 to the end). The signal is not one model's quirk.
+- Every other quant of that model walked the same traces: VQ-3.4, 3.8,
+  5.4 and mlx-community's 8-bit (affine, another method). The 4.6's probe
+  reads each as well as that quant's own probe -- AUC drop at most 0.002
+  (+- 0.002) at every layer, 3 seeds, held out by problem -- and its stop
+  at 0.95 keeps 80-81/82 at 48-49% of the thinking on each. **One probe
+  per model serves all its quants**: onboarding learns once, and a new
+  quant (a 4-bit DWQ) needs no learning. Untested: each quant reading its
+  own generated thinking (here all read the 4.6's text); with drops this
+  small it is not expected to change the answer.
+- (The walker hooks the decoder layer class: the 35B iterates
+  `pipeline_layers`, a list rebuilt on every access.)
 
 **A state monitor from the same signal** (Noah, 2026-10-19): streamed with
 the thinking, the confidence gives a harness a glance at each worker --
@@ -399,7 +416,7 @@ The monitor is the harness's (Chuck); knurlogic streams the number.
 **Next:**
 - the same on GLM-5.3 at max (both Macs, when the cluster is free): its
   own traces, does the stop end the thinking that never finishes;
-- on the single-Mac models meanwhile (Qwen3.6-35B on/off, Qwen3.8-27B):
+- the remaining single-Mac model (Qwen3.8-27B; the 35B is done, below):
   does the direction exist there too, and at what layer depth;
 - probe training as a step of onboarding a new model
   (docs/design/new-model.md), once the stop is a feature;
