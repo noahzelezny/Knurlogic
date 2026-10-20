@@ -293,6 +293,23 @@ method below is enough to redo it):
   the end is 76/82 at 65k. On this model `low` stays the better default;
   the probe pays where a model's own setting will not stop (GLM-5.3 at
   max).
+- Properly fitted (scikit-learn logistic regression, standardized,
+  C=0.01, 5 folds by problem; the hand-written trainer above was
+  undertrained), the `xhigh` probe reads AUC 0.98-0.99 and stops better.
+  First point over the threshold, layer 40 (to the end: 80/82 at 312k):
+  0.99 -> 78/82 at 41%; **0.9 -> 77/82 at 30%** (94k tokens); 0.8 ->
+  74/82 at 24%; 0.5 -> 72/82 at 21% (64k, about `low`'s tokens). The
+  threshold is a smooth knob from "answer as soon as it believes it" to
+  "keep checking".
+- No label had to be guessed: the first principal component of the
+  hidden state, found with no labels, separates right from wrong at AUC
+  0.95-0.96. It moves with position (correlation 0.76) but beats it where
+  the stop decides: 0.89-0.90 vs 0.82 in the first 30% of the thinking,
+  0.87-0.89 vs 0.79 in 30-60%. "The model has settled on an answer" is
+  the main thing the hidden state tracks while it thinks.
+- Nonlinear readers add nothing: held-out AUC, linear 0.987 (layer 32),
+  boosted trees 0.978, a small network 0.974; all five layers together
+  0.986. One direction in one layer carries it.
 
 **The effort knob this suggests** (Noah): not a level of text the model
 was trained to think longer on, but the probe's threshold -- how sure the
@@ -314,8 +331,12 @@ lost answers stay lost because the model itself was settled on a wrong
 answer at that point -- no probe of its state can see past that.
 
 **Next:**
-- the same on GLM-5.3 at max (both Macs): its own traces, does the stop
-  end the thinking that never finishes;
+- the same on GLM-5.3 at max (both Macs, when the cluster is free): its
+  own traces, does the stop end the thinking that never finishes;
+- on the single-Mac models meanwhile (Qwen3.6-35B on/off, Qwen3.8-27B):
+  does the direction exist there too, and at what layer depth;
+- probe training as a step of onboarding a new model
+  (docs/design/new-model.md), once the stop is a feature;
 - finer checks (every paragraph, not 12 per trace), and a probe that does
   not need answers with one checkable value (agent turns, prose) -- what
   it is trained on there is the open question;
