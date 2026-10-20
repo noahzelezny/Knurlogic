@@ -6,9 +6,11 @@ below (2026-10-18/19) turned it into **default low, escalate on demand**:
 the model asks for more thinking, as a tool, after it has tried. knurlogic
 builds the mechanism; harnesses (Chuck) own the outcome data.
 
-Testing paused 2026-10-19 (Noah): nothing so far shows a level improving
-what a model can do enough to be worth chasing; the escalation test below
-is written down in case that changes.
+Level testing paused 2026-10-19 (Noah): nothing showed a level improving
+what a model can do enough to be worth chasing. The same day the thread
+turned to **a probe on the hidden state** (below): stop the thinking when
+the model has its answer, with the probe's threshold as the effort knob --
+what an effort setting should have been.
 
 ## Why now
 
@@ -243,6 +245,83 @@ the rerun.
    sufficient level).
 Offered where it beats always-low on accuracy at a modest token cost;
 always-low is the default it has to beat.
+
+## A probe on the hidden state: stop when the model has its answer (2026-10-19)
+
+A level asks the model to think longer; nothing tells it to stop. The
+hidden state carries "the working answer is right" before the thinking
+ends, and a linear probe reads it with one dot product.
+
+**Experiment** (Qwen3.8-Flash-Next VQ-2.1bpw, the 41 problems above with
+known answers; the scripts were one-off and are not in the repo -- the
+method below is enough to redo it):
+1. traces: every problem at `low` (2 samples, 82) and at `xhigh` (2
+   samples, 82), full reasoning kept;
+2. one pass per trace in-process: at up to 12 paragraph breaks, keep the
+   hidden state of layers 12/24/32/40/47 at the break, and -- on a copy
+   of the cache -- close the think block and let the model write only its
+   answer, greedily. Right or wrong is the label ("would it be right if it
+   stopped here?"). Matches the server's forced answers 26/26;
+3. logistic regression per layer, trained on half the problems, scored on
+   the other half (split by problem), 10-20 repeats.
+
+**Results.**
+- The signal is real and not position: on non-final points at `low`,
+  probe AUC 0.878 (layer 32) against 0.517 for what a live server knows
+  (thinking so far) and 0.832 for fraction-through (needs the end);
+  0.72-0.74 inside the 50-80% band, where position gives 0.55. Layers
+  24-40 read best.
+- It transfers: trained on `low`, it scores `xhigh` points at AUC 0.90-
+  0.91. But calibrated for `low` it stops `xhigh` late; a probe is trained
+  (or calibrated) per level -- mixing levels made it worse.
+- As a stop, at `xhigh` (80/82 right thinking to the end, 312k thinking
+  tokens), with the first, undertrained probe: trained on `xhigh`, layer 40, stop at the first point
+  over 0.8 -> **77/82 right at 36% of the thinking**. The probe-free rule
+  "force an answer at each break, stop when it repeats 3 times" -> 77/82 at
+  56%, and costs a forced answer per check.
+- At `low` there is little to cut (the model stops soon after it has the
+  answer): 76/82 kept at 96%.
+- Where the thinking goes: by the median problem the forced answer is
+  first right at ~790 chars at `low`, ~1390 at `xhigh` (1.7x later), and
+  64% of `xhigh`'s thinking comes after the answer was already there (24%
+  at `low`).
+- The 3 answers the stop lost were the model confidently wrong, later
+  caught by its own re-checking (1363 for 1365 at ~1.2k tokens, fixed by
+  2.7k; 381 for 781 at 13k, fixed at 19k). The probe reads confidence, not
+  truth; the long tail's value is these rare corrections.
+- Against `low`: `xhigh` + probe stop is 77/82 at 113k tokens; `low` to
+  the end is 76/82 at 65k. On this model `low` stays the better default;
+  the probe pays where a model's own setting will not stop (GLM-5.3 at
+  max).
+
+**The effort knob this suggests** (Noah): not a level of text the model
+was trained to think longer on, but the probe's threshold -- how sure the
+model must be before knurlogic closes the think block. Low threshold:
+answer as soon as it believes it has it; high: keep checking. The model
+thinks as long as it needs and no longer, with no token cap; the knob is
+a confidence, which a user can reason about, and its effect (tokens and
+answers lost per threshold) is measured per model.
+
+**A second probe: doubt** (Noah) -- "the answer will still change", where
+confidence reads "it is right". Label: the forced answer here differs from
+the trace's final one (24% of non-final points at `xhigh`). It reads very
+well (AUC 0.98), but it is the confidence probe's mirror: their scores
+correlate at -0.99, and 1 - confidence detects the same points (AUC 0.98).
+Requiring low doubt on top of high confidence buys at most one answer at
+9 more points of thinking (layer 40: 78/82 at 45%). On these traces the
+model's hidden state carries one direction for "settled", not two. The
+lost answers stay lost because the model itself was settled on a wrong
+answer at that point -- no probe of its state can see past that.
+
+**Next:**
+- the same on GLM-5.3 at max (both Macs): its own traces, does the stop
+  end the thinking that never finishes;
+- finer checks (every paragraph, not 12 per trace), and a probe that does
+  not need answers with one checkable value (agent turns, prose) -- what
+  it is trained on there is the open question;
+- in the engine: read the chosen layer's state at paragraph breaks inside
+  batched, drafted decoding without slowing it, and close the think block
+  (the GLM "off" path already does).
 
 ## Open
 
