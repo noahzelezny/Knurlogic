@@ -108,3 +108,12 @@ def test_warm_loads_at_launch_and_a_failure_is_only_said():
     bad = E.Embedder("/models/x", load=load)
     bad.warm()
     assert bad.status()["state"] == "failed"
+
+
+def test_the_load_bounds_mlxs_buffer_pool(monkeypatch):
+    from knurlogic.engine import model as M
+    seen = []
+    monkeypatch.setattr(M, "set_cache_limit", seen.append)
+    monkeypatch.setattr(M, "load", lambda p: ("model", "tok"))
+    assert E._load("/models/x") == ("model", "tok")
+    assert seen == [E.CACHE_LIMIT_GIB]

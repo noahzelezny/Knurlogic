@@ -39,6 +39,17 @@ def chat_template_at(path) -> str:
     return ""
 
 
+def name_of(path) -> str:
+    """A model's name: its folder's, or for a Hugging Face cache snapshot
+    (models--org--repo/snapshots/<sha>) the repo id, org/repo -- the name
+    /models.json lists and a client asks for, never the snapshot's hash."""
+    p = Path(path)
+    for parent in p.parents:
+        if parent.name.startswith("models--"):
+            return parent.name[len("models--"):].replace("--", "/")
+    return p.name
+
+
 @dataclass
 class Artifact:
     path: Path
@@ -67,17 +78,16 @@ class Artifact:
         return bool(self.vq_modules or self.vq_other)
 
     @property
+    def name(self) -> str:
+        return name_of(self.path)
+
+    @property
     def embeds(self) -> bool:
         """A text embedding model (Qwen3-Embedding). Its config is a causal
-        LM's, so sentence-transformers' modules.json says it, else the
-        name does: the folder's, or for a Hugging Face cache snapshot the
-        cache entry's (models--org--name)."""
-        if (self.path / "modules.json").is_file():
-            return True
-        names = [self.path.name]
-        if self.path.parent.name == "snapshots":
-            names.append(self.path.parent.parent.name)
-        return any("embedding" in n.lower() for n in names)
+        LM's, so sentence-transformers' modules.json says it, else its
+        name (name_of) does."""
+        return (self.path / "modules.json").is_file() or \
+            "embedding" in self.name.lower()
 
     @property
     def geometries(self) -> dict:

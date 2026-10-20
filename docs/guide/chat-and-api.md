@@ -90,7 +90,9 @@ from one forward pass per text (no padding), the text cut to 512 tokens.
 inputs and `dimensions` are refused with a 400. The weights are dropped
 after 10 minutes with no request and loaded again by the next one (a
 second or two), so the ~320 MiB model stays out of a big model's way;
-the server itself stays up until it is unloaded. Through the page (`http://127.0.0.1:8899/v1/embeddings`)
+the server itself stays up until it is unloaded. A model from the Hugging Face
+cache is named by its repo id (`mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ`),
+as in `/models.json`. Through the page (`http://127.0.0.1:8899/v1/embeddings`)
 the request reaches the embedder on whichever Mac holds it.
 
 The Responses API keeps no conversation: `previous_response_id` and

@@ -163,7 +163,9 @@ listing routes every server has, so the page's survey, router, relay and
 unload treat it as a model. `engine/embeddings.Embedder` holds the
 weights: loaded through `engine.model.load` (the load lock) at launch, one
 forward pass per text under one lock, dropped after `IDLE_S` with no
-request and loaded again by the next. The pooling is Qwen3-Embedding's: mlx-lm's
+request and loaded again by the next. Its mlx buffer pool is held to
+`CACHE_LIMIT_GIB` (set_cache_limit): unbounded it grew 0.64 -> 3.21 GiB
+over a 7k-text run. The pooling is Qwen3-Embedding's: mlx-lm's
 qwen3 trunk (`model.model`, final norm applied), last token, L2 norm --
 what mlx_embeddings computes, without that library. A model_type with
 no recipe in `POOLING` is refused at serve; so is a split.

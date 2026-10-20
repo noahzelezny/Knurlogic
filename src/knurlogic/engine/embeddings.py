@@ -36,6 +36,12 @@ MAX_TOKENS = 512
 #: of memory costs more.
 IDLE_S = 600.0
 
+#: mlx's freed-buffer pool for this process, GiB. Unbounded it held the
+#: embedder at 3.21 GiB after 7,151 texts (0.64 GiB after load, the M3
+#: live test 2026-10-19); a burst leaves ~64 MB pooled (Scout's
+#: measurement), so 256 MiB costs no speed.
+CACHE_LIMIT_GIB = 0.25
+
 #: How often the idle watch looks, seconds.
 WATCH_S = 30.0
 
@@ -65,8 +71,15 @@ def clip(ids: list, max_tokens: int = MAX_TOKENS) -> list:
 
 
 def _load(path: str):
-    from knurlogic.engine.model import load
-    return load(path)
+    """The model and tokenizer, with mlx's buffer pool bounded
+    (CACHE_LIMIT_GIB) and the load's leftovers freed."""
+    import mlx.core as mx
+
+    from knurlogic.engine.model import load, set_cache_limit
+    set_cache_limit(CACHE_LIMIT_GIB)
+    got = load(path)
+    mx.clear_cache()
+    return got
 
 
 class Embedder:

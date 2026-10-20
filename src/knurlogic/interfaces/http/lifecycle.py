@@ -38,10 +38,12 @@ def switch(model: str, *, force: bool = False, wait: bool = True,
     scheduler's thread. Idempotent. NotLoadable says why not; `force`
     switches even with requests running (they fail, saying so)."""
     from knurlogic.interfaces.load_checks import NotLoadable, prepare
+    from knurlogic.machine.artifact import name_of
     sched = CURRENT["scheduler"]
     host = sched.host
     st = host.status()
-    if not (model in ("", Path(host.path or "").name, host.path)
+    if not (model in ("", Path(host.path or "").name,
+                      name_of(host.path or ""), host.path)
             and st["state"] in ("ready", "loading", "warming")):
         freed = int(st.get("memory_bytes") or 0)
         a = prepare(model, served=host.path, freed_bytes=freed)
@@ -62,7 +64,7 @@ def switch(model: str, *, force: bool = False, wait: bool = True,
     if st["state"] == "failed":
         raise NotLoadable(500, f"loading {Path(st['model'] or '').name} "
                                f"failed: {st['error']}", "load_failed")
-    return {"model": Path(st["model"] or "").name, "state": st["state"],
+    return {"model": name_of(st["model"] or ""), "state": st["state"],
             "memory_bytes": int(st.get("memory_bytes") or 0)}
 
 

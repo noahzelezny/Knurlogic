@@ -24,7 +24,6 @@ import struct
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, urlparse
 
@@ -194,7 +193,7 @@ def make_server(app: EmbeddingApp, host: str, port: int):
 def served(artifact, embedder) -> Callable[[], dict]:
     """/v1/models' one entry for the embedding model."""
     def current() -> dict:
-        return {"id": artifact.path.name, "path": str(artifact.path),
+        return {"id": artifact.name, "path": str(artifact.path),
                 "created": int(embedder.loaded_at or 0),
                 "capabilities": ["embeddings"],
                 "size_bytes": int(artifact.bytes_on_disk or 0)}
@@ -212,7 +211,7 @@ def status_fn(artifact, embedder) -> Callable:
             artifact=artifact, requests=requests, node="local",
             memory_fn=engine.process_memory)])
         snap["load"] = embedder.status()
-        return snap, (f"{artifact.path.name}: embedding model, "
+        return snap, (f"{artifact.name}: embedding model, "
                       f"{embedder.state}")
     return status_doc
 
@@ -250,7 +249,7 @@ def serve(artifact, host: str, port: int, *,
     for srv in servers[1:]:
         threading.Thread(target=srv.serve_forever, daemon=True).start()
     print(f"knurlogic embeddings on http://{host.split(',', 1)[0]}:{port}"
-          f"{EMBEDDINGS_PATH} ({Path(artifact.path).name}, dropped after "
+          f"{EMBEDDINGS_PATH} ({artifact.name}, dropped after "
           f"{embedder.idle_s:.0f} s idle, loaded again on demand)",
           flush=True)
     try:

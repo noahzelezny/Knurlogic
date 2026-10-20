@@ -180,3 +180,26 @@ def test_serve_refuses_an_unknown_recipe_or_a_split(tmp_path, model_type,
     art = Artifact.load(tmp_path)
     assert serve.serve_embeddings(art, "127.0.0.1", 0, None, ring) \
         == REFUSED_EXIT
+
+
+def test_a_hugging_face_snapshot_is_served_by_its_repo_id(tmp_path):
+    """models--org--repo/snapshots/<sha>: the id a client asks for is
+    org/repo, as /models.json names it, never the hash -- on a chat
+    model's /v1/models and residency as on an embedder's."""
+    from knurlogic.interfaces.http import residency
+    from knurlogic.machine.artifact import name_of
+    p = tmp_path.joinpath("hub", "models--mlx-community--Qwen3-Embedding-"
+                          "0.6B-4bit-DWQ", "snapshots", "6c3ae708")
+    p.mkdir(parents=True)
+    (p / "config.json").write_text('{"model_type": "qwen3"}')
+    art = Artifact.load(p)
+    want = "mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ"
+    assert name_of(p) == art.name == want
+    assert name_of(tmp_path / "Qwen3-8B") == "Qwen3-8B"
+    assert H.served(art, FakeEmbedder())()["id"] == want
+
+    class Host:
+        path, loaded_at = str(p), 0.0
+    assert residency.served(art, Host())()["id"] == want
+    snap, _ = H.status_fn(art, FakeEmbedder())(0)
+    assert snap["artifact"]["name"] == want
