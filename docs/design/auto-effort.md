@@ -330,6 +330,39 @@ model's hidden state carries one direction for "settled", not two. The
 lost answers stay lost because the model itself was settled on a wrong
 answer at that point -- no probe of its state can see past that.
 
+**Learning it from use, not from a test set** (Noah, 2026-10-19). The
+label need not be the true answer: "does the forced answer here match the
+model's final answer" read as well as correctness (AUC 0.98, the same
+direction), and the server sees every request's final answer. It is also
+the right target for a stop -- one that fires when the answer already
+matches what the model would end up saying gives the thinking-to-the-end
+output minus the tail; it saves time, it cannot make a model more right.
+- **An opt-in setting, "collect thinking traces"** (off by default; local
+  only): while serving, keep the hidden state of one layer at paragraph
+  breaks in the thinking (8-40 KB a point) and the request's final answer.
+- **Idle-time labelling:** replay a sample of kept reasoning (prefill
+  only, as the walker does) and force the answer at the breaks; the match
+  with the final answer is the label.
+- **Fit and calibrate per model:** a logistic regression, seconds; the
+  threshold from how often a stop changes the answer; served only once a
+  held-out match rate clears a bar. Before any labels, the no-label first
+  component (0.95 above) may serve as a starting stop -- untested.
+- **Agent turns** mostly end in a tool call, and tool calls compare
+  exactly (the same function and arguments): "would the forced call here
+  be the final one" is a clean label for most of Chuck's traffic. Prose
+  answers stay hard to compare.
+- **By task type:** a request says what it is -- the client's role
+  (X-Client-Role), whether tools were sent, the kind of answer (a number,
+  a tool call, prose) -- and the hidden states may cluster by task on
+  their own. Probes and thresholds can be kept per task type, so a math
+  calibration does not decide when an agent stops.
+- **Volume:** both Macs served about 21,000 requests (4.7M output tokens)
+  in the week to 2026-10-19, mostly Chuck; a small sample of a week or two
+  is far more than the 164 traces that showed the signal here.
+- **The work in the engine:** reading one layer's state at paragraph
+  breaks inside batched, drafted decoding without slowing it, and
+  storing it with the request.
+
 **Next:**
 - the same on GLM-5.3 at max (both Macs, when the cluster is free): its
   own traces, does the stop end the thinking that never finishes;
@@ -340,9 +373,8 @@ answer at that point -- no probe of its state can see past that.
 - finer checks (every paragraph, not 12 per trace), and a probe that does
   not need answers with one checkable value (agent turns, prose) -- what
   it is trained on there is the open question;
-- in the engine: read the chosen layer's state at paragraph breaks inside
-  batched, drafted decoding without slowing it, and close the think block
-  (the GLM "off" path already does).
+- in the engine: the state reading above, and closing the think block
+  when the probe fires (the GLM "off" path already closes one).
 
 ## Open
 
