@@ -50,6 +50,14 @@ def name_of(path) -> str:
     return p.name
 
 
+def embeds(path) -> bool:
+    """Artifact.embeds for `path`; False where no artifact loads."""
+    try:
+        return Artifact.load(path).embeds
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
 @dataclass
 class Artifact:
     path: Path

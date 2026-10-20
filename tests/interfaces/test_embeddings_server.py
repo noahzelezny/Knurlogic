@@ -203,3 +203,43 @@ def test_a_hugging_face_snapshot_is_served_by_its_repo_id(tmp_path):
     assert residency.served(art, Host())()["id"] == want
     snap, _ = H.status_fn(art, FakeEmbedder())(0)
     assert snap["artifact"]["name"] == want
+
+
+@pytest.mark.parametrize("embeds, phase", [(True, "serving"),
+                                           (False, "warming")])
+def test_an_idle_dropped_embedder_does_not_block_a_load(monkeypatch,
+                                                        tmp_path, embeds,
+                                                        phase):
+    """Its weights dropped on idle, an embedder answers holding a fraction
+    of its size: that is not memory about to move, so the MCP's ready and
+    the page's load check are not held up by it (a chat model is)."""
+    from knurlogic.interfaces import spawn
+    from knurlogic.interfaces.mcp import inspection
+    from knurlogic.machine import loadlock
+    log = tmp_path / "e.log"
+    log.write_text("dropped\n")
+    snap = tmp_path.joinpath("models--org--Qwen3-Embedding-x", "snapshots",
+                             "6c3ae708")
+    rec = {"pid": 100, "artifact": str(snap), "log": str(log),
+           "t": 0.0, "bytes": 1000, "embeds": embeds}
+    monkeypatch.setattr(spawn, "registry", lambda: {8080: rec})
+    monkeypatch.setattr(spawn, "is_our_server", lambda pid: True)
+    monkeypatch.setattr(spawn, "answers", lambda port: True)
+    monkeypatch.setattr(spawn.footprint, "memory_map", lambda: {
+        "processes": [{"pid": 100, "bytes": 100}]})
+    monkeypatch.setattr(loadlock, "holder", lambda: None)
+    (c,) = spawn.children()
+    assert c["phase"] == phase
+    got = inspection.ready()
+    assert got["ready"] is embeds
+    if not embeds:      # the blocker names the model, not the hash
+        assert got["blockers"][0]["detail"]["artifact"] == \
+            "org/Qwen3-Embedding-x"
+
+
+def test_a_launch_records_that_it_embeds(tmp_path):
+    from knurlogic.machine.artifact import embeds
+    p = tmp_path / "Qwen3-Embedding-0.6B"
+    p.mkdir()
+    (p / "config.json").write_text('{"model_type": "qwen3"}')
+    assert embeds(p) and not embeds(tmp_path / "missing")
