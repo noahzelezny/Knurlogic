@@ -1,16 +1,15 @@
-# Auto effort: the model sets its own thinking level
+# Auto effort: the model thinks until it has its answer
 
-Status: design, not built. Started 2026-10-18 as an `auto` level, the
-model rating the request's difficulty before answering; the measurements
-below (2026-10-18/19) turned it into **default low, escalate on demand**:
-the model asks for more thinking, as a tool, after it has tried. knurlogic
-builds the mechanism; harnesses (Chuck) own the outcome data.
+Status: design, not built. **Thinking: auto** is a probe on the model's
+hidden state that closes the think block when the model has its answer;
+its threshold is the effort knob (the probe sections below, 2026-10-19).
+It learns per model from served traffic, then switches itself on.
 
-Level testing paused 2026-10-19 (Noah): nothing showed a level improving
-what a model can do enough to be worth chasing. The same day the thread
-turned to **a probe on the hidden state** (below): stop the thinking when
-the model has its answer, with the probe's threshold as the effort knob --
-what an effort setting should have been.
+How it got here: started 2026-10-18 as the model rating the request's
+difficulty before answering; the runs turned that into "default low,
+escalate on demand" (the model asks for more thinking after trying), and
+level testing paused when no level improved what a model can do enough to
+chase. The sections below keep that record in order.
 
 ## Why now
 
@@ -359,6 +358,19 @@ output minus the tail; it saves time, it cannot make a model more right.
 - **Volume:** both Macs served about 21,000 requests (4.7M output tokens)
   in the week to 2026-10-19, mostly Chuck; a small sample of a week or two
   is far more than the 164 traces that showed the signal here.
+- **What a user sees** (Noah): one setting, **Thinking: auto** -- the
+  model thinks until it has its answer, then stops. While a model is new,
+  auto serves the model's own default and collects traces in the
+  background; once it has enough it switches itself on. The page shows it
+  per model: "auto: learning (120/300 traces)", then "auto: ready". A
+  probe belongs to one exact model (its weights; another quant or size is
+  another model), so the learning is once per model; whether a probe
+  carries across a family is untested.
+- **Enough, then stop:** collection ends by itself once a model and task
+  type has a few hundred traces (82 per level gave AUC 0.98 here), and
+  resumes only when the model changes (a new quant, a template change) to
+  check the probe still fits. Chuck's agent turns are the task type worth
+  their own probe. No traffic is kept beyond that.
 - **The work in the engine:** reading one layer's state at paragraph
   breaks inside batched, drafted decoding without slowing it, and
   storing it with the request.
