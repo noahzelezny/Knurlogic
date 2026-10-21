@@ -143,9 +143,11 @@ class Job:
     run: str | None = None
     #: X-Cache-Retain: pin -- its session's entries are never auto-deleted
     pin: bool = False
-    #: X-Cache-Keep: latest -- its entries replace its session's earlier
-    #: ones (the client never resumes from an earlier step)
-    keep_latest: bool = False
+    #: X-Cache-Keep: "latest" -- its entries replace its session's earlier
+    #: ones (the client never resumes from an earlier step); "none" -- it
+    #: leaves nothing behind but its system prompt's checkpoint (a batch of
+    #: one-off prompts: filling the cache would only evict what is reused)
+    keep: str = ""
     #: where this prompt left its session's longest entry, when it did
     #: (usage.knurlogic.cache.diverged; Scheduler._diverged)
     diverged: dict | None = None
@@ -1143,6 +1145,8 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
                 self._learn(e.tokens, e.cache)
                 if row.types:
                     kind = row.types.pop(0)
+                    if row.job.keep == "none" and kind != "system":
+                        continue
                     self._superseded(self.cache.insert(
                         self.host.model_key, e.tokens, e.cache, kind,
                         origin=("checkpoint", e.uid),
@@ -1165,6 +1169,8 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
                 # thread, after the store, and still finds it
                 self._done(e.uid)
                 self._learn(e.tokens, e.cache)
+                if row.job.keep == "none":
+                    continue
                 self._superseded(self.cache.insert(
                     self.host.model_key, e.tokens, e.cache, "assistant",
                     origin=("finished", e.uid),

@@ -218,7 +218,7 @@ def entry_owner(job, uid=None, kind: str | None = None) -> dict | None:
     s = getattr(job, "session", None)
     if not s:
         return None
-    latest = bool(getattr(job, "keep_latest", False))
+    latest = getattr(job, "keep", "") == "latest"
     if latest and kind == "system":
         return {"shared": True}
     out = {"session": s, "role": getattr(job, "role", None),

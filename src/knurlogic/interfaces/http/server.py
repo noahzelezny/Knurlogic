@@ -89,6 +89,14 @@ def _watch_hangup(job, sock, done: threading.Event) -> None:
             return
 
 
+def cache_keep(headers) -> str:
+    """X-Cache-Keep: "latest", "none", or "" (keep everything) for any
+    other value or none at all (docs/design/telemetry.md)."""
+    v = (headers.get("X-Cache-Keep") or "").strip().lower() if headers \
+        else ""
+    return v if v in ("latest", "none") else ""
+
+
 class BodyError(Exception):
     def __init__(self, status: int, message: str):
         super().__init__(message)
@@ -171,8 +179,7 @@ class App(CompactingChat):
                                            labs.get("role"), labs.get("run"))
         job.pin = bool(hdrs and (hdrs.get("X-Cache-Retain") or ""
                                  ).strip().lower() == "pin")
-        job.keep_latest = bool(hdrs and (hdrs.get("X-Cache-Keep") or ""
-                                         ).strip().lower() == "latest")
+        job.keep = cache_keep(hdrs)
         if rec is not None:
             job.request_id = rec.id    # X-Request-Id: the client's, or a ULID
             rec.model = self.served().get("id") or None

@@ -469,7 +469,7 @@ def test_keep_latest_replaces_the_sessions_earlier_steps(sched):
     a = list(s.prompts[1])
     b = a + list(s.prompts[2])                  # the worker appended
     _collect(s.submit(_chat(sys_p, a, max_tokens=3, session="k1",
-                            keep_latest=True)))
+                            keep="latest")))
     first = {tuple(t) for _, t in s.cache.of_session("k1")}
     assert first
     cmd = s.save_prompt_cache()                 # the first step on disk
@@ -477,7 +477,7 @@ def test_keep_latest_replaces_the_sessions_earlier_steps(sched):
     assert {f["session"] for f in D.list_disk()
             if f["model"] == "tiny-latest"} == {"k1", None}    # None: shared
     _collect(s.submit(_chat(sys_p, b, max_tokens=3, session="k1",
-                            keep_latest=True)))
+                            keep="latest")))
     now = {tuple(t) for _, t in s.cache.of_session("k1")}
     assert now and not (now & first)            # replaced, not stacked
     assert len(now) <= 2                        # its checkpoint + answer
@@ -489,6 +489,25 @@ def test_keep_latest_replaces_the_sessions_earlier_steps(sched):
     _collect(s.submit(_chat(sys_p, a, max_tokens=3, session="k2")))
     _collect(s.submit(_chat(sys_p, b, max_tokens=3, session="k2")))
     assert len(s.cache.of_session("k2")) > 2
+
+
+def test_keep_none_leaves_only_the_shared_system_checkpoint(sched):
+    """X-Cache-Keep: none (a batch of one-off prompts): a finished request
+    stores nothing -- not its answer, not its user turn -- but its system
+    prompt's checkpoint, which the next prompt of the batch reuses."""
+    s = sched
+    s.load("/nonexistent/tiny-none").done.wait(60)
+    s._prefill_tps = None
+    sys_p = list(s.prompts[0][:20])
+    for user in (s.prompts[1], s.prompts[2]):
+        _collect(s.submit(_chat(sys_p, list(user), max_tokens=3,
+                                keep="none")))
+    kept = [list(t) for _, t, _, _ in s.cache.live()]
+    assert kept == [sys_p]
+    # the same prompts without it keep their turns and answers, as before
+    for user in (s.prompts[1], s.prompts[2]):
+        _collect(s.submit(_chat(sys_p, list(user), max_tokens=3)))
+    assert len(s.cache.live()) > 1
 
 
 def _turns(*users, system=(), **kw):
@@ -534,16 +553,16 @@ def _fork_keeps_its_checkpoint(s):
     sys_p = list(s.prompts[0][:20])
     a, more, review = list(s.prompts[1]), list(s.prompts[2]), [7, 8, 9]
     _collect(s.submit(_turns(a, system=sys_p, max_tokens=3, session="w",
-                             keep_latest=True)))
+                             keep="latest")))
     _, _warm = _collect(s.submit(_turns(a, system=sys_p, max_tokens=1,
                                        session="w.A", pin=True,
-                                       keep_latest=True)))
+                                       keep="latest")))
     ckpt = [tuple(t) for _, t, e, m in s.cache.live()
             if m is not None and m["session"] == "w.A"
             and e.cache_type == "user"]
     assert len(ckpt) == 1                       # taken over, not copied
     _collect(s.submit(_turns(a, more, system=sys_p, max_tokens=3,
-                             session="w", keep_latest=True)))
+                             session="w", keep="latest")))
     assert ckpt[0] in {tuple(t) for _, t in s.cache.of_session("w.A")}
     saved = s.save_prompt_cache("w.A")
     assert saved.done.wait(60) and not saved.error
@@ -552,7 +571,7 @@ def _fork_keeps_its_checkpoint(s):
     assert len(ckpt[0]) in on
     _, rev = _collect(s.submit(_turns(a, review, system=sys_p,
                                       max_tokens=2, session="w.review1",
-                                      keep_latest=True)))
+                                      keep="latest")))
     assert rev["knurlogic"]["cache"]["used"] >= len(ckpt[0]) - 1
     s.unload().done.wait(60)
     s.load("/nonexistent/tiny-fork").done.wait(60)
@@ -570,7 +589,7 @@ def test_the_shared_system_checkpoint_is_saved_and_restored(sched):
     s._prefill_tps = None
     sys_p = list(s.prompts[0][:20])
     _collect(s.submit(_chat(sys_p, list(s.prompts[1]), max_tokens=3,
-                            session="w1", keep_latest=True)))
+                            session="w1", keep="latest")))
     assert tuple(sys_p) in s.cache.shared
     cmd = s.save_prompt_cache()
     assert cmd.done.wait(60) and not cmd.error
@@ -622,7 +641,7 @@ def test_entries_no_session_owns_can_be_dropped(sched):
     s._prefill_tps = None
     sys_p = list(s.prompts[0][:20])
     _collect(s.submit(_chat(sys_p, list(s.prompts[1]), max_tokens=3,
-                            session="e1", keep_latest=True)))
+                            session="e1", keep="latest")))
     _collect(s.submit(_job(s.prompts[2], max_tokens=3)))        # nobody's
     assert s.save_prompt_cache().done.wait(60)
     mine = lambda: [f for f in D.list_disk()

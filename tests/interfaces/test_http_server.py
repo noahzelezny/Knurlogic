@@ -519,3 +519,11 @@ def test_models_say_loading_until_the_warm_up_is_done():
         assert got["data"][0]["status"] == want, state
     assert S._load_state(SimpleNamespace()) == "ready"   # says nothing
     assert O.models_document({"id": "m"})["data"][0]["status"] == "ready"
+
+
+def test_x_cache_keep_names_latest_or_none_and_nothing_else():
+    from knurlogic.interfaces.http.server import cache_keep
+    assert cache_keep({"X-Cache-Keep": " None "}) == "none"
+    assert cache_keep({"X-Cache-Keep": "latest"}) == "latest"
+    assert cache_keep({"X-Cache-Keep": "forever"}) == ""
+    assert cache_keep({}) == "" and cache_keep(None) == ""

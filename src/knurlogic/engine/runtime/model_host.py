@@ -253,8 +253,8 @@ class ModelHost:
         vision.clear()
         binding.DRAFT.update(head=None, spec=None, on=False,
                              why="model unloaded")
-        from knurlogic.engine.probe import binding as auto
-        auto.unbind()
+        from knurlogic.engine.probe import binding as probe_binding
+        probe_binding.unbind()
         self.model = self.tokenizer = self.model_key = None
         if had:
             gc.collect()
@@ -356,10 +356,10 @@ class ModelHost:
     def _bind_probe(self, path: str) -> None:
         """Thinking: auto's probe or onboarding tap (engine/probe/binding);
         a model that cannot be tapped is served without auto."""
-        from knurlogic.engine.probe import binding as auto
-        from knurlogic.engine.probe import store, stop
+        from knurlogic.engine.probe import binding as probe_binding
+        from knurlogic.engine.probe import stop, store
         try:
-            auto.bind(self.model, path, split=self.shard is not None)
+            probe_binding.bind(self.model, path, split=self.shard is not None)
             if store.ACTIVE["state"] != "off":
                 # the vocabulary's break tokens, decoded once here (about a
                 # second for 250k ids), not on the scheduler thread at the
