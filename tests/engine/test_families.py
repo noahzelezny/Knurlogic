@@ -102,6 +102,10 @@ def test_every_data_file_in_the_package_ships():
     pkg = SRC / "knurlogic"
     missed = []
     for p in pkg.rglob("*"):
+        # a file manager's own (Finder writes .DS_Store into any folder it
+        # opens; .gitignore keeps it out of the repo): not package data
+        if p.name in (".DS_Store", "Thumbs.db", "desktop.ini"):
+            continue
         if not p.is_file() or p.suffix in (".py", ".pyc") \
                 or "__pycache__" in p.parts:
             continue
