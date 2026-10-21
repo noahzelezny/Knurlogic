@@ -1,10 +1,10 @@
 # Auto effort: the model thinks until it has its answer
 
-Status: design, not built. **Thinking: auto** runs the model at its top
-level and a probe on its hidden state closes the think block when the
-model has its answer; the probe's threshold is the effort knob, set per
-model (the probe sections below, 2026-10-19/20). It learns per model from
-served traffic, then switches itself on.
+Status: built on one Mac (2026-10-20; "Built", below). **Thinking: auto**
+runs the model at its top level and a probe on its hidden state closes the
+think block when the model has its answer; the probe's threshold is the
+effort knob, set per model. A model learns its probe at onboarding, on the
+server's own idle time, once its Thinking setting is auto.
 
 How it got here: started 2026-10-18 as the model rating the request's
 difficulty before answering; the runs turned that into "default low,
@@ -460,6 +460,82 @@ The monitor is the harness's (Chuck); knurlogic streams the number.
   it is trained on there is the open question;
 - in the engine: the state reading above, and closing the think block
   when the probe fires (the GLM "off" path already closes one).
+
+## Built (2026-10-20)
+
+`engine/probe/` and `interfaces/http/onboard.py`. What a user does: set a
+model's Thinking to **auto** on the page. That is the opt-in, and it says
+so: until the probe is ready, requests think at the model's top level, and
+while nothing else runs the server works through the onboarding set at
+that level. A client asks with `reasoning_effort: "auto"` (Anthropic's
+Messages API passes it through); a silent request gets auto when it is the
+model's Thinking default.
+
+- **Advertised**: `thinking.levels` lists `auto` after a template's native
+  levels, so /v1/models, /status.json, the MCP and the page's setting all
+  offer it; /v1/models adds `thinking.auto` = {state: ready | learning |
+  off, why, threshold, layer, traces}. Chuck reads the levels.
+- **Reported**: `usage.knurlogic.thinking` says `requested: auto`, the
+  level applied, and `auto` = {state, stopped, confidence,
+  stopped_at_token, breaks_read, max_confidence}.
+- **The read**: a class hook on the decoder layer (`tap.py`) keeps the
+  probe layer's output of each decode forward, lazily. A forward's input
+  positions are tokens the step commits (`t1`, then a verified `t2` on a
+  drafting step), so the loop (`MTPBatch._feed_stops`) hands each auto
+  row the score for the token it just committed -- the same state the
+  walker read at a paragraph break (the cut is after "\n\n", whose token
+  is the last of the prefix).
+- **The stop**: `AutoStop`, a logits processor in the row's list. At a
+  paragraph break inside the thinking (one token holding "\n\n", or two
+  meeting at newlines) with a score at or over the threshold, the next
+  tokens are forced to the template's think-end; the control machine then
+  sees the block closed and the answer follows as usual. Plain and
+  drafting steps alike (tested on a tiny qwen3_5: forced at a ready break,
+  token-identical to no stop when never ready).
+- **Onboarding**: the 41 problems (`problems.json`), twice each at the top
+  level, keeping the states of three layers (1/2, 0.6, 2/3 of the depth)
+  at every break; up to 12 breaks per trace labelled by a forced answer;
+  `fit.train` picks the layer by held-out AUC and the LOWEST threshold
+  whose simulated stop loses at most 5% of the answers thinking to the
+  end gets right; saved as `~/.knurlogic/probes/<base>.npz`, one per base
+  model (type, depth, width, vocabulary), so every quant reads it. Each
+  trace is kept on disk as it finishes; a restart resumes.
+- **First live check** (M3, 27B VQ-3.9, the probe fitted from the
+  walker's states of 2026-10-19: layer 42, threshold 0.8, held-out AUC
+  0.96): four hard problems, one sample each, auto against xhigh. All
+  eight right. Tokens: 842 / 5,110; 1,560 / 3,697; 384 / 518 (auto never
+  confident: max 0.43, finished on its own); 1,342 / 32,920 -- 4,128
+  against 42,245. The stops fired at 0.99, 0.99 and 0.95. A screen, not a
+  measurement: the problems are from the set the probe was fitted on.
+- **Shipped probes**: the seven bases measured here ship fitted in
+  `engine/probe/shipped/` (the Qwen 27B, 35B, 397B and Flash, Gemma 26B,
+  GLM-5.3 at max, DeepSeek V4 Flash at max), so auto is ready on them the
+  moment it is chosen; onboarding is for every other base. A probe is
+  three vectors of the layer's width (60 KB for the 27B, ~200 KB for the
+  four-stream DeepSeek and GLM layers). This machine's own fit, when it
+  has one, wins over the shipped one; a release can ship refits as served
+  use adds data.
+- **Free-form labels look possible** (2026-10-20, the same walker data):
+  labelled "the answer forced here matches the model's own final answer"
+  -- no answer key -- the probes read as well as labelled by the key (AUC
+  0.95/0.95 27B, 0.95/0.95 35B, 0.94/0.94 397B, 0.94/0.94 Gemma, 0.93/0.93
+  DeepSeek, 0.98/0.98 Flash, 0.93 vs 0.92 GLM) and stop the same, but for
+  GLM at max, where no threshold kept the answers. Here "matches" is an
+  integer compare; prose and agent turns need another compare.
+
+**Not yet:**
+- a split model: the layer may sit on another rank and every rank must
+  stop alike, so auto serves the top level unstopped there and says why;
+- DSpark block drafting (DeepSeek V4): its K-wide verify commits a
+  varying run; only its plain steps are read so far;
+- a soft nudge instead of the hard stop (raise think-end's logit at a
+  confident break, the model keeps the last word): may spare the rare
+  "confident but about to change its mind" break, may save less; never
+  measured. Later: an A/B against the hard stop on the 27B (Noah,
+  2026-10-20: the hard stop for now);
+- learning from served traffic: onboarding learns from the problem set,
+  whose answers can be checked; a label for free-form answers (agent
+  turns, prose) is still the open question above.
 
 ## Open
 

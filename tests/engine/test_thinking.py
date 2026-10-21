@@ -206,6 +206,38 @@ def test_the_thinking_default_serves_a_silent_request(monkeypatch):
     assert kwargs is None and rep["applied"] == "xhigh"
 
 
+def test_auto_thinks_at_the_top_level_and_says_what_it_will_do(
+        monkeypatch):
+    """Thinking: auto is the template's top level (every probe was fitted
+    there); the report names auto and its state on this model."""
+    from knurlogic.engine.probe import store
+    _serve(_Qwen38Tok())
+    for state, says in (("ready", "stopped when the probe"),
+                        ("learning", "learning"), ("off", "off")):
+        monkeypatch.setitem(store.ACTIVE, "state", state)
+        kwargs, rep = T.translate({"reasoning_effort": "auto"}, None)
+        assert kwargs == {"reasoning_effort": "xhigh"}
+        assert rep["requested"] == "auto" and rep["applied"] == "xhigh"
+        assert rep["auto"] == {"state": state} and says in rep["note"]
+
+
+def test_auto_as_the_thinking_default_serves_a_silent_request(monkeypatch):
+    from knurlogic.engine.probe import store
+    _serve(_Qwen38Tok())
+    monkeypatch.setitem(store.ACTIVE, "state", "learning")
+    monkeypatch.setenv(T.DEFAULT_ENV, "auto")
+    kwargs, rep = T.translate({}, None)
+    assert kwargs == {"reasoning_effort": "xhigh"}
+    assert rep["requested"] == "auto" and "Thinking default" in rep["note"]
+
+
+def test_choosing_auto_says_it_learns_at_max_first(monkeypatch):
+    from knurlogic.engine.model.loading import apply_live
+    monkeypatch.delenv(T.DEFAULT_ENV, raising=False)
+    said = apply_live({T.DEFAULT_ENV: "auto"})[T.DEFAULT_ENV]
+    assert said.startswith("applied") and "top level (max)" in said
+
+
 def test_the_thinking_default_is_live_and_checked(monkeypatch):
     import os
 
@@ -320,7 +352,8 @@ def test_the_mcp_models_tool_lists_each_models_thinking_levels():
         pytest.skip("GLM not on this box")
     lv = T.levels(T.template_of(d))
     assert lv["dialect"] == "glm_effort" and lv["default"] == "max"
-    assert [n["name"] for n in lv["native"]] == ["off", "low", "high", "max"]
+    assert [n["name"] for n in lv["native"]] == ["off", "low", "high", "max",
+                                               "auto"]
     assert T.levels(T.template_of("/nonexistent")) == {
         "dialect": None, "native": [], "default": None}
 
@@ -336,7 +369,8 @@ def test_an_artifact_shipping_no_template_lists_its_familys_levels(tmp_path):
          "dspark_block_size": 4}))
     lv = T.levels(T.template_of(d))
     assert lv["dialect"] == "deepseek_vision_effort"
-    assert [n["name"] for n in lv["native"]] == ["off", "low", "high", "max"]
+    assert [n["name"] for n in lv["native"]] == ["off", "low", "high", "max",
+                                               "auto"]
     (d / "config.json").write_text(json.dumps({"model_type": "deepseek_v4"}))
     assert T.levels(T.template_of(d))["dialect"] == "deepseek_effort"
 

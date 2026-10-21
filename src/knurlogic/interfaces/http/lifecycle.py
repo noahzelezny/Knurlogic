@@ -315,6 +315,10 @@ def serve(artifact, host: str, port: int, *, routes: dict | None = None,
     if ring:
         watch_ring(sched, mh)
     else:
+        # Thinking: auto -- bound to the Thinking setting, and a model set
+        # to auto with no probe learns one while the server is idle
+        from . import onboard
+        onboard.watch(sched)
         # the page's unload: leave through the `finally` below, so the
         # scheduler's own exit saves the prompt cache to disk; SIGTERM's
         # default ended the process with nothing saved

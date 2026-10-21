@@ -224,6 +224,11 @@ def build_job(body: dict, *, chat: bool, translate: Callable | None = None,
     job = Job(req, args, max_tokens=max_tokens, sampling=sampling,
               penalties=penalties, stops=stops, logprobs=logprobs,
               top_logprobs=top)
+    auto = (ctx["thinking"] or {}).get("auto")
+    if auto is not None and auto.get("state") == "ready":
+        # the probe stops this request's thinking (engine/probe/stop);
+        # what it did lands in usage.knurlogic.thinking.auto
+        job.auto = {"report": auto}
     return job, ctx
 
 

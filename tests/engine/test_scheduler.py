@@ -1040,3 +1040,35 @@ def test_a_running_prefill_reports_progress_logs_and_sees_a_cancel(caplog):
         job.outbox.get_nowait() == ("progress", (512, 4096))
     job.cancel()
     assert hook(9, 4096, 4096) is True
+
+
+def test_auto_stops_on_one_mac_and_never_on_a_split(monkeypatch):
+    """Thinking: auto's stop takes the probe's threshold; on a split the
+    layer may be on another rank and every rank must stop alike, so it
+    never fires there and the report says why."""
+    import types
+
+    import numpy as np
+
+    from knurlogic.engine.probe import store
+    from knurlogic.engine.runtime.scheduler import Job, Scheduler
+
+    class Tok:
+        vocab_size = 3
+        think_end_tokens = (2,)
+
+        def decode(self, ids):
+            return "\n\n"
+
+    probe = store.Probe(base="b", layer=0, mean=np.zeros(1), scale=np.ones(1),
+                        w=np.zeros(1), b=0.0, threshold=0.93)
+    monkeypatch.setitem(store.ACTIVE, "probe", probe)
+    for tensor, shard, want in ((None, None, 0.93), (object(), None, None),
+                                (None, object(), None)):
+        me = types.SimpleNamespace(tensor=tensor,
+                                   host=types.SimpleNamespace(shard=shard))
+        job = Job(request=None, args=None, auto={"report": {}})
+        stop = Scheduler._auto_stop(me, job, Tok(), "reasoning")
+        assert job.auto["stop"] is stop and stop.threshold == want
+        assert stop.inside
+        assert ("why" in job.auto["report"]) == (want is None)

@@ -601,6 +601,9 @@ class BlockBatch(MTPBatch):
         B = len(self.uids)
         lg = self.model(self.t1[:, None], cache=self.cache,
                         **self._pos_kw(1))
+        # Thinking: auto reads plain steps only; a K-wide verify commits a
+        # varying run, and its reads are not wired yet
+        self._feed_stops(0, 1)
         fin = finite_rows(self.row_t1)[:, None]
         t1_list = self.t1.tolist()
         out: list[RowStep] = []

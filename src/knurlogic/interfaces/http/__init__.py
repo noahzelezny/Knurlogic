@@ -20,4 +20,5 @@ loads, and inference requests wait for it (they are queued, not refused).
   prompt_cache.py  /v1/prompt-cache: save, drop, pin, park, list
   compaction.py    the chat path through context_management/
   telemetry.py     request ids, the ledger row, progress, /v1/usage
+  onboard.py       Thinking: auto's onboarding: learn a probe while idle
 """

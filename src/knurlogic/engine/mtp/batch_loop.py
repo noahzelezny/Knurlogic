@@ -28,6 +28,8 @@ import mlx.core as mx
 from mlx_lm.generate import _extend_cache, _merge_caches
 
 from knurlogic.engine.arrays import arrays_of
+from knurlogic.engine.probe import store as probe_store
+from knurlogic.engine.probe.stop import AutoStop
 from knurlogic.engine.split.marker import chunk_done, chunk_start
 from knurlogic.tuning import knobs
 
@@ -806,6 +808,7 @@ class MTPBatch:
         pos2 = self._pos_kw(2)
         lg2 = self.model(mx.stack([self.t1, d2], axis=1), cache=self.cache,
                          **pos2)
+        self._feed_stops(0, 1)
 
         # --- verdicts ----------------------------------------------------
         # a pipeline follower's logits are zeros: its verdicts come in B2
@@ -862,6 +865,8 @@ class MTPBatch:
                 lg2 = self.model(mx.stack([self.t1, t2], axis=1),
                                  cache=self.cache, **pos2)
 
+        # the forward that fed t2 last: verify, or the replay above
+        self._feed_stops(-1, 2)
         # NaN guard, lazy: joins the eval at the end of the step.
         fin = mx.stack([finite_rows(self.row_t1), finite_rows(lg2[:, 0])],
                        axis=1)
@@ -977,6 +982,26 @@ class MTPBatch:
                 keep.append(i)
         return out, keep
 
+    def _feed_stops(self, pos: int, ahead: int) -> None:
+        """After a decode forward: hand each Thinking: auto row the probe's
+        read of input position `pos` -- the token that makes the row's
+        history len(emitted) + `ahead` long (engine/probe/stop)."""
+        tap = probe_store.ACTIVE["tap"]
+        if tap is None:
+            return
+        rows = [(i, s) for i, p in enumerate(self.params)
+                for s in p.processors if isinstance(s, AutoStop)]
+        if not rows:
+            return
+        probe = probe_store.ACTIVE["probe"]
+        sc = tap.score(probe, pos) if probe is not None else None
+        st = (tap.states(pos) if any(s.keep_states for _, s in rows)
+              else None)
+        for i, s in rows:
+            s.feed(len(self.emitted[i]) + ahead,
+                   None if sc is None else sc[i],
+                   None if st is None else st[i])
+
     def _plain_step(self, then: mx.array | None = None) -> list[RowStep]:
         """One stock decode step: every row commits t1 and samples the next.
 
@@ -990,6 +1015,7 @@ class MTPBatch:
         assert self.t1 is not None and self.row_t1 is not None
         lg = self.model(self.t1[:, None], cache=self.cache,
                         **self._pos_kw(1))                      # [B, 1, V]
+        self._feed_stops(0, 1)
         fin = finite_rows(self.row_t1)[:, None]     # lazy NaN guard
         t1_list = self.t1.tolist()
         # The head already drafted the token after t1 (draft_row); the trunk

@@ -470,6 +470,10 @@ class Handler(PromptCacheHandlers, T.TelemetryHandlers,
                 think = TH.levels(TH.template_of(path)) if path else None
             except (ImportError, OSError, *TEMPLATE_ERRORS):
                 think = None
+            if think and think.get("native"):
+                # what Thinking: auto does on this model now
+                from knurlogic.engine.probe import store as auto
+                think["auto"] = auto.status()
             return self._json(200, O.models_document(
                 self.app.served(),
                 sampling_defaults(path) if path else {},

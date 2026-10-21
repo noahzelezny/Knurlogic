@@ -195,6 +195,15 @@ def long_context_overlay(path, env=None) -> dict:
     return context_window.long_context_config(cfg, mode)
 
 
+#: what choosing Thinking: auto says on the page: it is the opt-in, so it
+#: says what learning costs before it starts (engine/probe)
+AUTO_SAYS = ("auto. It learns this model first: until its probe is ready, "
+             "requests think at the model's top level (max), and while "
+             "nothing else runs the server works through a set of problems "
+             "at that level to fit the probe -- hours on a large model. "
+             "Then auto stops each request's thinking once the model has "
+             "its answer")
+
 #: the freed-buffer cache limit set_cache_limit last applied, in bytes
 #: (None: never set; mlx has no getter for it)
 CACHE_LIMIT: dict = {"bytes": None}
@@ -290,6 +299,7 @@ def apply_live(env: dict) -> dict:
             os.environ[k] = v
             done[k] = ("applied: a request that names no level gets "
                        + ("the model's own default" if v == "model"
+                          else AUTO_SAYS if v == "auto"
                           else f"its {v} level"))
         elif logical == "context_length":
             # the scheduler reads it at every admission

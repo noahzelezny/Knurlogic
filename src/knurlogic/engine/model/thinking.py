@@ -10,6 +10,8 @@ by rendering (family manifests, "thinking"). Native controls only, never a
 token budget: a level the template cannot express goes to the nearest
 native level AT OR ABOVE it. A client's own `chat_template_kwargs` wins,
 key by key. What was applied is reported in usage.knurlogic.thinking.
+`auto` is the top level, stopped early by the model's probe
+(engine/probe).
 Design: docs/design/server.md (thinking).
 """
 
@@ -23,6 +25,10 @@ from knurlogic.engine.templates import TEMPLATE_ERRORS
 from . import state
 
 LADDER = ("none", "minimal", "low", "medium", "high", "xhigh")
+#: Thinking: auto -- the template's top level, stopped early by the
+#: model's probe once one is fitted (engine/probe). Not a rung: it names
+#: no amount of thinking.
+AUTO = "auto"
 #: the level a request that names none is served at (a per-model setting,
 #: live); unset or "model": the template's own default. GLM-5.3's is max,
 #: and with a client's effort control broken every long conversation thought
@@ -47,6 +53,8 @@ def default_level(spec: dict | None):
     v = server_default()
     if v is None:
         return None
+    if v == AUTO:
+        return AUTO if spec is not None else None
     for lvl, name, _kw in (spec or {}).get("native") or ():
         if str(name).lower() == v:
             return lvl
@@ -101,10 +109,16 @@ def requested(body: dict):
     if level is None:
         return None
     level = str(level).strip().lower()
-    if level not in LADDER:
+    if level not in (*LADDER, AUTO):
         raise ValueError(f"reasoning_effort {level!r} is not one of "
-                         f"{', '.join(LADDER)}")
+                         f"{', '.join((*LADDER, AUTO))}")
     return level
+
+
+def top(spec: dict) -> str:
+    """The ladder level of the template's top native level: what auto
+    thinks at (every probe was fitted on traces there)."""
+    return max(spec["native"], key=lambda n: _rank(n[0]))[0]
 
 
 def resolve(level, dialect: str | None, spec: dict | None):
@@ -232,12 +246,16 @@ def applied_by_render(tokenizer, spec: dict, merged: dict, p: dict):
 
 
 def levels(template: str | None) -> dict:
-    """What a served template offers, for the MCP and /status.json."""
+    """What a served template offers, auto included, for the MCP,
+    /status.json and /v1/models."""
     name, spec = detect(template)
     if spec is None:
         return {"dialect": None, "native": [], "default": None}
+    # auto after the native levels: a level a client can ask for on every
+    # template that has levels (engine/probe; its state is the server's)
     return {"dialect": name, "default": spec["default"],
-            "native": [{"level": n[0], "name": n[1]} for n in spec["native"]]}
+            "native": [{"level": n[0], "name": n[1]} for n in spec["native"]]
+            + [{"level": AUTO, "name": AUTO}]}
 
 
 def template_of(artifact) -> str | None:
@@ -313,6 +331,25 @@ def status() -> dict:
     return out
 
 
+def _report_auto(report: dict, spec: dict | None) -> None:
+    """Say in the report that auto asked for this level, and what auto
+    will do with it (engine/probe/store.status)."""
+    from knurlogic.engine.probe import store
+    report["requested"] = AUTO
+    if spec is None:
+        return
+    st = store.status()
+    report["auto"] = {"state": st["state"]}
+    say = {"ready": "auto: the top level, stopped when the probe reads "
+                    "the answer as ready",
+           "learning": "auto is learning this model: served at its top "
+                       "level, unstopped, until its probe is fitted"}
+    report["note"] = say.get(st["state"],
+                             "auto is off for this model (no probe; its "
+                             "Thinking setting turns learning on): served "
+                             "at its top level")
+
+
 def translate(body: dict, client_kwargs: dict | None):
     """A chat request's reasoning level -> (chat_template_kwargs or None,
     report). The request's own chat_template_kwargs win over the
@@ -330,7 +367,12 @@ def translate(body: dict, client_kwargs: dict | None):
     if p is not None and not p["verified"]:
         # The text named controls the template does not act on.
         name, spec = None, None
+    auto = level == AUTO
+    if auto:
+        level = top(spec) if spec is not None else None
     kwargs, report = resolve(level, name, spec)
+    if auto:
+        _report_auto(report, spec)
     if by_server:
         report["note"] = ((report["note"] + "; ") if report["note"] else ""
                           ) + "the server's Thinking default (the request " \

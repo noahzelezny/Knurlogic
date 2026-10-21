@@ -162,7 +162,7 @@ def test_a_deepseek_v4_vision_artifact_gets_the_vision_template(tmp_path):
     from knurlogic.engine.model import thinking
     assert thinking.detect(vt)[0] == "deepseek_vision_effort"
     assert [n["name"] for n in thinking.levels(vt)["native"]] == \
-        ["off", "low", "high", "max"]
+        ["off", "low", "high", "max", "auto"]
     assert thinking.levels(vt)["default"] == "low"
     assert thinking.detect(templates.text("deepseek_v4"))[0] == \
         "deepseek_effort"
@@ -184,7 +184,7 @@ def test_the_template_is_chosen_by_the_config_not_the_folder_name(tmp_path):
     tok = SimpleNamespace(chat_template=None, name_or_path=plain)
     assert templates.install(tok) == "deepseek_v4_vision"
     assert [n["name"] for n in thinking.levels(tok.chat_template)["native"]] \
-        == ["off", "low", "high", "max"]
+        == ["off", "low", "high", "max", "auto"]
     # a copy of knurlogic's Flash template (a DSML marker) in that folder
     assert templates.family_for(templates.text("deepseek_v4"), plain) == \
         "deepseek_v4_vision"

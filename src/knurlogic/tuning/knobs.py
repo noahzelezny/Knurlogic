@@ -473,7 +473,7 @@ KV_BITS_OFFERED = ("bf16", "8")
 #: the Thinking default's values: a model's own level names, which the
 #: resolver narrows the range to per model (GLM: off, low, high, max); unset
 #: (the page's "default") is the template's own default
-THINKING_DEFAULT_VALUES = ["off", "low", "medium", "high", "max"]
+THINKING_DEFAULT_VALUES = ["off", "low", "medium", "high", "max", "auto"]
 
 
 def thinking_default_of(v) -> str:

@@ -149,6 +149,11 @@ class Job:
     #: where this prompt left its session's longest entry, when it did
     #: (usage.knurlogic.cache.diverged; Scheduler._diverged)
     diverged: dict | None = None
+    #: Thinking: auto's stop for this request (engine/probe/stop):
+    #: {"threshold": None for the probe's own, "report": the dict it
+    #: writes what it did into, "keep_states": onboarding's}; the
+    #: scheduler puts the AutoStop it made under "stop"
+    auto: dict | None = None
 
     def cancel(self) -> None:
         """From the HTTP thread: the client went away; free the row."""
@@ -983,6 +988,8 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
             if job.penalties:
                 from mlx_lm.sample_utils import make_logits_processors
                 procs = make_logits_processors(**job.penalties)
+            if job.auto is not None:
+                procs.append(self._auto_stop(job, tok, initial))
             sampling, wire = job.sampling, None
             if self.tensor is not None:
                 from knurlogic.engine.split.ring import assign_seed
@@ -1044,6 +1051,27 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
             return job.cancelled
 
         return hook
+
+    def _auto_stop(self, job: Job, tok, initial: str):
+        """The AutoStop Thinking: auto asked for (engine/probe/stop). On a
+        split the layer it reads may be on another rank and every rank
+        must stop alike: not wired yet, so the stop never fires there and
+        the report says why."""
+        from knurlogic.engine.probe import store
+        from knurlogic.engine.probe.stop import AutoStop
+        a = job.auto or {}
+        probe = store.ACTIVE["probe"]
+        threshold = a.get("threshold") or (probe.threshold if probe else None)
+        report = a.get("report")
+        if self.tensor is not None or getattr(self.host, "shard", None):
+            threshold = None
+            if report is not None:
+                report["why"] = "a split model: the stop runs on one Mac only"
+        stop = AutoStop(tok, reasoning=initial == "reasoning",
+                        threshold=threshold, report=report,
+                        keep_states=bool(a.get("keep_states")))
+        a["stop"] = stop
+        return stop
 
     def _queued(self) -> set:
         f = getattr(self._ex, "queued", None)

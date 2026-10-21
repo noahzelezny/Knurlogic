@@ -8,6 +8,7 @@ fails the suite, so swapping the engine stays a change to this folder.
   split/         one model across ranks: tensor and pipeline
   prompt_cache/  the prompt cache, in memory and on disk
   mtp/           drafting with a multi-token-prediction head
+  probe/         Thinking: auto -- a probe on the hidden state stops thinking
   vision/        images as context: the contracts, store and cache key
   families/      one folder per model family (VQLab imports these)
   templates/     chat templates knurlogic supplies in place of an artifact's

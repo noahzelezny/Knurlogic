@@ -66,7 +66,9 @@ knurlogic = ["interfaces/page/assets/**/*", "interfaces/menubar_assets/*.png", "
              "engine/families/*/templates/*.jinja",
              "engine/families/*/templates/*.json",
              "engine/families/*/templates/PROVENANCE.md",
-             "context_management/prompts/*.md"]
+             "context_management/prompts/*.md",
+             "engine/probe/problems.json",
+             "engine/probe/shipped/*.npz"]
 
 [tool.knurlogic.pins]
 # What tests/test_pins.py holds the installed stack to: the versions, and

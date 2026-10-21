@@ -1,0 +1,169 @@
+{
+ "system": "You are a careful assistant. End your reply with a line 'ANSWER: <integer>'.",
+ "problems": [
+  {
+   "question": "What is 58 * 37?",
+   "answer": 2146
+  },
+  {
+   "question": "What is 1000 - 457?",
+   "answer": 543
+  },
+  {
+   "question": "What is 15% of 260?",
+   "answer": 39
+  },
+  {
+   "question": "How many edges does a cube have?",
+   "answer": 12
+  },
+  {
+   "question": "What is the 11th Fibonacci number, with F(1) = F(2) = 1?",
+   "answer": 89
+  },
+  {
+   "question": "What is the greatest common divisor of 84 and 132?",
+   "answer": 12
+  },
+  {
+   "question": "How many minutes are in 4.5 hours?",
+   "answer": 270
+  },
+  {
+   "question": "What is 2 to the power 13?",
+   "answer": 8192
+  },
+  {
+   "question": "How many positive integers less than 10000 have digit sum exactly 19?",
+   "answer": 660
+  },
+  {
+   "question": "How many permutations of 1, 2, ..., 7 leave no number in its original position?",
+   "answer": 1854
+  },
+  {
+   "question": "In how many ways can 60 cents be made from coins worth 1, 3, 10 and 25 cents?",
+   "answer": 109
+  },
+  {
+   "question": "How many integers from 1 to 5000 inclusive are coprime to 42?",
+   "answer": 1429
+  },
+  {
+   "question": "What are the last two digits of 13^2027? Give them as a number.",
+   "answer": 17
+  },
+  {
+   "question": "How many zeros are at the end of 1500! when it is written in base 12?",
+   "answer": 746
+  },
+  {
+   "question": "How many solutions in nonnegative integers does x + 2y + 4z = 26 have?",
+   "answer": 56
+  },
+  {
+   "question": "How many positive divisors does 12! have?",
+   "answer": 792
+  },
+  {
+   "question": "Order matters: in how many ways can 18 be written as a sum of 1s, 3s and 4s (for example 1+3 and 3+1 count separately)?",
+   "answer": 3025
+  },
+  {
+   "question": "How many 6-element subsets of {1, 2, ..., 17} contain no two consecutive integers?",
+   "answer": 924
+  },
+  {
+   "question": "How many permutations of 1..8 have exactly 3 fixed points?",
+   "answer": 2464
+  },
+  {
+   "question": "How many strings of length 10 over the letters A, B, C contain no two adjacent equal letters and start and end with A?",
+   "answer": 170
+  },
+  {
+   "question": "How many lattice paths from (0,0) to (7,7) using unit steps right and up never go above the line y = x?",
+   "answer": 429
+  },
+  {
+   "question": "How many integers from 1 to 2000 are divisible by exactly one of 6, 10 and 15?",
+   "answer": 468
+  },
+  {
+   "question": "How many ordered triples (a, b, c) of positive integers satisfy a * b * c = 720?",
+   "answer": 270
+  },
+  {
+   "question": "How many 5-digit numbers (10000-99999) have digits that strictly increase from left to right?",
+   "answer": 126
+  },
+  {
+   "question": "Run this code exactly as written on [[1, 4], [4, 6], [8, 10], [9, 12], [15, 15]] and report total_covered of that input. Give the number it returns.\n\ndef merge_intervals(intervals):\n    \"\"\"Merge overlapping [start, end] intervals (ends inclusive).\"\"\"\n    if not intervals:\n        return []\n    intervals = sorted(intervals, key=lambda iv: iv[0])\n    merged = [list(intervals[0])]\n    for start, end in intervals[1:]:\n        last = merged[-1]\n        if start < last[1]:\n            last[1] = max(last[1], end)\n        else:\n            merged.append([start, end])\n    return merged\n\n\ndef total_covered(intervals):\n    \"\"\"Number of integer points covered by the intervals.\"\"\"\n    return sum(end - start + 1 for start, end in merge_intervals(intervals))\n\n\ndef busiest_point(intervals):\n    \"\"\"The integer point covered by the most intervals (lowest on ties).\"\"\"\n    counts = {}\n    for start, end in intervals:\n        for p in range(start, end + 1):\n            counts[p] = counts.get(p, 0) + 1\n    best = max(counts.values())\n    return min(p for p, c in counts.items() if c == best)",
+   "answer": 13
+  },
+  {
+   "question": "What does this program print?\n\ndef f(n):\n    seen = set()\n    steps = 0\n    while n not in seen:\n        seen.add(n)\n        n = (n * n + 3) % 101\n        steps += 1\n    return steps + len(seen)\nprint(f(7))",
+   "answer": 42
+  },
+  {
+   "question": "In this config a service can start only after every service it depends on has started; services with no remaining dependencies start together in one wave. How many waves does it take to start everything?\n\n{\"services\": [\n  {\"name\": \"auth\",    \"replicas\": 3, \"cpu\": 2, \"depends\": []},\n  {\"name\": \"orders\",  \"replicas\": 4, \"cpu\": 4, \"depends\": [\"auth\", \"stock\"]},\n  {\"name\": \"stock\",   \"replicas\": 2, \"cpu\": 2, \"depends\": [\"auth\"]},\n  {\"name\": \"mailer\",  \"replicas\": 1, \"cpu\": 1, \"depends\": [\"orders\"]},\n  {\"name\": \"reports\", \"replicas\": 2, \"cpu\": 3, \"depends\": [\"orders\", \"stock\"]}\n]}",
+   "answer": 4
+  },
+  {
+   "question": "In this log the order endpoint failed for a while. How many connections did the process that caused it hold at the peak, going by the pool counts?\n\n09:14:02 api  POST /orders 201 in 41ms (pool 3/20)\n09:14:05 api  POST /orders 201 in 44ms (pool 4/20)\n09:14:09 cron nightly-export started\n09:14:10 api  GET /orders/88 200 in 12ms (pool 9/20)\n09:14:12 api  POST /orders 201 in 390ms (pool 17/20)\n09:14:13 api  GET /health 200 in 2ms (pool 20/20)\n09:14:15 api  POST /orders 503 in 5001ms (pool 20/20)\n09:14:16 api  POST /orders 503 in 5000ms (pool 20/20)\n09:14:31 cron nightly-export finished, 19 connections released\n09:14:32 api  POST /orders 201 in 39ms (pool 2/20)",
+   "answer": 19
+  },
+  {
+   "question": "In how many ways can a 2 x 11 board be tiled with 1x2 dominoes (either orientation) and 2x2 squares?",
+   "answer": 1365
+  },
+  {
+   "question": "A walk starts at 0 and takes 12 steps, each +1 or -1, never going below 0. How many such walks end at 2?",
+   "answer": 297
+  },
+  {
+   "question": "Four fair six-sided dice are rolled. The probability that their sum is a multiple of 5 is p/q in lowest terms. What is p + q?",
+   "answer": 1555
+  },
+  {
+   "question": "How many binary strings of length 12 have no three consecutive 1s when read cyclically (the last position is adjacent to the first)?",
+   "answer": 1499
+  },
+  {
+   "question": "A stack machine runs this program (push n pushes n; dup copies the top; swap swaps the top two; mul/sub/add/mod pop b then a and push a op b). What is on top of the stack at the end?\n\npush 3\npush 4\nmul\ndup\npush 5\nsub\nswap\npush 2\nmod\nadd\ndup\nmul\npush 7\nswap\nsub",
+   "answer": -42
+  },
+  {
+   "question": "Tasks run in parallel as soon as their prerequisites finish, with unlimited workers. What is the earliest time all tasks are done?\n\ntasks (name: duration, must start after):\nA: 3, -\nB: 2, A\nC: 4, A\nD: 1, B\nE: 5, B, C\nF: 2, D\nG: 3, E, F\nH: 2, C",
+   "answer": 15
+  },
+  {
+   "question": "What does this program print?\n\ndef f(xs):\n    out = []\n    for i, x in enumerate(xs):\n        if i % 2 == 0:\n            out.insert(0, x * 2)\n        elif x % 3 == 0:\n            out.append(x // 3)\n        else:\n            out[len(out) // 2:len(out) // 2] = [x, -x]\n    return sum(v * (k + 1) for k, v in enumerate(out))\nprint(f([5, 9, 4, 7, 6, 2, 8, 3]))",
+   "answer": 158
+  },
+  {
+   "question": "Six people A-F sit around a round table with 6 seats; seatings that differ by a rotation are the same. In how many seatings are A and B not adjacent and C directly opposite D?",
+   "answer": 16
+  },
+  {
+   "question": "How many lattice points (x, y) with integer x, y satisfy x^2 + y^2 <= 200 and x + y odd?",
+   "answer": 316
+  },
+  {
+   "question": "How many 4-digit numbers have digit sum 15 and are divisible by 11?",
+   "answer": 30
+  },
+  {
+   "question": "How many paths from (0,0) to (6,6) using unit steps right or up avoid the points (2,2), (3,4) and (4,1)?",
+   "answer": 229
+  },
+  {
+   "question": "What are the last three digits of 1^1 + 2^2 + 3^3 + ... + 30^30? Give them as a number.",
+   "answer": 781
+  },
+  {
+   "question": "How many pairs (a, b) with 1 <= a < b <= 40 have gcd(a, b) = 1 and a + b divisible by 3?",
+   "answer": 119
+  }
+ ]
+}

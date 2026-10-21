@@ -194,6 +194,7 @@ class ModelHost:
                 self._bind_vision(path)
                 tv = time.monotonic()
                 self._bind_head(path)
+                self._bind_probe(path)
                 logger.info("bound vision in %.1fs, the head in %.1fs",
                             tv - tb, time.monotonic() - tv)
                 # a split rank's load is done: the ranks waiting their
@@ -252,6 +253,8 @@ class ModelHost:
         vision.clear()
         binding.DRAFT.update(head=None, spec=None, on=False,
                              why="model unloaded")
+        from knurlogic.engine.probe import binding as auto
+        auto.unbind()
         self.model = self.tokenizer = self.model_key = None
         if had:
             gc.collect()
@@ -349,6 +352,21 @@ class ModelHost:
         binding.bind_head(path)
 
     # --------------------------------------------------------------- status
+
+    def _bind_probe(self, path: str) -> None:
+        """Thinking: auto's probe or onboarding tap (engine/probe/binding);
+        a model that cannot be tapped is served without auto."""
+        from knurlogic.engine.probe import binding as auto
+        from knurlogic.engine.probe import store, stop
+        try:
+            auto.bind(self.model, path, split=self.shard is not None)
+            if store.ACTIVE["state"] != "off":
+                # the vocabulary's break tokens, decoded once here (about a
+                # second for 250k ids), not on the scheduler thread at the
+                # first auto request
+                stop.break_ids(self.tokenizer)
+        except (AttributeError, OSError, ValueError) as e:
+            logger.warning("Thinking: auto unavailable: %s", e)
 
     def status(self) -> dict:
         out: dict = {"state": self.state, "model": self.path,
