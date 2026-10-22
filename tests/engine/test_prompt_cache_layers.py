@@ -237,10 +237,10 @@ def test_a_commit_a_rank_did_not_write_makes_no_entry(tmp_path, monkeypatch):
     assert stores[0].entries() == []
 
 
-def test_the_old_per_split_files_still_restore_at_load(tmp_path):
+def test_the_old_per_split_files_are_still_read_back(tmp_path):
     """An entry an earlier build wrote (disk.py's format, under its exact
-    key) restores at load beside the new format; a new save writes only
-    the new one."""
+    key) is read back when a request continues it, as the new format is
+    (nothing restores at load); a new save writes only the new one."""
     from test_batch_drafting import _tiny
 
     from knurlogic.engine.runtime.scheduler import Scheduler
@@ -256,8 +256,7 @@ def test_the_old_per_split_files_still_restore_at_load(tmp_path):
     assert got["saved"] >= 1
     s.unload().done.wait(60)
     s.load(path).done.wait(60)
-    assert s._restored and all(Path(v["file"]).is_file()
-                               for v in s._restored.values())
+    assert not s._restored
     _, warm = _collect(s.submit(_job(p + [5, 6, 7], max_tokens=4)))
     assert warm["knurlogic"]["cache"]["disk"]["tokens"] >= len(p) - 1
     # a new save: the per-layer format only
@@ -300,7 +299,7 @@ def test_a_read_only_models_folder_falls_back(tmp_path):
 def test_a_scheduler_saves_beside_the_models_and_drops_there(tmp_path):
     """Through the scheduler: a save lands in <models>/Prompt cache/, the
     registry's disk side says where, a drop by session removes the entry
-    directory, and the next load restores what is left."""
+    directory, and the next load indexes what is left, restoring none."""
     from test_batch_drafting import _tiny
 
     from knurlogic.engine.runtime.scheduler import Scheduler
@@ -327,8 +326,9 @@ def test_a_scheduler_saves_beside_the_models_and_drops_there(tmp_path):
     assert all(Path(r["file"]).is_dir() for r in left)
     s.unload().done.wait(60)
     s.load(str(path)).done.wait(60)
-    assert {(v["owner"] or {}).get("session")
-            for v in s._restored.values()} == {"b"}
+    assert not s._restored
+    assert {(v.get("owner") or {}).get("session")
+            for v in s._disk_index.values()} == {"b"}
 
 
 # --- sweep, pins, TTL ---------------------------------------------------------

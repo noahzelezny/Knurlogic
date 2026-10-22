@@ -581,9 +581,10 @@ def _fork_keeps_its_checkpoint(s):
     assert back["knurlogic"]["cache"]["disk"]["tokens"] >= len(ckpt[0]) - 1
 
 
-def test_the_shared_system_checkpoint_is_saved_and_restored(sched):
-    """Nobody's, yet kept across a reload: the first worker after it
-    starts from the system prompt and tools, not from nothing."""
+def test_the_shared_system_checkpoint_is_saved_and_read_back(sched):
+    """Nobody's, yet kept across a reload: nothing comes back at the load,
+    and the first worker after it reads the system prompt and tools back
+    from disk instead of prefilling them."""
     s = sched
     s.load("/nonexistent/tiny-shared").done.wait(60)
     s._prefill_tps = None
@@ -598,8 +599,32 @@ def test_the_shared_system_checkpoint_is_saved_and_restored(sched):
     assert len(on) == 1 and on[0]["session"] is None
     s.unload().done.wait(60)
     s.load("/nonexistent/tiny-shared").done.wait(60)
-    assert tuple(sys_p) in s.cache.shared       # restored as shared
-    assert s.cache.hit_length(s.host.model_key, [*sys_p, 1, 2]) >= len(sys_p)
+    assert not s._restored and not s.cache.live()   # a load restores nothing
+    _, back = _collect(s.submit(_chat(sys_p, list(s.prompts[2]),
+                                      max_tokens=2, session="w2",
+                                      keep="latest")))
+    assert back["knurlogic"]["cache"]["disk"]["tokens"] >= len(sys_p) - 1
+
+
+def test_a_load_restores_nothing_and_a_restore_asks_for_one(sched):
+    """Loading a model brings no saved entry back (Noah, 2026-10-22);
+    POST /v1/prompt-cache/restore does, for one session: its longest
+    entry, into memory, before its next request."""
+    s = sched
+    s.load("/nonexistent/tiny-restore").done.wait(60)
+    s._prefill_tps = None
+    p = list(s.prompts[2])
+    _collect(s.submit(_job(p, max_tokens=4, session="r1")))
+    assert s.save_prompt_cache().done.wait(60)
+    s.unload().done.wait(60)
+    s.load("/nonexistent/tiny-restore").done.wait(60)
+    assert not s.cache.live()
+    nobody = s.restore_prompt_cache("nobody")
+    assert nobody.done.wait(60) and nobody.result["restored"] == 0
+    cmd = s.restore_prompt_cache("r1")
+    assert cmd.done.wait(60) and not cmd.error
+    assert cmd.result["restored"] == 1 and cmd.result["tokens"] > len(p)
+    assert s.cache.hit_length(s.host.model_key, p) >= len(p) - 1
 
 
 def test_a_session_parked_on_request_is_read_back(sched):

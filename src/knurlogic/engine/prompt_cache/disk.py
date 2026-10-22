@@ -1,5 +1,6 @@
 """The prompt cache on disk: saved when a client asks (never on its own),
-restored when the same model loads again (docs/design/prompt-cache-disk.md).
+read back when a request continues an entry or a client asks for a
+session's -- never by a load alone (docs/design/prompt-cache-disk.md).
 
 Two formats. New saves of a whole model or a pipeline split go to
 layers.py's (one file per layer, any split reads it, beside the models:
@@ -965,7 +966,8 @@ def insert(lru, model_key, got: list) -> dict:
 
 def restore(lru, model_key, key: dict | None, *, max_bytes=None,
             link=None, base: Path | None = None) -> dict:
-    """The load-time restore: the candidates for `key`, read, agreed across
+    """The restore: the candidates for `key` (None: none -- what a load
+    passes now, so a ring's votes still run over nothing), read, agreed across
     the ranks when `link` is a ring's (every rank calls this at the same
     point, whatever it read), inserted. A file that cannot be read is a
     miss, never a failed load; returns insert()'s map."""

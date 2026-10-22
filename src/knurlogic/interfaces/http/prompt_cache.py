@@ -1,4 +1,4 @@
-"""/v1/prompt-cache: save, drop, pin, park and list the prompt cache
+"""/v1/prompt-cache: save, drop, pin, park, restore and list the prompt cache
 (engine/prompt_cache). PromptCacheHandlers is a mixin of server.Handler."""
 
 from __future__ import annotations
@@ -160,6 +160,20 @@ class PromptCacheHandlers:
             self.app.scheduler.park_prompt_cache(got[0]), "park")
         if r is not None:
             self._json(200, {"object": "prompt_cache.park", **r})
+
+    def _restore_prompt_cache(self, raw: bytes) -> None:
+        """POST /v1/prompt-cache/restore {"session"}: that session's longest
+        saved entry read back into memory now (a load restores nothing).
+        The loopback operator only."""
+        if self._refused_remote("restored"):
+            return
+        got = self._session_body(raw)
+        if got is None:
+            return
+        r = self._cache_command(
+            self.app.scheduler.restore_prompt_cache(got[0]), "restore")
+        if r is not None:
+            self._json(200, {"object": "prompt_cache.restore", **r})
 
     def _list_prompt_cache(self) -> None:
         """GET /v1/prompt-cache: every entry, in memory (this model's, read

@@ -559,6 +559,8 @@ class Handler(PromptCacheHandlers, T.TelemetryHandlers,
             return self._pin_prompt_cache(raw)
         if path == "/v1/prompt-cache/park":
             return self._park_prompt_cache(raw)
+        if path == "/v1/prompt-cache/restore":
+            return self._restore_prompt_cache(raw)
         if path == "/v1/ensure" and self.app.ensure:
             try:
                 body = json.loads(raw or b"{}")

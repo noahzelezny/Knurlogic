@@ -8,6 +8,18 @@ saved. Everything below about sessions, pins, budget, TTL, park, drop and
 read-back holds for both formats; "Where and how", "The key" and
 "Clusters" describe the per-split format.
 
+**A load restores nothing** (Noah, 2026-10-22). Reloading a cache must be
+asked for: a request that continues a saved entry reads it back before
+it is admitted (any request, with or without a session), or a client
+asks with `POST /v1/prompt-cache/restore {"session"}` (that session's
+longest entry). Loading a model bare indexes what is saved and reads
+none of it: a 35B-8bit on the M4 had sat at "loaded" for 36 s restoring
+40 entries (1.8M tokens) over the network share for a request that used
+none. On a ring the restore's votes still run, over nothing, and a ring
+reads nothing back. Where this page or prompt-cache-shards.md describes
+a restore at load, that is the mechanism the votes run over, not
+something a load now does.
+
 ## Problem
 
 A model swap loses every resident context, and each session's next request
@@ -111,9 +123,10 @@ each save and load; tuning/groups.PROMPT_CACHE_KNOBS):
 
 The sweep runs after every save and before every restore.
 
-A load restores at most the in-memory cache's entry count (and its byte cap
-where it has one), newest save first; the memory guard trims the prompt
-cache as before if a request needs the room.
+A read-back brings back one entry, the longest the prompt continues; the
+memory guard trims the prompt cache as before if a request needs the
+room. (A load used to restore up to the in-memory cache's entry count,
+newest first; it restores none now.)
 
 ## Prefix-compatible
 

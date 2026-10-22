@@ -322,7 +322,10 @@ def test_the_scheduler_serves_a_converted_entry_and_usage_says_so(
         assert c["converted"] == {"from_bits": None, "to_bits": 8}
         rows = [r for r in D.list_disk(tmp_path)
                 if r.get("model") and r.get("kv_bits") is not None]
-        assert rows and all(r["kv_bits"] == 8 for r in rows)
+        # the entry it read back was converted and rewritten; the rest
+        # wait, unread, until a request continues them (nothing restores
+        # at load)
+        assert any(r["kv_bits"] == 8 for r in rows)
     finally:
         s.unload().done.wait(60)
         model.make_cache = make16

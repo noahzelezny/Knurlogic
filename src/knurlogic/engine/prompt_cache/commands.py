@@ -94,6 +94,13 @@ class PromptCacheCommands:
         "bytes", "freed", "in_memory"}."""
         return self._command(Command("park", None, session=session))
 
+    def restore_prompt_cache(self, session: str) -> Command:
+        """Queue a restore of `session`: its longest entry on disk read back
+        into memory now, ahead of its next request -- the client's call (a
+        load restores nothing; a request that continues an entry reads it
+        back itself). Command.result: {"session", "restored", "tokens"}."""
+        return self._command(Command("restore", None, session=session))
+
     def list_prompt_cache(self) -> Command:
         """Queue a listing of the in-memory entries (read between steps).
         Command.result: {"entries": [...], "key_id", "model"}."""
@@ -282,13 +289,18 @@ class PromptCacheCommands:
                     (best is None or n > len(best)) and \
                     tuple(prompt[:n]) == t:
                 best = t
-        if best is None:
-            return
+        if best is not None:
+            self._read_entry(best)
+
+    def _read_entry(self, best: tuple) -> bool:
+        """The saved entry `best` (a key of the disk index) into the prompt
+        cache, from whichever format holds it; False when nothing could be
+        read (gone or corrupt: a miss, dropped from the index)."""
         from knurlogic.engine.prompt_cache import disk as prompt_disk
         f = Path(self._disk_index[best]["file"])
         st = self._store
         if f.is_dir() and st is not None and f.name in st.pending:
-            return          # its entry.json waits for the ring's commit
+            return False    # its entry.json waits for the ring's commit
         if f.is_dir() and st is not None:
             # pieces another machine holds, fetched first (transfer.fill;
             # nothing on a ring, whose index holds only restored entries)
@@ -311,7 +323,7 @@ class PromptCacheCommands:
             got = prompt_disk.read(self._disk_key, [f])
         if not got:
             self._disk_index.pop(best, None)    # gone or corrupt: a miss
-            return
+            return False
         back = prompt_disk.insert(self.cache.lru, self.host.model_key, got)
         prompt_disk.adopt(self.cache.owners, self.cache.pinned, back,
                           shared=self.cache.shared)
@@ -323,16 +335,20 @@ class PromptCacheCommands:
                                        "owner": v.get("owner")}
         if self.tensor is not None:
             self.tensor.journal.add("read_back", name=Path(f).name)
+        return True
 
     def _restore_disk(self) -> None:
-        """ModelHost.after_bind: what was saved for this model, into the
-        new prompt cache, before the warm-up. On a ring a collective (every
-        rank restores the same entries, or none)."""
+        """ModelHost.after_bind: index what was saved for this model. A
+        load restores nothing (Noah, 2026-10-22: a 35B-8bit on the M4 sat
+        at "loaded" for 36 s restoring 40 entries, 1.8M tokens, over the
+        network share, for a request that used none): a saved entry is
+        read back when a request continues it (`_read_back`). On a ring
+        the restore's votes still run, over nothing, and a ring reads
+        nothing back (its index held only what the load restored)."""
         from knurlogic.engine.prompt_cache import disk as prompt_disk
         from knurlogic.engine.prompt_cache import layers, memory
-        # KNURLOGIC_PROMPT_CACHE_REUSE off (benchmark): nothing restored and
-        # nothing to read back; the votes still run, over nothing, as every
-        # rank's do
+        # KNURLOGIC_PROMPT_CACHE_REUSE off (benchmark): nothing to read
+        # back either
         reuse = memory.reuse_on()
         try:
             key = prompt_disk.host_key(self.host)
@@ -344,7 +360,7 @@ class PromptCacheCommands:
         # builds wrote, and a tensor split of a family with no cache spec
         # still writes)
         old = prompt_disk.restore(
-            self.cache.lru, self.host.model_key, key if reuse else None,
+            self.cache.lru, self.host.model_key, None,
             max_bytes=self.cache_bytes, link=link)
         self._store = None
         try:
@@ -354,9 +370,8 @@ class PromptCacheCommands:
         new = {}
         if layers.uses_layers(self.host):
             # every rank of a split votes here, whatever it holds
-            got = layers.restore(self.cache.lru.max_size if reuse else 0,
-                                 self._store, max_bytes=self.cache_bytes,
-                                 link=link)
+            got = layers.restore(0, self._store,
+                                 max_bytes=self.cache_bytes, link=link)
             new = prompt_disk.insert(self.cache.lru, self.host.model_key,
                                      got) if got else {}
         self._restored = {**old, **new}
@@ -451,6 +466,15 @@ class PromptCacheCommands:
             self.tensor.journal.add("park_session", session=c.session)
             self._journal_commit()
         return {"session": c.session, **got}
+
+    def _cmd_restore(self, c: Command) -> dict:
+        assert c.session is not None    # restore_prompt_cache sets it
+        mine = [t for t, v in self._disk_index.items()
+                if (v.get("owner") or {}).get("session") == c.session]
+        best = max(mine, key=len, default=None)
+        got = best is not None and self._read_entry(best)
+        return {"session": c.session, "restored": int(got),
+                "tokens": len(best) if got else 0}
 
     def _cmd_pin(self, c: Command) -> dict:
         assert c.session is not None    # pin_prompt_cache sets it

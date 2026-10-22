@@ -619,7 +619,7 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
                 finally:
                     c.done.set()
                 continue
-            if c.kind in ("drop", "pin", "list", "park"):
+            if c.kind in ("drop", "pin", "list", "park", "restore"):
                 c.started.set()
                 try:
                     c.result = getattr(self, "_cmd_" + c.kind)(c)
@@ -964,8 +964,9 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
             if s and getattr(job, "pin", False) and \
                     s not in self.cache.pinned:
                 self._pin(s, True)          # sticky for the session
-            if s:
-                self._read_back(job, prompt)
+            # a saved entry this prompt continues, read back now: a load
+            # restores nothing (PromptCacheCommands._restore_disk)
+            self._read_back(job, prompt)
             hit = getattr(self.cache, "hit_length", lambda k, t: 0)(
                 self.host.model_key, prompt)
             conv = None

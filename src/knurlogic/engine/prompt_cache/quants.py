@@ -10,7 +10,7 @@ approximation, as 16 -> 8 conversion is (measured on Qwen3.6-35B quants:
 the next-token distribution differs from a re-read of the prompt by mean
 KL 0.015-0.042, about 40-60% of the gap the two quants have anyway).
 
-When a load's restore, or a read-back, finds fewer entries than it wants
+When a read-back (a load restores nothing) finds fewer entries than it wants
 under its key and its own other widths (convert.py), it looks under the
 keys that differ in `artifact` (and, when the conversion setting allows,
 in kv_bits) for entries with the loaded model's fingerprint, reads them,

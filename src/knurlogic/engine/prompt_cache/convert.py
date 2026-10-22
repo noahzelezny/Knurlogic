@@ -3,7 +3,7 @@ prompt-cache-shards.md, "Conversion").
 
 The key (layers.shard_key) holds the KV bits, so a model switched between
 16-bit and 8-bit KV (KNURLOGIC_KV_BITS) finds none of its saved sessions
-under its own key. When a load's restore, or a read-back, finds fewer
+under its own key. When a read-back (a load restores nothing) finds fewer
 entries than it wants under its key, it looks under the keys that differ
 in `kv_bits` alone, reads an entry there, converts it, writes it under its
 own key and deletes the other width's: a session is on disk once.
